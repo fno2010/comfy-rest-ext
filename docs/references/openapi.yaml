@@ -1,0 +1,2543 @@
+openapi: 3.0.3
+info:
+  title: ComfyUI REST API
+  description: |
+    ComfyUI and ComfyUI Manager REST API specification.
+
+    **Framework**: aiohttp
+    **Base URL**: http://{host}:{port} (default http://127.0.0.1:8188)
+
+    ## Authentication
+    ComfyUI has no built-in authentication. Deploy behind a reverse proxy (nginx, Caddy, etc.)
+    to add authentication layer.
+
+    ## Path Prefixes
+    - `/api/*` — Core ComfyUI API (most routes also available without `/api` prefix)
+    - `/internal/*` — Internal API (for ComfyUI frontend only)
+    - `/v2/manager/*` — ComfyUI Manager core functionality
+    - `/v2/customnode/*` — Custom node management
+    - `/v2/snapshot/*` — Snapshot management
+    - `/v2/comfyui_manager/*` — ComfyUI version management
+
+    ## WebSocket
+    Connect to `ws://{host}:{port}/ws` for real-time events (execution progress, status updates).
+    Include `client_id` in your prompt's `extra_data` to receive targeted events.
+  version: 1.0.0
+  contact:
+    name: ComfyUI
+
+servers:
+  - url: http://127.0.0.1:8188
+    description: ComfyUI default server
+
+tags:
+  - name: Execution
+    description: Prompt execution and queue management
+  - name: Jobs
+    description: Job tracking
+  - name: History
+    description: Execution history
+  - name: Models
+    description: Model listing and management
+  - name: Images
+    description: Image upload, view, and metadata
+  - name: Nodes
+    description: Node class information
+  - name: System
+    description: System stats and features
+  - name: Internal
+    description: Internal API (frontend use)
+  - name: Users
+    description: User management
+  - name: Settings
+    description: Application settings
+  - name: Workflows
+    description: Workflow templates and subgraphs
+  - name: Assets
+    description: Asset management API
+  - name: Manager
+    description: ComfyUI Manager core operations
+  - name: Manager.Node
+    description: Custom node management
+  - name: Manager.Snapshot
+    description: Snapshot management
+  - name: Manager.Share
+    description: Third-party sharing services
+  - name: Manager.Model
+    description: Model installation via Manager
+
+paths:
+  # =============================================================================
+  # EXECUTION
+  # =============================================================================
+
+  /prompt:
+    get:
+      tags: [Execution]
+      summary: Get queue information
+      description: Returns current running and pending queues with prompt IDs.
+      operationId: get_prompt
+      responses:
+        '200':
+          description: Queue information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queue_running:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: string
+                    example: [["prompt-uuid", "node-id"]]
+                  queue_pending:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: string
+    post:
+      tags: [Execution]
+      summary: Submit workflow for execution
+      description: |
+        Submit a workflow (prompt) to the execution queue.
+
+        The prompt is a JSON object representing a directed graph of nodes.
+        Each node has a `class_type` (node class name) and `inputs` (key-value pairs).
+
+        Input values can be:
+        - Primitives: `string`, `number`, `boolean`
+        - Links: `["other_node_id", output_index]` — reference another node's output
+        - Lists: `[val1, val2, ...]`
+
+        Use WebSocket at `/ws` with `client_id` in `extra_data` to receive real-time updates.
+      operationId: post_prompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptRequest'
+            example:
+              prompt:
+                "1":
+                  class_type: KSampler
+                  inputs:
+                    model: ["2", 0]
+                    seed: 1234567890
+                    steps: 20
+                    cfg: 8.0
+                    sampler_name: euler
+                    scheduler: normal
+                    positive: ["3", 0]
+                    negative: ["4", 0]
+                    denoise: 1.0
+                  _meta:
+                    title: KSampler
+                "2":
+                  class_type: CheckpointLoaderSimple
+                  inputs:
+                    ckpt_name: model.safetensors
+                "3":
+                  class_type: CLIPTextEncode
+                  inputs:
+                    text: "high quality, detailed"
+                    clip: ["2", 1]
+                "4":
+                  class_type: CLIPTextEncode
+                  inputs:
+                    text: "blurry, low quality"
+                    clip: ["2", 1]
+              prompt_id: "optional-custom-uuid"
+              front: false
+              extra_data:
+                client_id: "websocket-client-id"
+      responses:
+        '200':
+          description: Prompt queued successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt_id:
+                    type: string
+                    example: "prompt-uuid-string"
+                  number:
+                    type: number
+                    example: 1.0
+                  node_errors:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: object
+              example:
+                prompt_id: "abc123"
+                number: 1.0
+                node_errors: {}
+
+  /queue:
+    get:
+      tags: [Execution]
+      summary: Get queue status
+      operationId: get_queue
+      responses:
+        '200':
+          description: Current queue status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatus'
+    post:
+      tags: [Execution]
+      summary: Modify queue
+      description: Clear all queue items or delete specific items.
+      operationId: post_queue
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueueModifyRequest'
+            example:
+              clear: true
+              delete: ["prompt-id-1", "prompt-id-2"]
+      responses:
+        '200':
+          description: Queue modified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+
+  /interrupt:
+    post:
+      tags: [Execution]
+      summary: Interrupt execution
+      description: Interrupt current execution. Without prompt_id interrupts all; with prompt_id interrupts only that specific execution.
+      operationId: post_interrupt
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt_id:
+                  type: string
+                  description: Optional specific prompt ID to interrupt
+            example:
+              prompt_id: "specific-prompt-uuid"
+      responses:
+        '200':
+          description: Interrupt triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+
+  /free:
+    post:
+      tags: [Execution]
+      summary: Free memory and unload models
+      operationId: post_free
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreeMemoryRequest'
+            example:
+              unload_models: true
+              free_memory: true
+      responses:
+        '200':
+          description: Memory freed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  vram_free:
+                    type: string
+                    example: "2.00 GiB"
+                  ram_free:
+                    type: string
+                    example: "12.34 GiB"
+
+  # =============================================================================
+  # JOBS
+  # =============================================================================
+
+  /api/jobs:
+    get:
+      tags: [Jobs]
+      summary: List all jobs
+      description: List jobs with optional filtering, sorting, and pagination.
+      operationId: get_jobs
+      parameters:
+        - name: status
+          in: query
+          description: Filter by status (comma-separated)
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, failed]
+          example: "completed,failed"
+        - name: workflow_id
+          in: query
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [created_at, execution_duration]
+            default: created_at
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Job list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobList'
+
+  /api/jobs/{job_id}:
+    get:
+      tags: [Jobs]
+      summary: Get specific job
+      operationId: get_job_by_id
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  # =============================================================================
+  # HISTORY
+  # =============================================================================
+
+  /history:
+    get:
+      tags: [History]
+      summary: Get execution history
+      operationId: get_history
+      parameters:
+        - name: max_entries
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: History entries keyed by prompt_id
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    status:
+                      type: object
+                      properties:
+                        exec_rt:
+                          type: number
+                        ids:
+                          type: array
+                          items:
+                            type: string
+                    outputs:
+                      type: object
+                      additionalProperties:
+                        type: object
+    post:
+      tags: [History]
+      summary: Clear or delete history
+      operationId: post_history
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clear:
+                  type: boolean
+                delete:
+                  type: array
+                  items:
+                    type: string
+            example:
+              clear: true
+
+  /history/{prompt_id}:
+    get:
+      tags: [History]
+      summary: Get history for specific prompt
+      operationId: get_history_prompt_id
+      parameters:
+        - name: prompt_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: History entry for the prompt
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # =============================================================================
+  # MODELS
+  # =============================================================================
+
+  /models:
+    get:
+      tags: [Models]
+      summary: List model type folders
+      operationId: list_model_types
+      responses:
+        '200':
+          description: List of model folder names
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folders:
+                    type: array
+                    items:
+                      type: string
+                    example: ["checkpoints", "loras", "embeddings", "upscale_models"]
+
+  /models/{folder}:
+    get:
+      tags: [Models]
+      summary: List models in a folder
+      operationId: get_models
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+          example: checkpoints
+      responses:
+        '200':
+          description: List of model filenames
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  model_names:
+                    type: array
+                    items:
+                      type: string
+                    example: ["model_a.safetensors", "model_b.ckpt"]
+
+  /experiment/models:
+    get:
+      tags: [Models]
+      summary: List model folders with full paths (experimental)
+      operationId: get_model_folders_exp
+      responses:
+        '200':
+          description: Model folders with paths
+
+  /experiment/models/{folder}:
+    get:
+      tags: [Models]
+      summary: List all models in folder with metadata (experimental)
+      operationId: get_all_models_exp
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Models with metadata
+
+  /experiment/models/preview/{folder}/{path_index}/{filename}:
+    get:
+      tags: [Models]
+      summary: Get model preview image (experimental)
+      operationId: get_model_preview
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path_index
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Preview image in WEBP format
+          content:
+            image/webp: {}
+
+  # =============================================================================
+  # IMAGES
+  # =============================================================================
+
+  /upload/image:
+    post:
+      tags: [Images]
+      summary: Upload image
+      operationId: upload_image
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Image file
+                overwrite:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "false"
+                type:
+                  type: string
+                  default: input
+      responses:
+        '200':
+          description: Image uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: uploaded_image.png
+                  path:
+                    type: string
+                    example: path/to/uploaded_image.png
+
+  /upload/mask:
+    post:
+      tags: [Images]
+      summary: Upload mask image
+      description: Upload a mask for compositing with original_ref image.
+      operationId: upload_mask
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image, original_ref]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                original_ref:
+                  type: string
+                  description: Reference image path for compositing
+                overwrite:
+                  type: string
+                  enum: ["true", "false"]
+      responses:
+        '200':
+          description: Mask uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  path:
+                    type: string
+
+  /view:
+    get:
+      tags: [Images]
+      summary: View or download image
+      operationId: view_image
+      parameters:
+        - name: filename
+          in: query
+          required: true
+          schema:
+            type: string
+          example: image.png
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [input, output, temp]
+            default: output
+        - name: subfolder
+          in: query
+          schema:
+            type: string
+        - name: preview
+          in: query
+          schema:
+            type: string
+          description: Preview format e.g. "webp;90" for 90% quality
+          example: "webp;90"
+        - name: channel
+          in: query
+          schema:
+            type: string
+            enum: [rgba, rgb, a]
+      responses:
+        '200':
+          description: Image binary data
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+
+  /view_metadata/{folder_name}:
+    get:
+      tags: [Images]
+      summary: Get safetensors metadata
+      operationId: view_metadata
+      parameters:
+        - name: folder_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filename
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            default: output
+      responses:
+        '200':
+          description: Safetensors metadata
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # =============================================================================
+  # NODES
+  # =============================================================================
+
+  /object_info:
+    get:
+      tags: [Nodes]
+      summary: Get info for all node classes
+      description: Returns complete definitions for all registered node classes including inputs, outputs, and metadata.
+      operationId: get_object_info
+      responses:
+        '200':
+          description: Node class definitions keyed by class name
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+
+  /object_info/{node_class}:
+    get:
+      tags: [Nodes]
+      summary: Get info for specific node class
+      operationId: get_object_info_node
+      parameters:
+        - name: node_class
+          in: path
+          required: true
+          schema:
+            type: string
+          example: KSampler
+      responses:
+        '200':
+          description: Node class definition
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # =============================================================================
+  # SYSTEM
+  # =============================================================================
+
+  /system_stats:
+    get:
+      tags: [System]
+      summary: Get system statistics
+      operationId: system_stats
+      responses:
+        '200':
+          description: System stats including RAM, VRAM, and version info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        type:
+                          type: string
+                        index:
+                          type: integer
+                        vram_total:
+                          type: number
+                        vram_free:
+                          type: number
+                        torch_vram_total:
+                          type: number
+                        torch_vram_free:
+                          type: number
+                  ram_total:
+                    type: number
+                  ram_free:
+                    type: number
+                  version:
+                    type: string
+
+  /features:
+    get:
+      tags: [System]
+      summary: Get server feature flags
+      operationId: get_features
+      responses:
+        '200':
+          description: Feature flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disableicanhaz:
+                    type: boolean
+                  disable_list:
+                    type: boolean
+                  feature_config:
+                    type: object
+
+  /embeddings:
+    get:
+      tags: [System]
+      summary: List available text embeddings
+      operationId: get_embeddings
+      responses:
+        '200':
+          description: List of embedding filenames
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  embeddings:
+                    type: array
+                    items:
+                      type: string
+
+  /extensions:
+    get:
+      tags: [System]
+      summary: List JavaScript extensions
+      operationId: get_extensions
+      responses:
+        '200':
+          description: List of extension paths
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  extensions:
+                    type: array
+                    items:
+                      type: string
+
+  # =============================================================================
+  # INTERNAL
+  # =============================================================================
+
+  /internal/logs:
+    get:
+      tags: [Internal]
+      summary: Get formatted server logs
+      operationId: get_logs
+      responses:
+        '200':
+          description: Formatted logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: string
+
+  /internal/logs/raw:
+    get:
+      tags: [Internal]
+      summary: Get raw logs with terminal size info
+      operationId: get_raw_logs
+      responses:
+        '200':
+          description: Raw logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: string
+                  width:
+                    type: integer
+                  height:
+                    type: integer
+
+  /internal/logs/subscribe:
+    patch:
+      tags: [Internal]
+      summary: Subscribe to log updates
+      operationId: subscribe_logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, enabled]
+              properties:
+                clientId:
+                  type: string
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Subscription updated
+
+  /internal/folder_paths:
+    get:
+      tags: [Internal]
+      summary: Get configured folder paths
+      operationId: get_folder_paths
+      responses:
+        '200':
+          description: Folder paths mapping
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+
+  /internal/files/{directory_type}:
+    get:
+      tags: [Internal]
+      summary: List files in a directory
+      operationId: get_internal_files
+      parameters:
+        - name: directory_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [output, input, temp]
+        - name: recursive
+          in: query
+          schema:
+            type: boolean
+        - name: name
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File listing
+
+  # =============================================================================
+  # USERS
+  # =============================================================================
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List users (multi-user mode)
+      operationId: get_users
+      responses:
+        '200':
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  storage:
+                    type: string
+                  users:
+                    type: object
+                    additionalProperties:
+                      type: string
+    post:
+      tags: [Users]
+      summary: Create a new user
+      operationId: post_users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+      responses:
+        '200':
+          description: User created
+
+  # =============================================================================
+  # USERDATA
+  # =============================================================================
+
+  /userdata:
+    get:
+      tags: [Users]
+      summary: List user data files
+      operationId: list_userdata
+      parameters:
+        - name: dir
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: recurse
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+        - name: full_info
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+        - name: split
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+      responses:
+        '200':
+          description: User data file listing
+
+  /v2/userdata:
+    get:
+      tags: [Users]
+      summary: List user data files (v2)
+      operationId: list_userdata_v2
+      parameters:
+        - name: path
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User data file listing
+
+  /userdata/{file}:
+    get:
+      tags: [Users]
+      summary: Download user data file
+      operationId: get_userdata
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+    post:
+      tags: [Users]
+      summary: Upload/create user data file
+      operationId: post_userdata
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: overwrite
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+            default: "true"
+        - name: full_info
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: File uploaded
+    delete:
+      tags: [Users]
+      summary: Delete user data file
+      operationId: delete_userdata
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File deleted
+
+  /userdata/{file}/move/{dest}:
+    post:
+      tags: [Users]
+      summary: Move/rename user data file
+      operationId: move_userdata
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: dest
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: overwrite
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+            default: "true"
+        - name: full_info
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        '200':
+          description: File moved
+
+  # =============================================================================
+  # SETTINGS
+  # =============================================================================
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Get all settings
+      operationId: get_settings
+      responses:
+        '200':
+          description: All settings
+          content:
+            application/json:
+              schema:
+                type: object
+    post:
+      tags: [Settings]
+      summary: Update multiple settings
+      operationId: post_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Settings updated
+
+  /settings/{id}:
+    get:
+      tags: [Settings]
+      summary: Get specific setting
+      operationId: get_setting
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Setting value
+    post:
+      tags: [Settings]
+      summary: Update specific setting
+      operationId: post_setting
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema: {}
+      responses:
+        '200':
+          description: Setting updated
+
+  # =============================================================================
+  # WORKFLOWS & SUBGRAPHS
+  # =============================================================================
+
+  /workflow_templates:
+    get:
+      tags: [Workflows]
+      summary: Get workflow templates from custom nodes
+      operationId: get_workflow_templates
+      responses:
+        '200':
+          description: Workflow template list
+
+  /i18n:
+    get:
+      tags: [Workflows]
+      summary: Get internationalization translations
+      operationId: get_i18n
+      responses:
+        '200':
+          description: Translation data
+
+  /node_replacements:
+    get:
+      tags: [Workflows]
+      summary: Get node replacement mappings
+      operationId: get_node_replacements
+      responses:
+        '200':
+          description: Node replacement map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+
+  /global_subgraphs:
+    get:
+      tags: [Workflows]
+      summary: List all global subgraphs
+      operationId: get_global_subgraphs
+      responses:
+        '200':
+          description: Global subgraph list
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /global_subgraphs/{id}:
+    get:
+      tags: [Workflows]
+      summary: Get specific global subgraph
+      operationId: get_global_subgraph
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Subgraph data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # =============================================================================
+  # ASSETS API
+  # =============================================================================
+
+  /api/assets/hash/{hash}:
+    head:
+      tags: [Assets]
+      summary: Check if asset exists by hash
+      operationId: head_asset_by_hash
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+          example: blake3:abc123def456
+      responses:
+        '200':
+          description: Asset exists
+        '404':
+          description: Asset not found
+
+  /api/assets:
+    get:
+      tags: [Assets]
+      summary: List assets
+      operationId: list_assets_route
+      parameters:
+        - name: include_tags
+          in: query
+          schema:
+            type: string
+          description: Comma-separated tags to include
+        - name: exclude_tags
+          in: query
+          schema:
+            type: string
+        - name: name_contains
+          in: query
+          schema:
+            type: string
+        - name: metadata_filter
+          in: query
+          schema:
+            type: string
+          description: JSON object for metadata filtering
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [name, created_at, updated_at, size, last_access_time]
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        '200':
+          description: Asset list
+    post:
+      tags: [Assets]
+      summary: Upload new asset
+      operationId: upload_asset
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                tags:
+                  type: array
+                  items:
+                    type: string
+                name:
+                  type: string
+                user_metadata:
+                  type: string
+                hash:
+                  type: string
+      responses:
+        '200':
+          description: Asset uploaded
+
+  /api/assets/{id}:
+    get:
+      tags: [Assets]
+      summary: Get asset details
+      operationId: get_asset_route
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          format: uuid
+      responses:
+        '200':
+          description: Asset details
+    put:
+      tags: [Assets]
+      summary: Update asset metadata
+      operationId: update_asset_route
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                user_metadata:
+                  type: object
+      responses:
+        '200':
+          description: Asset updated
+    delete:
+      tags: [Assets]
+      summary: Delete asset reference
+      operationId: delete_asset_route
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: delete_content
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        '200':
+          description: Asset deleted
+
+  /api/assets/{id}/content:
+    get:
+      tags: [Assets]
+      summary: Download asset content
+      operationId: download_asset_content
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: disposition
+          in: query
+          schema:
+            type: string
+            enum: [inline, attachment]
+            default: attachment
+      responses:
+        '200':
+          description: Asset content binary
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /api/assets/from-hash:
+    post:
+      tags: [Assets]
+      summary: Create asset reference from existing hash
+      operationId: create_asset_from_hash
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hash]
+              properties:
+                hash:
+                  type: string
+                name:
+                  type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                user_metadata:
+                  type: object
+      responses:
+        '200':
+          description: Asset created
+
+  /api/tags:
+    get:
+      tags: [Assets]
+      summary: List all tags
+      operationId: get_tags
+      parameters:
+        - name: prefix
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [count_desc, name_asc]
+        - name: include_zero
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Tag list
+
+  /api/assets/{id}/tags:
+    post:
+      tags: [Assets]
+      summary: Add tags to asset
+      operationId: add_asset_tags
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Tags added
+    delete:
+      tags: [Assets]
+      summary: Remove tags from asset
+      operationId: delete_asset_tags
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Tags removed
+
+  /api/assets/seed:
+    post:
+      tags: [Assets]
+      summary: Trigger asset scan
+      operationId: seed_assets
+      parameters:
+        - name: wait
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roots:
+                  type: array
+                  items:
+                    type: string
+                  example: ["models", "input", "output"]
+      responses:
+        '200':
+          description: Seeding started
+
+  /api/assets/seed/status:
+    get:
+      tags: [Assets]
+      summary: Get asset scan status
+      operationId: get_seed_status
+      responses:
+        '200':
+          description: Seed status
+
+  /api/assets/seed/cancel:
+    post:
+      tags: [Assets]
+      summary: Cancel ongoing asset scan
+      operationId: cancel_seed
+      responses:
+        '200':
+          description: Seed cancelled
+
+  /api/assets/prune:
+    post:
+      tags: [Assets]
+      summary: Mark missing assets
+      operationId: mark_missing_assets
+      responses:
+        '200':
+          description: Missing assets marked
+
+  # =============================================================================
+  # COMFYUI MANAGER - CORE
+  # =============================================================================
+
+  /v2/manager/version:
+    get:
+      tags: [Manager]
+      summary: Get ComfyUI Manager version
+      operationId: manager_get_version
+      responses:
+        '200':
+          description: Manager version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: "2.0.0"
+
+  /v2/manager/is_legacy_manager_ui:
+    get:
+      tags: [Manager]
+      summary: Check if legacy Manager UI is active
+      operationId: is_legacy_manager_ui
+      responses:
+        '200':
+          description: UI mode status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_legacy:
+                    type: boolean
+
+  /v2/manager/db_mode:
+    get:
+      tags: [Manager]
+      summary: Get database mode
+      operationId: get_db_mode
+      responses:
+        '200':
+          description: Database mode
+
+  /v2/manager/policy/update:
+    get:
+      tags: [Manager]
+      summary: Update manager policy
+      operationId: update_policy
+      responses:
+        '200':
+          description: Policy updated
+
+  /v2/manager/channel_url_list:
+    get:
+      tags: [Manager]
+      summary: Get channel URL list
+      operationId: get_channel_url_list
+      responses:
+        '200':
+          description: Channel URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  urls:
+                    type: array
+                    items:
+                      type: string
+
+  /v2/manager/reboot:
+    get:
+      tags: [Manager]
+      summary: Reboot Manager
+      operationId: reboot_manager
+      responses:
+        '200':
+          description: Reboot triggered
+
+  /v2/manager/queue/status:
+    get:
+      tags: [Manager]
+      summary: Get task queue status
+      operationId: queue_status
+      responses:
+        '200':
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [idle, running, paused]
+                  current:
+                    type: string
+                    nullable: true
+                  queue:
+                    type: integer
+
+  /v2/manager/queue/reset:
+    get:
+      tags: [Manager]
+      summary: Reset task queue
+      operationId: queue_reset
+      responses:
+        '200':
+          description: Queue reset
+
+  /v2/manager/queue/start:
+    get:
+      tags: [Manager]
+      summary: Start queue processing
+      operationId: queue_start
+      responses:
+        '200':
+          description: Queue started
+
+  /v2/manager/queue/update_all:
+    get:
+      tags: [Manager]
+      summary: Update all custom nodes to latest
+      operationId: update_all_nodes
+      responses:
+        '200':
+          description: Update all initiated
+
+  /v2/manager/queue/update_comfyui:
+    get:
+      tags: [Manager]
+      summary: Update ComfyUI to latest
+      operationId: update_comfyui
+      responses:
+        '200':
+          description: ComfyUI update initiated
+
+  /v2/manager/queue/task:
+    post:
+      tags: [Manager]
+      summary: Add single task to queue (glob)
+      description: Unified task queue for install/update/fix/uninstall operations.
+      operationId: queue_task_glob
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, data]
+              properties:
+                type:
+                  type: string
+                  enum: [install, update, fix, uninstall]
+                data:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    url:
+                      type: string
+            example:
+              type: install
+              data:
+                name: "custom-node-name"
+                url: "https://github.com/author/repo"
+      responses:
+        '200':
+          description: Task queued
+
+  /v2/manager/queue/install_model:
+    post:
+      tags: [Manager.Model]
+      summary: Install model via queue
+      operationId: queue_install_model
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_name, model_url, folder]
+              properties:
+                model_name:
+                  type: string
+                model_url:
+                  type: string
+                  format: uri
+                folder:
+                  type: string
+      responses:
+        '200':
+          description: Model installation queued
+
+  /v2/manager/queue/history_list:
+    get:
+      tags: [Manager]
+      summary: Get task history list
+      operationId: get_queue_history_list
+      responses:
+        '200':
+          description: History list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                        state:
+                          type: string
+                          enum: [done, failed, running]
+                        name:
+                          type: string
+                        timestamp:
+                          type: number
+
+  /v2/manager/queue/history:
+    get:
+      tags: [Manager]
+      summary: Get task history details
+      operationId: get_queue_history
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: History details
+
+  /v2/comfyui_manager/comfyui_versions:
+    get:
+      tags: [Manager]
+      summary: Get available ComfyUI versions
+      operationId: get_comfyui_versions
+      responses:
+        '200':
+          description: Available versions
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v2/comfyui_manager/comfyui_switch_version:
+    get:
+      tags: [Manager]
+      summary: Switch ComfyUI version
+      operationId: switch_comfyui_version
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "1.2.3"
+      responses:
+        '200':
+          description: Version switch initiated
+
+  # =============================================================================
+  # COMFYUI MANAGER - CUSTOM NODES
+  # =============================================================================
+
+  /v2/customnode/getmappings:
+    get:
+      tags: [Manager.Node]
+      summary: Fetch custom node mappings
+      description: Returns extension-node-map.json content mapping custom nodes to their provided node types.
+      operationId: fetch_customnode_mappings
+      responses:
+        '200':
+          description: Node mappings
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  additionalProperties:
+                    type: string
+
+  /v2/customnode/fetch_updates:
+    get:
+      tags: [Manager.Node]
+      summary: Fetch available updates for custom nodes
+      operationId: fetch_updates
+      responses:
+        '200':
+          description: Available updates
+
+  /v2/customnode/installed:
+    get:
+      tags: [Manager.Node]
+      summary: Get list of installed custom nodes
+      operationId: installed_list
+      responses:
+        '200':
+          description: Installed nodes list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  installed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                        author:
+                          type: string
+                        name:
+                          type: string
+                        url:
+                          type: string
+                        description:
+                          type: string
+                        installed:
+                          type: boolean
+                        installed_version:
+                          type: string
+                        git_cloned:
+                          type: boolean
+
+  /v2/customnode/getlist:
+    get:
+      tags: [Manager.Node]
+      summary: Get available custom node list (legacy)
+      operationId: fetch_customnode_list
+      responses:
+        '200':
+          description: Available node list
+
+  /v2/customnode/versions/{node_name}:
+    get:
+      tags: [Manager.Node]
+      summary: Get versions for a custom node (legacy)
+      operationId: get_cnr_versions
+      parameters:
+        - name: node_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Version list
+
+  /v2/customnode/disabled_versions/{node_name}:
+    get:
+      tags: [Manager.Node]
+      summary: Get disabled versions for a node (legacy)
+      operationId: get_disabled_versions
+      parameters:
+        - name: node_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Disabled versions
+
+  /customnode/alternatives:
+    get:
+      tags: [Manager.Node]
+      summary: Get alternative nodes (legacy)
+      operationId: fetch_customnode_alternatives
+      responses:
+        '200':
+          description: Alternative nodes
+
+  /v2/externalmodel/getlist:
+    get:
+      tags: [Manager.Node]
+      summary: Get external model list (legacy)
+      operationId: fetch_externalmodel_list
+      responses:
+        '200':
+          description: External model list
+
+  /v2/customnode/import_fail_info:
+    post:
+      tags: [Manager.Node]
+      summary: Report import failure
+      operationId: import_fail_info
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, module, error]
+              properties:
+                name:
+                  type: string
+                module:
+                  type: string
+                error:
+                  type: string
+      responses:
+        '200':
+          description: Failure reported
+
+  /v2/customnode/import_fail_info_bulk:
+    post:
+      tags: [Manager.Node]
+      summary: Bulk report import failures
+      operationId: import_fail_info_bulk
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      module:
+                        type: string
+                      error:
+                        type: string
+      responses:
+        '200':
+          description: Failures reported
+
+  /v2/customnode/install/git_url:
+    post:
+      tags: [Manager.Node]
+      summary: Install custom node via git URL (legacy)
+      operationId: install_git_url
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Installation initiated
+
+  /v2/customnode/install/pip:
+    post:
+      tags: [Manager.Node]
+      summary: Install custom node via pip (legacy)
+      operationId: install_pip
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [package]
+              properties:
+                package:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Installation initiated
+
+  # =============================================================================
+  # COMFYUI MANAGER - LEGACY QUEUE OPERATIONS
+  # =============================================================================
+
+  /v2/manager/queue/batch:
+    post:
+      tags: [Manager]
+      summary: Queue batch operations (legacy)
+      operationId: queue_batch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operations:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [install, uninstall, update, fix]
+                      name:
+                        type: string
+      responses:
+        '200':
+          description: Batch queued
+
+  /v2/manager/queue/install:
+    post:
+      tags: [Manager.Node]
+      summary: Install custom node via queue (legacy)
+      operationId: install_custom_node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Installation queued
+
+  /v2/manager/queue/fix:
+    post:
+      tags: [Manager.Node]
+      summary: Fix custom node via queue (legacy)
+      operationId: fix_custom_node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Fix queued
+
+  /v2/manager/queue/reinstall:
+    post:
+      tags: [Manager.Node]
+      summary: Reinstall custom node via queue (legacy)
+      operationId: reinstall_custom_node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Reinstall queued
+
+  /v2/manager/queue/uninstall:
+    post:
+      tags: [Manager.Node]
+      summary: Uninstall custom node via queue (legacy)
+      operationId: uninstall_custom_node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Uninstall queued
+
+  /v2/manager/queue/update:
+    post:
+      tags: [Manager.Node]
+      summary: Update custom node via queue (legacy)
+      operationId: update_custom_node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Update queued
+
+  /v2/manager/queue/disable:
+    post:
+      tags: [Manager.Node]
+      summary: Disable custom node (legacy)
+      operationId: disable_node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Node disabled
+
+  /v2/manager/queue/abort_current:
+    get:
+      tags: [Manager]
+      summary: Abort current queue operation (legacy)
+      operationId: abort_queue
+      responses:
+        '200':
+          description: Operation aborted
+
+  # =============================================================================
+  # COMFYUI MANAGER - SNAPSHOTS
+  # =============================================================================
+
+  /v2/snapshot/getlist:
+    get:
+      tags: [Manager.Snapshot]
+      summary: Get snapshot list
+      operationId: get_snapshot_list
+      responses:
+        '200':
+          description: Snapshot list
+
+  /v2/snapshot/save:
+    get:
+      tags: [Manager.Snapshot]
+      summary: Save a snapshot
+      operationId: save_snapshot
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snapshot saved
+
+  /v2/snapshot/get_current:
+    get:
+      tags: [Manager.Snapshot]
+      summary: Get current snapshot
+      operationId: get_current_snapshot
+      responses:
+        '200':
+          description: Current snapshot
+
+  /v2/snapshot/restore:
+    get:
+      tags: [Manager.Snapshot]
+      summary: Restore from snapshot
+      operationId: restore_snapshot
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Restore initiated
+
+  /v2/snapshot/remove:
+    get:
+      tags: [Manager.Snapshot]
+      summary: Remove snapshot
+      operationId: remove_snapshot
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snapshot removed
+
+  # =============================================================================
+  # COMFYUI MANAGER - LEGACY NOTICE
+  # =============================================================================
+
+  /v2/manager/notice:
+    get:
+      tags: [Manager]
+      summary: Get notice (v2)
+      operationId: get_notice
+      responses:
+        '200':
+          description: Notice content
+
+  /manager/notice:
+    get:
+      tags: [Manager]
+      summary: Get notice (legacy path)
+      operationId: get_notice_legacy
+      responses:
+        '200':
+          description: Notice content
+
+  # =============================================================================
+  # COMFYUI MANAGER - SHARE / 3RD PARTY
+  # =============================================================================
+
+  /v2/manager/share_option:
+    get:
+      tags: [Manager.Share]
+      summary: Get/share option
+      operationId: share_option
+      responses:
+        '200':
+          description: Share options
+
+  /v2/manager/share:
+    post:
+      tags: [Manager.Share]
+      summary: Share workflow/art to platforms
+      operationId: share_art
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, data]
+              properties:
+                type:
+                  type: string
+                  enum: [matrix, comfyworkflows]
+                data:
+                  type: object
+                  properties:
+                    workflow:
+                      type: object
+                    images:
+                      type: array
+                      items:
+                        type: string
+      responses:
+        '200':
+          description: Shared successfully
+
+  /v2/manager/get_openart_auth:
+    get:
+      tags: [Manager.Share]
+      summary: Get OpenArt authentication
+      operationId: get_openart_auth
+      responses:
+        '200':
+          description: OpenArt auth info
+
+  /v2/manager/set_openart_auth:
+    post:
+      tags: [Manager.Share]
+      summary: Set OpenArt authentication
+      operationId: set_openart_auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Auth set
+
+  /v2/manager/get_matrix_auth:
+    get:
+      tags: [Manager.Share]
+      summary: Get Matrix authentication
+      operationId: get_matrix_auth
+      responses:
+        '200':
+          description: Matrix auth info
+
+  /v2/manager/get_matrix_dep_status:
+    get:
+      tags: [Manager.Share]
+      summary: Check Matrix dependency status
+      operationId: get_matrix_dep_status
+      responses:
+        '200':
+          description: Dependency status
+
+  /v2/manager/get_comfyworkflows_auth:
+    get:
+      tags: [Manager.Share]
+      summary: Get ComfyWorkflows authentication
+      operationId: get_comfyworkflows_auth
+      responses:
+        '200':
+          description: ComfyWorkflows auth info
+
+  /v2/manager/youml/settings:
+    get:
+      tags: [Manager.Share]
+      summary: Get YouML settings
+      operationId: get_youml_settings
+      responses:
+        '200':
+          description: YouML settings
+    post:
+      tags: [Manager.Share]
+      summary: Set YouML settings
+      operationId: set_youml_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Settings updated
+
+  /v2/manager/get_esheep_workflow_and_images:
+    get:
+      tags: [Manager.Share]
+      summary: Get eSheep workflow and images
+      operationId: get_esheep_workflow_and_images
+      responses:
+        '200':
+          description: eSheep data
+
+  /v2/manager/set_esheep_workflow_and_images:
+    post:
+      tags: [Manager.Share]
+      summary: Set eSheep workflow and images
+      operationId: set_esheep_workflow_and_images
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: eSheep data set
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+
+components:
+  schemas:
+    PromptRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: object
+          description: Workflow node graph keyed by node_id
+          additionalProperties:
+            type: object
+            required: [class_type, inputs]
+            properties:
+              class_type:
+                type: string
+                description: Node class name (e.g. KSampler, LoadImage)
+              inputs:
+                type: object
+                description: Node input key-value pairs
+                additionalProperties: true
+              _meta:
+                type: object
+                description: Node metadata (title, tags, etc.)
+                additionalProperties: true
+        prompt_id:
+          type: string
+          description: Custom prompt UUID (auto-generated if not provided)
+        number:
+          type: number
+          description: Queue position (float for precise ordering)
+        front:
+          type: boolean
+          description: Execute at front of queue if true
+          default: false
+        extra_data:
+          type: object
+          description: 'Extra data (e.g. {client_id: string} for WebSocket events)'
+        partial_execution_targets:
+          type: array
+          items:
+            type: string
+          description: Subset of node IDs to execute
+        node_errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: object
+
+    QueueStatus:
+      type: object
+      properties:
+        queue_running:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        queue_pending:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+
+    QueueModifyRequest:
+      type: object
+      properties:
+        clear:
+          type: boolean
+          description: Clear all queue items
+        delete:
+          type: array
+          items:
+            type: string
+          description: Delete specific prompt_ids
+
+    FreeMemoryRequest:
+      type: object
+      properties:
+        unload_models:
+          type: boolean
+          description: Unload all models from VRAM
+          default: true
+        free_memory:
+          type: boolean
+          description: Free system RAM
+          default: true
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        prompt_id:
+          type: string
+        workflow_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed]
+        created_at:
+          type: number
+        started_at:
+          type: number
+        finished_at:
+          type: number
+        execution_duration:
+          type: number
+        error:
+          type: string
+          nullable: true
+        outputs:
+          type: object
+
+    JobList:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+        total:
+          type: integer
