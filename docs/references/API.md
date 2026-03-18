@@ -1400,6 +1400,606 @@
 
 ---
 
+## Comfy-REST-Ext API
+
+> ComfyUI REST API 扩展，通过 Custom Node 机制补充的额外端点
+> 路径前缀 `/v2/extension/`
+
+### 健康检查
+
+#### GET `/v2/extension/health` — 健康检查
+
+返回扩展加载状态。
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "extension": "comfy-rest-ext"
+}
+```
+
+---
+
+### 模型下载
+
+#### POST `/v2/extension/model/download` — 创建下载任务
+
+创建异步模型下载任务。
+
+**Request Body:**
+```json
+{
+  "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+  "folder": "checkpoints",
+  "filename": "sd_xl.safetensors"
+}
+```
+
+**支持的 URL 类型：**
+| 类型 | 示例 URL |
+|------|----------|
+| HuggingFace 直链 | `https://huggingface.co/{org}/{repo}/resolve/{branch}/{filename}` |
+| HuggingFace 仓库 | `https://huggingface.co/{org}/{repo}` (自动查找主文件) |
+| CivitAI 模型页 | `https://civitai.com/models/{id}` |
+| CivitAI 版本页 | `https://civitai.com/models/{id}?modelVersion={version_id}` |
+| 直链 HTTP | 任何可访问的 HTTP/HTTPS 下载链接 |
+
+**Response:**
+```json
+{
+  "task_id": "4353b883-88d0-401c-a66a-0fab1437ca28",
+  "status": "queued",
+  "url": "https://...",
+  "folder": "checkpoints",
+  "filename": "sd_xl.safetensors"
+}
+```
+
+---
+
+#### GET `/v2/extension/model/download/{task_id}` — 查询下载状态
+
+**Response:**
+```json
+{
+  "task_id": "4353b883-88d0-401c-a66a-0fab1437ca28",
+  "status": "completed",
+  "progress": 1.0,
+  "url": "https://...",
+  "downloaded_bytes": 28839,
+  "total_bytes": 28839,
+  "local_path": "/basedir/models/checkpoints/README.md",
+  "error": null
+}
+```
+
+**状态值：** `queued` | `downloading` | `completed` | `failed` | `cancelled`
+
+---
+
+#### DELETE `/v2/extension/model/download/{task_id}` — 取消下载任务
+
+**Response:**
+```json
+{
+  "task_id": "4353b883-88d0-401c-a66a-0fab1437ca28",
+  "status": "cancelled"
+}
+```
+
+---
+
+#### GET `/v2/extension/model/download` — 列出所有下载任务
+
+**Response:**
+```json
+{
+  "tasks": [
+    {
+      "task_id": "...",
+      "name": "download:https://...",
+      "status": "completed",
+      "progress": 1.0,
+      "url": "https://...",
+      "local_path": "/basedir/models/checkpoints/file.safetensors"
+    }
+  ]
+}
+```
+
+---
+
+### 模型管理
+
+#### GET `/v2/extension/models/all` — 递归列出所有模型
+
+**Query Parameters:**
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `include_hash` | bool | false | 是否计算 SHA256 hash（较慢） |
+| `folder` | string | - | 筛选特定文件夹类型 |
+
+**Response:**
+```json
+{
+  "models": [
+    {
+      "name": "sd_xl_base_1.0.safetensors",
+      "path": "sd_xl_base_1.0.safetensors",
+      "full_path": "/basedir/models/checkpoints/sd_xl_base_1.0.safetensors",
+      "folder": "checkpoints",
+      "size": 46149344974,
+      "hash": "a1e637f7c2b1b0a9305ae4f6d0904143f1f79fee3d182417d39e7cf9f3838124",
+      "metadata": {"__metadata__": {"model_version": "2.3.0", ...}}
+    }
+  ],
+  "total": 2,
+  "folders": ["checkpoints", "vae", "loras", "controlnet"]
+}
+```
+
+**metadata 字段说明：**
+- `.safetensors` 文件：读取文件 header 解析元数据
+- `.ckpt`/`.pt`/`.pth` 文件：尝试解析 pickle 元数据
+- 其他格式：返回 null
+
+---
+
+#### GET `/v2/extension/models/info` — 获取模型元数据
+
+**Query Parameters:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `path` | string | 是 | 模型路径（相对或绝对） |
+
+**Response:**
+```json
+{
+  "name": "ltx-2.3-22b-dev.safetensors",
+  "path": "LTX-Video/ltx-2.3-22b-dev.safetensors",
+  "full_path": "/basedir/models/checkpoints/LTX-Video/ltx-2.3-22b-dev.safetensors",
+  "size": 46149344974,
+  "hash": "a1e637f7...",
+  "metadata": {"__metadata__": {"model_version": "2.3.0", ...}},
+  "created": 1742332800.0,
+  "modified": 1742332800.0
+}
+```
+
+---
+
+#### DELETE `/v2/extension/models/{path}` — 删除模型
+
+**Query Parameters:**
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `force` | bool | false | 强制删除（跳过保护检查） |
+
+**Response:**
+```json
+{
+  "deleted": true,
+  "path": "/basedir/models/checkpoints/model.safetensors"
+}
+```
+
+**错误响应：**
+- `404`: 模型不存在
+- `403`: 模型受保护（Manager 中的 protected_models）
+- `409`: 模型正在使用中
+
+---
+
+### 自定义节点管理
+
+#### GET `/v2/extension/nodes/list` — 列出所有节点
+
+**Response:**
+```json
+{
+  "nodes": [
+    {
+      "name": "comfyui-manager",
+      "path": "/basedir/custom_nodes/comfyui-manager",
+      "has_init": true,
+      "is_git": true
+    }
+  ],
+  "count": 15
+}
+```
+
+---
+
+#### POST `/v2/extension/nodes/pack` — 打包节点
+
+**Request Body:**
+```json
+{
+  "node_name": "comfyui-manager",
+  "respect_comfyignore": true
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "node_name": "comfyui-manager",
+  "path": "/basedir/custom_nodes/comfyui-manager.zip",
+  "size": 1048576,
+  "files_included": 42
+}
+```
+
+---
+
+#### POST `/v2/extension/nodes/validate` — 验证节点
+
+**Request Body:**
+```json
+{
+  "node_name": "comfyui-manager"
+}
+```
+
+**Response:**
+```json
+{
+  "node_name": "comfyui-manager",
+  "valid": true,
+  "errors": [],
+  "warnings": ["Missing __init__.py - node may not be properly importable"],
+  "files_checked": 42
+}
+```
+
+**检查项：**
+- Ruff 安全检查（S102 eval, S307 pickling, E702 exec）
+- Python 语法错误
+- `__init__.py` 存在性
+
+---
+
+#### POST `/v2/extension/nodes/init` — 初始化节点项目
+
+**Request Body:**
+```json
+{
+  "path": "/basedir/custom_nodes/my-custom-node"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "path": "/basedir/custom_nodes/my-custom-node",
+  "node_name": "my-custom-node",
+  "git_url": "https://github.com/user/repo.git",
+  "files_created": ["pyproject.toml", "__init__.py", "README.md"]
+}
+```
+
+---
+
+### 工作流依赖管理
+
+#### POST `/v2/extension/workflow/dependencies/check` — 检查依赖
+
+检查工作流所需依赖是否已满足。
+
+**Request Body:**
+```json
+{
+  "workflow": {
+    "1": {"class_type": "KSampler", "inputs": {...}},
+    "2": {"class_type": "CLIPTextEncode", "inputs": {...}}
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "missing": ["some-missing-package>=1.0"],
+  "already_satisfied": ["torch", "numpy"],
+  "can_run": false,
+  "gpu_type": "cuda"
+}
+```
+
+---
+
+#### POST `/v2/extension/workflow/dependencies` — 安装依赖
+
+异步安装工作流所需依赖。
+
+**Request Body:**
+```json
+{
+  "workflow": {...},
+  "async_install": true
+}
+```
+
+**Response:**
+```json
+{
+  "task_id": "task-uuid",
+  "status": "queued",
+  "packages_to_install": ["missing-package"],
+  "async": true
+}
+```
+
+---
+
+#### GET `/v2/extension/workflow/dependencies/{task_id}` — 查询安装状态
+
+**Response:**
+```json
+{
+  "task_id": "task-uuid",
+  "status": "completed",
+  "progress": 1.0,
+  "installed": ["package1", "package2"],
+  "failed": [],
+  "restart_required": true,
+  "pip_output": null
+}
+```
+
+---
+
+### 节点依赖管理
+
+#### GET `/v2/extension/dependencies/check` — 检查节点依赖
+
+**Query Parameters:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `node` | string | 是 | 节点类名 |
+
+**Response:**
+```json
+{
+  "node": "KSampler",
+  "required_packages": ["numpy>=1.20"]
+}
+```
+
+---
+
+#### POST `/v2/extension/dependencies/restore` — 恢复节点依赖
+
+使用 ComfyUI Manager 的 cm-cli 恢复节点依赖。
+
+**Request Body:**
+```json
+{
+  "nodes": ["comfyui-manager", "comfyui-model-manager"],
+  "async_mode": true
+}
+```
+
+**Response (async):**
+```json
+{
+  "task_id": "task-uuid",
+  "status": "queued"
+}
+```
+
+---
+
+### 前端 PR 缓存管理
+
+#### GET `/v2/extension/frontend/pr-cache` — 列出 PR 缓存
+
+**Response:**
+```json
+{
+  "cache": [
+    {
+      "name": "username-123-main",
+      "path": "/home/user/.config/comfy-cli/pr-cache/frontend/username-123-main",
+      "size": 104857600,
+      "modified": 1742332800.0,
+      "user": "username",
+      "pr_number": 123,
+      "branch": "main"
+    }
+  ],
+  "total_size": 209715200,
+  "count": 2
+}
+```
+
+---
+
+#### DELETE `/v2/extension/frontend/pr-cache/{pr}` — 删除指定缓存
+
+**Response:**
+```json
+{
+  "deleted": true,
+  "name": "username-123-main"
+}
+```
+
+---
+
+#### DELETE `/v2/extension/frontend/pr-cache` — 清空所有缓存
+
+**Query Parameters:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `confirm` | bool | 是 | 必须设为 `true` |
+
+**Response:**
+```json
+{
+  "cleared": true,
+  "entries_removed": 5,
+  "errors": null
+}
+```
+
+---
+
+#### GET `/v2/extension/frontend/pr-cache/size` — 获取缓存大小
+
+**Response:**
+```json
+{
+  "total_size": 524288000,
+  "count": 10
+}
+```
+
+---
+
+### WebSocket 事件
+
+模型下载和依赖安装进度通过 WebSocket 推送：
+
+```javascript
+// 连接 WebSocket
+const ws = new WebSocket('ws://127.0.0.1:8188/ws?clientId=your-client-id');
+
+// 监听事件
+ws.addEventListener('message', (event) => {
+  const data = JSON.parse(event.data);
+
+  switch (data.event) {
+    case 'extension-model-download-progress':
+      // 进度更新
+      console.log(`下载进度: ${data.data.progress * 100}%`);
+      break;
+
+    case 'extension-model-download-complete':
+      // 下载完成
+      console.log(`已下载到: ${data.data.path}`);
+      break;
+
+    case 'extension-model-download-failed':
+      // 下载失败
+      console.error(`下载失败: ${data.data.error}`);
+      break;
+
+    case 'extension-model-download-cancelled':
+      // 下载取消
+      console.log('下载已取消');
+      break;
+
+    case 'extension-deps-install-complete':
+      // 依赖安装完成
+      console.log(`已安装: ${data.data.installed.join(', ')}`);
+      break;
+
+    case 'extension-deps-install-failed':
+      // 依赖安装失败
+      console.error(`安装失败: ${data.data.error}`);
+      break;
+  }
+});
+```
+
+---
+
+### 快照管理
+
+#### POST `/v2/extension/snapshot/export` — 导出快照
+
+**Request Body:**
+```json
+{
+  "snapshot_id": "my-snapshot-2024",
+  "format": "tarball",
+  "include_models": false
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "snapshot_id": "my-snapshot-2024",
+  "path": "/home/user/.comfyui/snapshots/my-snapshot-2024.tar.gz"
+}
+```
+
+---
+
+#### POST `/v2/extension/snapshot/import` — 导入快照
+
+**Request Body (JSON):**
+```json
+{
+  "path": "/path/to/snapshot.tar.gz",
+  "restore_models": true,
+  "restore_nodes": true
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "stdout": "Import completed..."
+}
+```
+
+---
+
+#### GET `/v2/extension/snapshot/diff` — 对比快照差异
+
+**Query Parameters:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `snapshot_a` | string | 是 | 第一个快照路径 |
+| `snapshot_b` | string | 是 | 第二个快照路径 |
+
+**Response:**
+```json
+{
+  "snapshot_a": "/path/to/snap1.tar.gz",
+  "snapshot_b": "/path/to/snap2.tar.gz",
+  "custom_nodes": {
+    "added": ["new-node"],
+    "removed": ["old-node"],
+    "common": ["shared-node"]
+  },
+  "pip_packages": {
+    "added": ["new-package"],
+    "removed": ["removed-package"],
+    "common": ["shared-package"]
+  }
+}
+```
+
+---
+
+#### GET `/v2/extension/snapshot/list` — 列出快照
+
+**Response:**
+```json
+{
+  "snapshots": [
+    {
+      "name": "snapshot-2024-03-18.tar.gz",
+      "path": "/home/user/.comfyui/snapshots/snapshot-2024-03-18.tar.gz",
+      "size": 1048576,
+      "modified": 1742332800.0
+    }
+  ]
+}
+```
+
+---
+
 ## 统计
 
 | 分类 | 端点数量 |
@@ -1409,4 +2009,5 @@
 | ComfyUI 用户/设置/资产 | ~30 |
 | ComfyUI Manager (glob) | ~38 |
 | ComfyUI Manager (legacy 额外) | ~17 |
-| **合计** | **~115** |
+| **Comfy-REST-Ext** | **~28** |
+| **合计** | **~143** |
