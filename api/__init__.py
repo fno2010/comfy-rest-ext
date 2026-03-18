@@ -18,9 +18,9 @@ async def health_check(request):
 
 # Import all route modules to trigger registration
 # Each module registers its own routes via the @routes decorator
-from api.models import download  # noqa: F401
-from api.models import management  # noqa: F401
-from api.models import dependencies  # noqa: F401
-from api.models import snapshot  # noqa: F401
-from api.models import nodes  # noqa: F401
-from api.models import pr_cache  # noqa: F401
+from .models import download  # noqa: F401
+from .models import management  # noqa: F401
+from .models import dependencies  # noqa: F401
+from .models import snapshot  # noqa: F401
+from .models import nodes  # noqa: F401
+from .models import pr_cache  # noqa: F401

@@ -238,7 +238,7 @@ async def download_file(
                     # Update progress via task queue
                     if total_bytes > 0:
                         progress = downloaded / total_bytes
-                        from api.tasks import get_task_queue
+                        from . import get_task_queue
                         get_task_queue().update_progress(task_id, progress)
 
             return downloaded, output_path
@@ -256,7 +256,7 @@ async def run_download_task(
 
     Returns the local path of the downloaded file.
     """
-    from api.tasks import get_task_queue
+    from . import get_task_queue
 
     queue = get_task_queue()
     is_civitai, is_api, model_id, version_id = check_civitai_url(url)

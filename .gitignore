@@ -47,9 +47,9 @@ htmlcov/
 *.pt
 *.pth
 *.pth
-models/
-output/
-temp/
+/models/
+/output/
+/temp/
 
 # Logs
 *.log

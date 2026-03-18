@@ -2,7 +2,7 @@
 Pydantic schemas for API requests and responses.
 """
 
-from api.schemas.requests import (
+from .requests import (
     ModelDownloadRequest,
     ModelDeleteRequest,
     WorkflowDepsRequest,

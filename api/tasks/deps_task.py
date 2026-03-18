@@ -126,7 +126,7 @@ async def install_packages(
 
     Returns: (installed, failed, restart_required)
     """
-    from api.tasks import get_task_queue
+    from . import get_task_queue
 
     queue = get_task_queue()
     installed = []
