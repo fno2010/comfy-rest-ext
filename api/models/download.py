@@ -284,7 +284,18 @@ async def cancel_download_task(request: web.Request) -> web.Response:
 
 @routes.get("/v2/extension/model/download")
 async def list_download_tasks(request: web.Request) -> web.Response:
-    """List all download tasks (active and recent)."""
+    """List all download tasks.
+
+    Query params:
+    - status: Comma-separated list of statuses to include. Default: "queued,downloading".
+              Use "all" to include completed, failed, cancelled from history.
+              Valid values: queued, downloading, completed, failed, cancelled
+    """
+    status_filter = request.query.get("status", "queued,downloading")
+    if status_filter == "all":
+        status_filter = "queued,downloading,completed,failed,cancelled"
+    status_set = set(s.strip() for s in status_filter.split(",") if s.strip())
+
     queue = get_task_queue()
     persistence = get_persistence()
     tasks = []
@@ -294,10 +305,13 @@ async def list_download_tasks(request: web.Request) -> web.Response:
 
     for task_id, info in queue.list_tasks().items():
         task_state = active_tasks.get(task_id)
+        status = task_state.status if task_state else info.status.value
+        if status not in status_set:
+            continue
         tasks.append({
             "task_id": task_id,
             "name": info.name,
-            "status": task_state.status if task_state else info.status.value,
+            "status": status,
             "progress": info.progress,
             "created_at": info.created_at,
             "url": task_state.url if task_state else None,
@@ -309,6 +323,8 @@ async def list_download_tasks(request: web.Request) -> web.Response:
     # Also include tasks from persistence that are not in queue
     # (e.g., cancelled tasks waiting for resume or cleanup)
     for task_id, task_state in active_tasks.items():
+        if task_state.status not in status_set:
+            continue
         if task_state.status == "cancelled" and task_id not in queue.list_tasks():
             tasks.append({
                 "task_id": task_id,
@@ -321,5 +337,39 @@ async def list_download_tasks(request: web.Request) -> web.Response:
                 "downloaded_bytes": task_state.downloaded_bytes,
                 "total_bytes": task_state.total_bytes,
             })
+
+    # Include completed/failed tasks from history if requested
+    if "completed" in status_set or "failed" in status_set:
+        history_file = persistence._history_file
+        if history_file.exists():
+            try:
+                lines = history_file.read_text().strip().split("\n")
+                for line in reversed(lines):
+                    if not line:
+                        continue
+                    try:
+                        import json
+                        task_dict = json.loads(line)
+                        status = task_dict.get("status", "")
+                        if status not in status_set:
+                            continue
+                        # Skip if already in active list
+                        if task_dict["task_id"] in [t["task_id"] for t in tasks]:
+                            continue
+                        tasks.append({
+                            "task_id": task_dict["task_id"],
+                            "name": task_dict.get("name"),
+                            "status": status,
+                            "progress": task_dict.get("progress", 1.0),
+                            "created_at": task_dict.get("created_at"),
+                            "url": task_dict.get("url"),
+                            "local_path": task_dict.get("local_path"),
+                            "downloaded_bytes": task_dict.get("downloaded_bytes", 0),
+                            "total_bytes": task_dict.get("total_bytes"),
+                        })
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+            except Exception:
+                pass
 
     return web.json_response({"tasks": tasks})

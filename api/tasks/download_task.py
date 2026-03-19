@@ -167,6 +167,12 @@ async def resolve_civitai_download_url(
         return download_url, filename, size
 
 
+import os
+
+# HuggingFace mirror endpoint (set via HF_ENDPOINT env var)
+HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
+
+
 async def resolve_huggingface_download_url(
     repo_id: str,
     filename: Optional[str] = None,
@@ -179,6 +185,8 @@ async def resolve_huggingface_download_url(
 
     Returns: (url, filename)
     """
+    hf_endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
+
     # Try using huggingface_hub if available
     try:
         from huggingface_hub import hf_hub_download
@@ -196,11 +204,11 @@ async def resolve_huggingface_download_url(
     except Exception:
         pass
 
-    # Fall back to direct URL construction
+    # Fall back to direct URL construction using configured endpoint
     if filename:
-        url = f"https://huggingface.co/{repo_id}/resolve/{branch}/{filename}"
+        url = f"{hf_endpoint}/{repo_id}/resolve/{branch}/{filename}"
         if folder:
-            url = f"https://huggingface.co/{repo_id}/resolve/{branch}/{folder}/{filename}"
+            url = f"{hf_endpoint}/{repo_id}/resolve/{branch}/{folder}/{filename}"
         return url, filename
 
     raise ValueError("filename is required for HuggingFace downloads without hf_hub_download")

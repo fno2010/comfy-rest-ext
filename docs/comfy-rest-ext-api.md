@@ -64,6 +64,9 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
 | CivitAI 模型页 | `https://civitai.com/models/{id}` |
 | CivitAI 版本页 | `https://civitai.com/models/{id}?modelVersion={version_id}` |
 | 直链 HTTP | 任何可访问的 HTTP/HTTPS 链接 |
+| HuggingFace 镜像 | 如 `https://hf-mirror.com/...`（受 `HF_ENDPOINT` 环境变量控制） |
+
+**断点续传：** 如果目标路径已存在同名文件，将自动从断点继续下载（通过 HTTP Range 头实现）。返回的 `existing_size` 表示已存在的文件大小。
 
 **响应：**
 ```json
@@ -72,9 +75,14 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
   "status": "queued",
   "url": "https://...",
   "folder": "checkpoints",
-  "filename": "sd_xl.safetensors"
+  "filename": "sd_xl.safetensors",
+  "existing_size": 45000000
 }
 ```
+
+| 额外字段 | 说明 |
+|---------|------|
+| `existing_size` | 如果目标路径已有同名文件，表示该文件大小（字节），可用于判断是否需要续传。为 `null` 表示无残留文件。 |
 
 ---
 
@@ -120,6 +128,17 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
 
 ### GET `/v2/extension/model/download` — 列出所有下载任务
 
+**查询参数：**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `status` | string | `queued,downloading` | 状态过滤，支持的值：`queued`, `downloading`, `completed`, `failed`, `cancelled`，或使用 `all` 包含所有状态。多个状态用逗号分隔 |
+
+**示例：**
+- `?status=queued,downloading` — 仅活跃任务（默认）
+- `?status=all` — 所有任务（含历史）
+- `?status=completed,failed` — 仅已完成和失败
+
 **响应：**
 ```json
 {
@@ -127,10 +146,12 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
     {
       "task_id": "...",
       "name": "download:https://...",
-      "status": "completed",
-      "progress": 1.0,
+      "status": "downloading",
+      "progress": 0.45,
       "url": "https://...",
-      "local_path": "/basedir/models/checkpoints/file.safetensors"
+      "local_path": "/basedir/models/checkpoints/file.safetensors",
+      "downloaded_bytes": 45000000,
+      "total_bytes": 100000000
     }
   ]
 }
