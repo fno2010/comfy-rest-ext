@@ -170,6 +170,7 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `include_hash` | bool | false | 是否计算 SHA256 hash（会显著变慢） |
+| `include_metadata` | bool | false | 是否包含模型元数据（默认关闭，元数据较大） |
 | `folder` | string | - | 仅列出指定文件夹，如 `checkpoints`。支持自定义子目录（如下载任务创建的自定义文件夹） |
 
 **响应：**

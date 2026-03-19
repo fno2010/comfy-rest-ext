@@ -155,6 +155,13 @@ def get_file_hash(path: str, algorithm: str = "blake3") -> Optional[str]:
         return None
 
 
+# Model file extensions to scan
+MODEL_EXTENSIONS = {
+    ".safetensors", ".ckpt", ".pt", ".pth", ".pt2",
+    ".bin", ".sft", ".pkl",
+}
+
+
 @routes.get("/v2/extension/models/all")
 async def list_all_models(request: web.Request) -> web.Response:
     """
@@ -162,9 +169,11 @@ async def list_all_models(request: web.Request) -> web.Response:
 
     Query params:
     - include_hash: bool - calculate file hash (slower)
+    - include_metadata: bool - include model metadata (default false)
     - folder: str - filter by specific folder type
     """
     include_hash = request.query.get("include_hash", "false").lower() == "true"
+    include_metadata = request.query.get("include_metadata", "false").lower() == "true"
     folder_filter = request.query.get("folder", None)
 
     folders = get_model_folders()
@@ -200,6 +209,11 @@ async def list_all_models(request: web.Request) -> web.Response:
 
         for root, _, files in os.walk(folder_path):
             for filename in files:
+                # Only scan model files
+                _, ext = os.path.splitext(filename)
+                if ext.lower() not in MODEL_EXTENSIONS:
+                    continue
+
                 filepath = os.path.join(root, filename)
 
                 # Deduplicate by full_path
@@ -214,10 +228,11 @@ async def list_all_models(request: web.Request) -> web.Response:
                     metadata = None
                     file_hash = None
 
-                    if filename.endswith(".safetensors"):
-                        metadata = parse_safetensors_header(filepath)
-                    elif filename.endswith((".ckpt", ".pt", ".pth")):
-                        metadata = parse_ckpt_metadata(filepath)
+                    if include_metadata:
+                        if filename.endswith(".safetensors"):
+                            metadata = parse_safetensors_header(filepath)
+                        elif filename.endswith((".ckpt", ".pt", ".pth")):
+                            metadata = parse_ckpt_metadata(filepath)
 
                     if include_hash:
                         file_hash = get_file_hash(filepath)
