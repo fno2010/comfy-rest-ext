@@ -105,15 +105,21 @@ async def create_download_task(request: web.Request) -> web.Response:
     try:
         import sys
         sys.path.insert(0, '/comfy/mnt/ComfyUI')
-        from folder_paths import get_folder_paths
+        from folder_paths import get_folder_paths, models_dir
         paths = get_folder_paths(folder or "checkpoints")
         if paths:
             output_dir = paths[0]
         else:
-            output_dir = os.path.join(os.path.expanduser("~"), "ComfyUI", "models", folder)
+            # Non-standard folder: fallback to models_dir (already respects --base-directory)
+            output_dir = os.path.join(models_dir, folder)
+    except KeyError:
+        # get_folder_paths doesn't know this folder type
+        from folder_paths import models_dir
+        output_dir = os.path.join(models_dir, folder)
     except Exception as e:
         logger.warning(f"Could not get ComfyUI folder paths: {e}")
-        output_dir = os.path.join(os.path.expanduser("~"), "ComfyUI", "models", folder)
+        from folder_paths import models_dir
+        output_dir = os.path.join(models_dir, folder)
 
     os.makedirs(output_dir, exist_ok=True)
 

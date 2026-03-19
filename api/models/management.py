@@ -22,29 +22,26 @@ logger = logging.getLogger("comfy-rest-ext.management")
 
 
 def get_model_folders() -> dict[str, str]:
-    """Get ComfyUI model folder paths."""
+    """Get all model folder paths under models_dir.
+
+    Scans models_dir directly to discover all subdirectories,
+    ensuring custom folders created by downloads are included.
+    """
     try:
         import sys
         sys.path.insert(0, '/comfy/mnt/ComfyUI')
-        from folder_paths import get_folder_paths
+        from folder_paths import models_dir
 
-        # get_folder_paths(folder_name: str) -> list[str]
-        common_folders = [
-            "checkpoints", "clip", "vae", "controlnet", "gligen",
-            "ultralytics", "models", "loras", "embeddings", "upscale_models"
-        ]
+        import os as _os
         result = {}
-        for name in common_folders:
-            try:
-                paths = get_folder_paths(name)
-                if paths:
-                    result[name] = paths[0]  # Take first path
-            except Exception:
-                pass
+        if _os.path.isdir(models_dir):
+            for entry in _os.listdir(models_dir):
+                subdir = _os.path.join(models_dir, entry)
+                if _os.path.isdir(subdir):
+                    result[entry] = subdir
         return result
 
     except ImportError:
-        # Fallback paths
         base = os.path.join(os.path.expanduser("~"), "ComfyUI", "models")
         return {
             "checkpoints": os.path.join(base, "checkpoints"),
@@ -172,14 +169,30 @@ async def list_all_models(request: web.Request) -> web.Response:
 
     folders = get_model_folders()
     if folder_filter:
-        if folder_filter not in folders:
-            return web.json_response(
-                {"error": f"Unknown folder type: {folder_filter}"},
-                status=400,
-            )
-        folders = {folder_filter: folders[folder_filter]}
+        if folder_filter in folders:
+            folders = {folder_filter: folders[folder_filter]}
+        else:
+            # Try as a custom subdirectory of models_dir
+            try:
+                import sys
+                sys.path.insert(0, '/comfy/mnt/ComfyUI')
+                from folder_paths import models_dir
+                custom_path = os.path.join(models_dir, folder_filter)
+                if os.path.isdir(custom_path):
+                    folders = {folder_filter: custom_path}
+                else:
+                    return web.json_response(
+                        {"error": f"Unknown folder type: {folder_filter}"},
+                        status=400,
+                    )
+            except Exception:
+                return web.json_response(
+                    {"error": f"Unknown folder type: {folder_filter}"},
+                    status=400,
+                )
 
     models = []
+    seen_full_paths = set()  # dedup by full_path
 
     for folder_name, folder_path in folders.items():
         if not os.path.exists(folder_path):
@@ -187,10 +200,13 @@ async def list_all_models(request: web.Request) -> web.Response:
 
         for root, _, files in os.walk(folder_path):
             for filename in files:
-                if filename.startswith("."):
-                    continue
-
                 filepath = os.path.join(root, filename)
+
+                # Deduplicate by full_path
+                if filepath in seen_full_paths:
+                    continue
+                seen_full_paths.add(filepath)
+
                 try:
                     stat = os.stat(filepath)
                     size = stat.st_size
@@ -206,7 +222,6 @@ async def list_all_models(request: web.Request) -> web.Response:
                     if include_hash:
                         file_hash = get_file_hash(filepath)
 
-                    # Relative path from models base
                     rel_path = os.path.relpath(filepath, folder_path)
 
                     models.append({
@@ -225,7 +240,7 @@ async def list_all_models(request: web.Request) -> web.Response:
     return web.json_response({
         "models": models,
         "total": len(models),
-        "folders": list(folders.keys()),
+        "folders": [f for f in folders.keys() if f != "_models_root"],
     })
 
 
