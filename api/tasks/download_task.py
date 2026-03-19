@@ -212,22 +212,64 @@ async def download_file(
     output_path: str,
     chunk_size: int = 1024 * 1024,  # 1MB chunks
     cancellation_event: Optional[asyncio.Event] = None,
+    resume_offset: int = 0,
 ) -> Tuple[int, str]:
     """
-    Download a file with progress tracking.
+    Download a file with progress tracking and resume support.
+
+    Args:
+        task_id: Task ID for progress updates
+        url: Download URL
+        output_path: Local file path
+        chunk_size: Download chunk size
+        cancellation_event: Event to check for cancellation
+        resume_offset: Bytes already downloaded (for resume)
 
     Returns: (total_bytes, local_path)
     """
-    async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
+    headers = {}
+    mode = "wb"
 
-            total_bytes = int(response.headers.get("Content-Length", 0))
-            downloaded = 0
+    # Check for resume support
+    if resume_offset > 0:
+        headers["Range"] = f"bytes={resume_offset}-"
+        mode = "ab"  # Append mode for resume
+
+    async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
+        async with client.stream("GET", url, headers=headers) as response:
+            # Handle resume response
+            if response.status_code == 206:
+                # Partial content - resume supported
+                content_range = response.headers.get("Content-Range", "")
+                logger.info(f"Resuming download from byte {resume_offset}")
+                # Parse total from Content-Range header if available
+                # Format: "bytes {start}-{end}/{total}"
+                if "/" in content_range:
+                    total_str = content_range.split("/")[-1]
+                    if total_str.isdigit():
+                        total_bytes = int(total_str)
+            elif response.status_code == 200:
+                # Full content - starting fresh or server doesn't support resume
+                total_bytes = int(response.headers.get("Content-Length", 0))
+            elif response.status_code == 416:
+                # Range Not Satisfiable - file is already complete
+                # (server doesn't support Range or we've already downloaded everything)
+                logger.info(f"File already complete at {output_path}")
+                return resume_offset, output_path
+            else:
+                response.raise_for_status()
+                total_bytes = 0
+
+            downloaded = resume_offset
+            total_header = response.headers.get("Content-Length")
+            if total_header:
+                file_total = int(total_header)
+                if resume_offset > 0:
+                    total_bytes = resume_offset + file_total
 
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-            with open(output_path, "wb") as f:
+            with open(output_path, mode) as f:
                 async for chunk in response.aiter_bytes(chunk_size=chunk_size):
                     if cancellation_event and cancellation_event.is_set():
                         raise asyncio.CancelledError("Download cancelled")
@@ -282,6 +324,13 @@ async def run_download_task(
 
     output_path = os.path.join(output_dir, resolved_filename)
 
+    # Check for existing partial file (resume support)
+    resume_offset = 0
+    if os.path.exists(output_path):
+        resume_offset = os.path.getsize(output_path)
+        if resume_offset > 0:
+            logger.info(f"Found partial file {output_path} ({resume_offset} bytes), will resume")
+
     logger.info(f"Downloading {resolved_url} to {output_path}")
 
     try:
@@ -290,11 +339,11 @@ async def run_download_task(
             resolved_url,
             output_path,
             cancellation_event=cancellation_event,
+            resume_offset=resume_offset,
         )
         logger.info(f"Download complete: {downloaded} bytes -> {path}")
         return path
     except asyncio.CancelledError:
-        # Clean up partial file
-        if os.path.exists(output_path):
-            os.remove(output_path)
+        # Keep partial file for resume
+        logger.info(f"Download cancelled, partial file kept at {output_path}")
         raise
