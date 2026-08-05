@@ -829,6 +829,17 @@ curl -X POST http://host:8188/v1/videos \
   -F "input_reference=@/path/to/first-frame.png;type=image/png"
 ```
 
+**multipart 字段（R2V，多参考图）：**
+```bash
+curl -X POST http://host:8188/v1/videos \
+  -F "model=minimax-h3-r2v" \
+  -F "prompt=Use <Picture 1> as style reference" \
+  -F "seconds=5" \
+  -F "input_reference=@/path/to/ref1.png;type=image/png" \
+  -F "input_reference=@/path/to/ref2.png;type=image/png"
+```
+R2V 使用 `ref2va` checkpoint，prompt 中通过 `<Picture 1>`、`<Picture 2>` 标签按上传顺序引用参考图（最多 9 张）。
+
 **响应（OpenAI VideoResource 形状）：**
 ```json
 {
@@ -844,9 +855,11 @@ curl -X POST http://host:8188/v1/videos \
   "completed_at": null,
   "media_type": "video/mp4",
   "file_name": null,
+  "inference_time_s": null,
   "error": null
 }
 ```
+`inference_time_s`：任务完成后为 `completed_at - created_at`（秒），否则为 `null`。
 
 ### GET `/v1/videos/{video_id}` — 轮询任务状态
 
