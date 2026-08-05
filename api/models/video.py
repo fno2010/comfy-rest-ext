@@ -22,7 +22,22 @@ from ..tasks.video_task import (
     frames_for_seconds,
     get_video_manager,
     submit_video_task,
+    _record_to_task,
+    comfyui_view_url,
 )
+from ..tasks.video_persistence import get_video_persistence
+
+
+def _task_summary(task: VideoTask) -> dict:
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "task": task.task_type,
+        "progress": task.progress,
+        "created_at": task.created_at,
+        "completed_at": task.completed_at,
+        "view_url": comfyui_view_url(task.output_path),
+    }
 
 logger = logging.getLogger("comfy-rest-ext.video")
 
@@ -135,7 +150,11 @@ async def get_video_task_status(request: web.Request) -> web.Response:
     task_id = request.match_info["task_id"]
     task = get_video_manager().get(task_id)
     if not task:
-        return web.json_response({"error": "Task not found"}, status=404)
+        record = get_video_persistence().get(task_id)
+        if record is None:
+            return web.json_response({"error": "Task not found"}, status=404)
+        task = _record_to_task(record)
+        get_video_manager().restore(task)
 
     return web.json_response({
         "task_id": task.task_id,
@@ -144,6 +163,7 @@ async def get_video_task_status(request: web.Request) -> web.Response:
         "progress": task.progress,
         "prompt_id": task.prompt_id,
         "output_path": task.output_path,
+        "view_url": _comfyui_view_url(task.output_path),
         "error": task.error,
         "created_at": task.created_at,
         "completed_at": task.completed_at,
@@ -152,16 +172,17 @@ async def get_video_task_status(request: web.Request) -> web.Response:
 
 @routes.get("/v2/extension/video")
 async def list_video_tasks(request: web.Request) -> web.Response:
-    """List active video generation tasks."""
+    """List video generation tasks (active + history)."""
     manager = get_video_manager()
-    tasks = [
-        {
-            "task_id": t.task_id,
-            "status": t.status,
-            "task": t.task_type,
-            "progress": t.progress,
-            "created_at": t.created_at,
-        }
-        for t in manager.list_active().values()
-    ]
+    seen = set()
+    tasks = []
+    for t in manager.list_all().values():
+        seen.add(t.task_id)
+        tasks.append(_task_summary(t))
+    for record in get_video_persistence().list_active().values():
+        if record.get("task_id") in seen:
+            continue
+        task = _record_to_task(record)
+        manager.restore(task)
+        tasks.append(_task_summary(task))
     return web.json_response({"tasks": tasks})

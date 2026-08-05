@@ -25,7 +25,10 @@ from ..tasks.video_task import (
     frames_for_seconds,
     get_video_manager,
     submit_video_task,
+    _record_to_task,
+    comfyui_view_url,
 )
+from ..tasks.video_persistence import get_video_persistence
 
 logger = logging.getLogger("comfy-rest-ext.openai")
 
@@ -65,6 +68,7 @@ def _video_response(task: VideoTask) -> dict:
         "completed_at": int(task.completed_at) if task.completed_at else None,
         "media_type": "video/mp4",
         "file_name": task.output_path,
+        "view_url": comfyui_view_url(task.output_path),
         "error": (
             {"code": "generation_error", "message": task.error}
             if task.error else None
@@ -231,11 +235,25 @@ async def _save_upload(data: bytes, prefix: str) -> Optional[str]:
     return filename
 
 
+def _get_task_or_restore(video_id: str) -> Optional[VideoTask]:
+    """Get a task from memory, restoring from persistence if needed."""
+    manager = get_video_manager()
+    task = manager.get(video_id)
+    if task is not None:
+        return task
+    record = get_video_persistence().get(video_id)
+    if record is None:
+        return None
+    task = _record_to_task(record)
+    manager.restore(task)
+    return task
+
+
 @routes.get("/v1/videos/{video_id}")
 async def retrieve_video(request: web.Request) -> web.Response:
     """Retrieve the job record for a video generation task."""
     video_id = request.match_info["video_id"]
-    task = get_video_manager().get(video_id)
+    task = _get_task_or_restore(video_id)
     if not task:
         return web.json_response({"error": "Video not found"}, status=404)
     return web.json_response(_video_response(task))
@@ -243,11 +261,19 @@ async def retrieve_video(request: web.Request) -> web.Response:
 
 @routes.get("/v1/videos")
 async def list_videos(request: web.Request) -> web.Response:
-    """List video generation jobs."""
+    """List video generation jobs (active + history)."""
     tasks = [
         _video_response(t)
-        for t in get_video_manager().list_active().values()
+        for t in get_video_manager().list_all().values()
     ]
+    history = get_video_persistence().list_active()
+    seen = {t.task_id for t in get_video_manager().list_all().values()}
+    for record in history.values():
+        if record.get("task_id") in seen:
+            continue
+        task = _record_to_task(record)
+        get_video_manager().restore(task)
+        tasks.append(_video_response(task))
     return web.json_response({
         "object": "list",
         "data": tasks,
@@ -258,7 +284,7 @@ async def list_videos(request: web.Request) -> web.Response:
 async def download_video_content(request: web.Request) -> web.Response:
     """Download the generated MP4 for a completed job."""
     video_id = request.match_info["video_id"]
-    task = get_video_manager().get(video_id)
+    task = _get_task_or_restore(video_id)
     if not task:
         return web.json_response({"error": "Video not found"}, status=404)
     if task.status != "completed" or not task.output_path:
@@ -273,7 +299,7 @@ async def download_video_content(request: web.Request) -> web.Response:
 async def delete_video(request: web.Request) -> web.Response:
     """Delete a video generation job record."""
     video_id = request.match_info["video_id"]
-    task = get_video_manager().get(video_id)
+    task = _get_task_or_restore(video_id)
     if not task:
         return web.json_response({"error": "Video not found"}, status=404)
     return web.json_response({

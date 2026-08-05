@@ -9,6 +9,8 @@ from comfy_api.latest import ComfyExtension, io
 from typing import override
 
 from .tasks.persistence import init_persistence, stop_persistence
+from .tasks.video_persistence import init_video_persistence, stop_video_persistence
+from .tasks.video_task import restore_video_tasks_from_disk
 
 logger = logging.getLogger("comfy-rest-ext")
 
@@ -32,11 +34,14 @@ class ComfyRestExtExtension(ComfyExtension):
         """Called when the extension is loaded."""
         logger.info("[Comfy-REST-Ext] Initializing task persistence...")
         await init_persistence()
-        logger.info("[Comfy-REST-Ext] Task persistence initialized.")
+        await init_video_persistence()
+        restored = await restore_video_tasks_from_disk()
+        logger.info("[Comfy-REST-Ext] Task persistence initialized (%d video tasks restored).", restored)
 
     @override
     async def on_unload(self) -> None:
         """Called when the extension is unloaded or server is stopping."""
         logger.info("[Comfy-REST-Ext] Stopping task persistence...")
         await stop_persistence()
+        await stop_video_persistence()
         logger.info("[Comfy-REST-Ext] Task persistence stopped.")

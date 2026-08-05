@@ -9,13 +9,14 @@ video file path for downstream serving.
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
+
+from .video_persistence import get_video_persistence
 
 logger = logging.getLogger("comfy-rest-ext.video")
 
@@ -147,15 +148,30 @@ def build_h3_workflow(
 
 
 class VideoTaskManager:
-    """Manages video generation tasks in-process."""
+    """Manages video generation tasks with persistence.
 
-    def __init__(self):
+    In-memory dict is a write-through cache: every create/update
+    mutates the persisted record via VideoPersistence so tasks survive
+    ComfyUI restarts.
+    """
+
+    def __init__(self, persistence=None):
         self._tasks: Dict[str, VideoTask] = {}
         self._lock = threading.RLock()
+        self._persistence = persistence
+
+    def _persist(self, task: VideoTask) -> None:
+        if self._persistence is None:
+            return
+        record = _task_to_record(task)
+        record.pop("task_id", None)
+        self._persistence.update(task.task_id, **record)
 
     def create(self, task: VideoTask) -> VideoTask:
         with self._lock:
             self._tasks[task.task_id] = task
+            if self._persistence is not None:
+                self._persistence.create(_task_to_record(task))
         return task
 
     def get(self, task_id: str) -> Optional[VideoTask]:
@@ -170,6 +186,7 @@ class VideoTaskManager:
             for k, v in kwargs.items():
                 if hasattr(task, k):
                     setattr(task, k, v)
+            self._persist(task)
             return True
 
     def list_active(self) -> Dict[str, VideoTask]:
@@ -179,6 +196,87 @@ class VideoTaskManager:
                 if t.status in ("queued", "running")
             }
 
+    def list_all(self) -> Dict[str, VideoTask]:
+        with self._lock:
+            return dict(self._tasks)
+
+    def restore(self, task: VideoTask) -> None:
+        """Load a task back into memory from persisted state."""
+        with self._lock:
+            self._tasks[task.task_id] = task
+
+
+def _task_to_record(task: VideoTask) -> dict:
+    """Serialize a VideoTask to a persistence-friendly dict."""
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "prompt": task.prompt,
+        "task_type": task.task_type,
+        "width": task.width,
+        "height": task.height,
+        "length": task.length,
+        "seed": task.seed,
+        "first_frame": task.first_frame,
+        "prompt_id": task.prompt_id,
+        "progress": task.progress,
+        "output_path": task.output_path,
+        "error": task.error,
+        "created_at": task.created_at,
+        "completed_at": task.completed_at,
+    }
+
+
+def _record_to_task(record: dict) -> VideoTask:
+    """Deserialize a persisted dict back into a VideoTask."""
+    return VideoTask(
+        task_id=record.get("task_id", ""),
+        status=record.get("status", "failed"),
+        prompt=record.get("prompt", ""),
+        task_type=record.get("task_type", "t2va"),
+        width=record.get("width", 1344),
+        height=record.get("height", 768),
+        length=record.get("length", 101),
+        seed=record.get("seed", 0),
+        first_frame=record.get("first_frame"),
+        prompt_id=record.get("prompt_id"),
+        progress=record.get("progress", 0.0),
+        output_path=record.get("output_path"),
+        error=record.get("error"),
+        created_at=record.get("created_at", 0.0),
+        completed_at=record.get("completed_at"),
+    )
+
+
+async def restore_video_tasks_from_disk() -> int:
+    """Load persisted tasks into the manager.
+
+    Completed/failed tasks from history are restored as-is. Tasks that
+    were queued/running when ComfyUI stopped are marked failed because
+    their in-flight prompt is gone (PromptQueue history is memory-only).
+
+    Returns the number of tasks restored.
+    """
+    persistence = get_video_persistence()
+    manager = get_video_manager()
+    count = 0
+    for record in persistence.list_active().values():
+        status = record.get("status", "failed")
+        if status in ("queued", "running"):
+            record["status"] = "failed"
+            record["error"] = "Interrupted by ComfyUI restart"
+        task = _record_to_task(record)
+        manager.restore(task)
+        count += 1
+    for record in await persistence.list_history():
+        task_id = record.get("task_id")
+        if manager.get(task_id) is not None:
+            continue
+        task = _record_to_task(record)
+        manager.restore(task)
+        count += 1
+    return count
+
 
 _video_manager: Optional[VideoTaskManager] = None
 
@@ -186,7 +284,7 @@ _video_manager: Optional[VideoTaskManager] = None
 def get_video_manager() -> VideoTaskManager:
     global _video_manager
     if _video_manager is None:
-        _video_manager = VideoTaskManager()
+        _video_manager = VideoTaskManager(persistence=get_video_persistence())
     return _video_manager
 
 
@@ -206,12 +304,34 @@ def _resolve_output_path(value: dict) -> str:
     return os.path.join(output_dir, subfolder, filename)
 
 
+def comfyui_view_url(output_path: Optional[str]) -> Optional[str]:
+    """Build a ComfyUI /view URL for a completed output file."""
+    if not output_path:
+        return None
+    import os
+    from urllib.parse import urlencode
+    import folder_paths
+    output_dir = folder_paths.get_output_directory()
+    rel = os.path.relpath(output_path, output_dir)
+    parts = rel.split(os.sep)
+    filename = parts[-1]
+    subfolder = os.sep.join(parts[:-1]) if len(parts) > 1 else ""
+    params = urlencode({"filename": filename, "type": "output", "subfolder": subfolder})
+    return f"/view?{params}"
+
+
 async def submit_video_task(task: VideoTask) -> VideoTask:
     """Submit the task to ComfyUI's in-process queue and track until done."""
     from server import PromptServer
 
     prompt_queue = _get_prompt_queue()
     server = PromptServer.instance
+    manager = get_video_manager()
+
+    def sync_status():
+        record = _task_to_record(task)
+        record.pop("task_id", None)
+        manager.update(task.task_id, **record)
 
     workflow = build_h3_workflow(
         prompt=task.prompt,
@@ -224,6 +344,7 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
 
     prompt_id = str(uuid.uuid4())
     task.prompt_id = prompt_id
+    sync_status()
 
     try:
         from execution import validate_prompt
@@ -232,16 +353,19 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
             task.status = "failed"
             task.error = valid[1]
             task.node_errors = valid[3]
+            sync_status()
             return task
     except Exception as e:
         task.status = "failed"
         task.error = f"validate_prompt failed: {e}"
+        sync_status()
         return task
 
     task.status = "running"
     number = getattr(server, "number", 0)
     outputs_to_execute = valid[2] if valid[2] is not None else []
     prompt_queue.put((number, prompt_id, workflow, {}, outputs_to_execute, {}))
+    sync_status()
 
     deadline = time.time() + 3600
     while time.time() < deadline:
@@ -256,6 +380,7 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         if status_str == "error":
             task.status = "failed"
             task.error = str(status.get("messages", []))
+            sync_status()
             return task
         for node_id, out in outputs.items():
             for value in out.get("images", []):
@@ -264,13 +389,15 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
                     task.status = "completed"
                     task.completed_at = time.time()
                     task.progress = 1.0
+                    sync_status()
                     return task
-        # completed but no video output yet
         task.status = "completed"
         task.completed_at = time.time()
         task.progress = 1.0
+        sync_status()
         return task
 
     task.status = "failed"
     task.error = "Timeout waiting for video generation"
+    sync_status()
     return task
