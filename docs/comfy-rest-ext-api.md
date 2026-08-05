@@ -709,4 +709,163 @@ ws.addEventListener('message', (event) => {
 | GET | `/v2/extension/snapshot/diff` | 对比快照差异 |
 | GET | `/v2/extension/snapshot/list` | 列出快照 |
 
-**总计：28 个端点**
+| POST | `/v2/extension/video/generate` | 提交视频生成任务 |
+| GET | `/v2/extension/video/{task_id}` | 查询视频生成状态 |
+| GET | `/v2/extension/video` | 列出视频生成任务 |
+| GET | `/v1/models` | 列出模型（OpenAI 兼容） |
+| POST | `/v1/videos` | 创建视频任务（OpenAI 兼容） |
+| GET | `/v1/videos/{video_id}` | 查询视频任务（OpenAI 兼容） |
+| GET | `/v1/videos/{video_id}/content` | 下载视频（OpenAI 兼容） |
+| GET | `/v1/videos` | 列出视频任务（OpenAI 兼容） |
+| DELETE | `/v1/videos/{video_id}` | 删除视频任务（OpenAI 兼容） |
+
+**总计：37 个端点**
+
+---
+
+## 视频生成 (MiniMax-H3)
+
+### POST `/v2/extension/video/generate` — 提交视频生成任务
+
+提交 MiniMax-H3 T2V/I2V 生成任务。任务异步执行，通过 `/v2/extension/video/{task_id}` 查询状态。
+
+**请求体：**
+```json
+{
+  "prompt": "A red cube rolling across a white floor",
+  "task": "t2va",
+  "width": 1344,
+  "height": 768,
+  "duration": 5.0,
+  "seed": 42,
+  "first_frame": "data:image/png;base64,..."
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `prompt` | string | 是 | 文本提示词 |
+| `task` | string | 否 | `t2va`（默认）或 `fl2va` |
+| `width` | int | 否 | 输出宽度（默认 1344） |
+| `height` | int | 否 | 输出高度（默认 768） |
+| `duration` | float | 否 | 时长秒数（默认 5.0，自动对齐 H3 17k+5 帧网格） |
+| `seed` | int | 否 | 随机种子（默认 0） |
+| `first_frame` | string | 否 | I2V 首帧：ComfyUI input 文件名或 data URL |
+
+**响应：**
+```json
+{
+  "task_id": "ae3ac055-3396-4bd0-811e-cbaf0607aaf1",
+  "status": "queued",
+  "task": "t2va",
+  "prompt": "...",
+  "width": 1344,
+  "height": 768,
+  "duration": 5.0,
+  "length": 125
+}
+```
+
+### GET `/v2/extension/video/{task_id}` — 查询生成状态
+
+**响应：**
+```json
+{
+  "task_id": "...",
+  "status": "completed",
+  "task": "t2va",
+  "progress": 1.0,
+  "prompt_id": "...",
+  "output_path": "/comfy/mnt/ComfyUI/output/video/comfy-rest-ext_00002_.mp4",
+  "error": null,
+  "created_at": 1785908457.0,
+  "completed_at": 1785909085.0
+}
+```
+
+**状态值：** `queued` | `running` | `completed` | `failed`
+
+### GET `/v2/extension/video` — 列出活跃任务
+
+---
+
+## OpenAI 兼容 API
+
+通过 Custom Node 机制注册 OpenAI 风格的 `/v1/*` 端点，使 AI agent 可直接用官方 OpenAI SDK（`base_url="http://host:8188/v1"`）调用。
+
+### GET `/v1/models` — 列出可用模型
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "minimax-h3-t2v", "object": "model", "created": 1785905031, "owned_by": "comfy-rest-ext"},
+    {"id": "minimax-h3-i2v", "object": "model", "created": 1785905031, "owned_by": "comfy-rest-ext"}
+  ]
+}
+```
+
+### POST `/v1/videos` — 创建视频生成任务（异步）
+
+接受 **multipart/form-data**（OpenAI SDK 格式）或 **application/json**。
+
+**JSON 请求体（OpenAI 兼容字段 + 扩展）：**
+```json
+{
+  "model": "minimax-h3-t2v",
+  "prompt": "A red cube rolling across a white floor",
+  "seconds": "4",
+  "size": "1344x768",
+  "seed": 42
+}
+```
+
+**multipart 字段（I2V）：**
+```bash
+curl -X POST http://host:8188/v1/videos \
+  -F "model=minimax-h3-i2v" \
+  -F "prompt=continue the scene" \
+  -F "seconds=3" \
+  -F "input_reference=@/path/to/first-frame.png;type=image/png"
+```
+
+**响应（OpenAI VideoResource 形状）：**
+```json
+{
+  "id": "video_9dba6e30637a421ba4af779bec3ed86f",
+  "object": "video",
+  "model": "minimax-h3-t2v",
+  "prompt": "...",
+  "status": "queued",
+  "progress": 0,
+  "size": "1344x768",
+  "seconds": "4.458333333333333",
+  "created_at": 1785908457,
+  "completed_at": null,
+  "media_type": "video/mp4",
+  "file_name": null,
+  "error": null
+}
+```
+
+### GET `/v1/videos/{video_id}` — 轮询任务状态
+
+`status`: `queued` | `in_progress` | `completed` | `failed`；`progress`: 0-100
+
+### GET `/v1/videos/{video_id}/content` — 下载生成的 MP4
+
+返回 `video/mp4` 二进制流。
+
+### GET `/v1/videos` — 列出任务
+
+### DELETE `/v1/videos/{video_id}` — 删除任务记录
+
+---
+
+## WebSocket 事件（视频生成）
+
+| 事件 | 数据 |
+|------|------|
+| `extension-video-generation-queued` | `{task_id, task}` |
+| `extension-video-generation-complete` | `{task_id, path}` |
+| `extension-video-generation-failed` | `{task_id, error}` |

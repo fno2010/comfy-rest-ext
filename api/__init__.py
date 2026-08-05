@@ -24,3 +24,5 @@ from .models import dependencies  # noqa: F401
 from .models import snapshot  # noqa: F401
 from .models import nodes  # noqa: F401
 from .models import pr_cache  # noqa: F401
+from .models import video  # noqa: F401
+from .openai import v1  # noqa: F401

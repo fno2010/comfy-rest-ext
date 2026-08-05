@@ -47,8 +47,13 @@ def check_civitai_url(url: str) -> Tuple[bool, bool, Optional[str], Optional[str
     )
     if model_match:
         model_id = model_match.group(1)
+        # Version can be a path segment (version/{id}) or a query param
+        # (?modelVersion={id})
         version_match = re.search(r"version/(\d+)", url, re.IGNORECASE)
         version_id = version_match.group(1) if version_match else None
+        if version_id is None:
+            query_match = re.search(r"[?&]modelVersion=(\d+)", url, re.IGNORECASE)
+            version_id = query_match.group(1) if query_match else None
         return True, False, model_id, version_id
 
     # Match api.civitai.com/v1/models/{id}
