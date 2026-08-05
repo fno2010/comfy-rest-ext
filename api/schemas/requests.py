@@ -91,3 +91,18 @@ class NodeValidateRequest(BaseModel):
 class NodeInitRequest(BaseModel):
     """Request body for POST /v2/nodes/init"""
     path: str
+
+
+# =============================================================================
+# Video Generation (MiniMax-H3)
+# =============================================================================
+
+class VideoGenerateRequest(BaseModel):
+    """Request body for POST /v2/extension/video/generate"""
+    prompt: str
+    task: str = "t2va"
+    width: int = 1344
+    height: int = 768
+    duration: float = 5.0
+    seed: int = 0
+    first_frame: Optional[str] = None

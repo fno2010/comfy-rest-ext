@@ -14,6 +14,7 @@ from .requests import (
     NodePackRequest,
     NodeValidateRequest,
     NodeInitRequest,
+    VideoGenerateRequest,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "NodePackRequest",
     "NodeValidateRequest",
     "NodeInitRequest",
+    "VideoGenerateRequest",
 ]

@@ -8,5 +8,6 @@ from . import dependencies
 from . import snapshot
 from . import nodes
 from . import pr_cache
+from . import video
 
-__all__ = ["download", "management", "dependencies", "snapshot", "nodes", "pr_cache"]
+__all__ = ["download", "management", "dependencies", "snapshot", "nodes", "pr_cache", "video"]

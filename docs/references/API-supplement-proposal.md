@@ -716,6 +716,47 @@ DELETE /v2/extension/frontend/pr-cache
 
 ---
 
+### 9. 视频生成（MiniMax-H3）
+
+#### 现状问题
+
+ComfyUI 原生 API 仅暴露 workflow 提交（`/prompt`），无语义化的视频生成端点。AI agent 需要 OpenAI 兼容的 `/v1/*` 接口。
+
+#### 设计思路
+
+- **OpenAI 兼容层**：`/v1/models` + `/v1/videos`（multipart + JSON）+ `/v1/videos/{id}` + `/content`，遵循 OpenAI VideoResource job 生命周期（queued → in_progress → completed/failed）
+- **原生端点**：`/v2/extension/video/*` 保留 `/v2/extension/` 前缀约定
+- **T2V/I2V 判别**：`task` 字段（t2va/fl2va）+ `input_reference` 文件上传（multipart）或 JSON `first_frame`（data URL）
+- **任务执行**：复用 ComfyUI 进程内 PromptQueue，提交 H3 API-format workflow，轮询 history 取输出 MP4
+- **帧网格**：时长按 H3 的 17k+5 帧网格对齐（24fps）
+
+#### 建议端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/models` | 列出可用模型（OpenAI 兼容） |
+| POST | `/v1/videos` | 创建视频任务（OpenAI 兼容，multipart/JSON） |
+| GET | `/v1/videos/{video_id}` | 查询任务状态（OpenAI 兼容） |
+| GET | `/v1/videos/{video_id}/content` | 下载生成 MP4（OpenAI 兼容） |
+| GET | `/v1/videos` | 列出任务（OpenAI 兼容） |
+| DELETE | `/v1/videos/{video_id}` | 删除任务（OpenAI 兼容） |
+| POST | `/v2/extension/video/generate` | 原生视频生成端点 |
+| GET | `/v2/extension/video/{task_id}` | 原生状态查询 |
+| GET | `/v2/extension/video` | 原生任务列表 |
+
+#### 工作流构造
+
+```
+UNETLoader → MiniMaxH3SigmaShift → KSampler
+CLIPLoader → MiniMaxH3ImageToVideo (cond+latent) → KSampler
+VAELoader(video) → VAEDecode → CreateVideo → SaveVideo
+VAELoader(audio) → VAEDecodeAudio → CreateVideo
+```
+
+#### 状态
+
+已实现（Phase 1: T2V + I2V），见 `api/openai/v1.py`、`api/models/video.py`、`api/tasks/video_task.py`。
+
 ## 端点优先级
 
 | 优先级 | 端点 | 理由 |
@@ -731,6 +772,7 @@ DELETE /v2/extension/frontend/pr-cache
 | **P3** | `POST /v2/extension/nodes/validate` + `POST /v2/extension/nodes/init` | 辅助节点开发工作流 |
 | **P3** | `GET /v2/extension/snapshot/diff` | 快照对比，较低频 |
 | **P3** | `GET/DELETE /v2/extension/frontend/pr-cache` | PR 缓存管理，低频 |
+| **P1** | `/v1/videos` + `/v1/videos/{id}` + `/content` + `/v1/models` | OpenAI 兼容视频生成，agent 直接调用（已实现） |
 
 ---
 
