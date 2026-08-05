@@ -4,6 +4,7 @@ ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 R
 
 ## 功能
 
+- **OpenAI 兼容视频生成 API** — T2V / I2V 生成、任务持久化、历史查询（MiniMax-H3）
 - **模型下载** — 从 CivitAI、HuggingFace、直链下载模型到本地
 - **模型管理** — 递归列出模型、获取元数据、删除模型
 - **工作流依赖安装** — 从 workflow JSON 解析依赖并自动安装
@@ -12,6 +13,7 @@ ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 R
 - **节点打包** — 将节点打包为 zip
 - **节点验证** — ruff 安全检查
 - **前端 PR 缓存** — 管理前端 PR 构建缓存
+- **CLI 工具** — `comfy-rest-ext-cli` 命令行客户端
 
 ## 安装
 
@@ -29,6 +31,50 @@ ln -s /path/to/comfy-rest-ext $COMFYUI/custom_nodes/comfy-rest-ext
 curl http://127.0.0.1:8188/v2/extension/health
 # {"status": "ok", "extension": "comfy-rest-ext"}
 ```
+
+## CLI 工具
+
+`comfy-rest-ext-cli` 是面向 OpenAI 兼容视频 API 的命令行客户端。
+
+**零外部依赖**——仅使用 Python 标准库（`urllib.request`），任何 Python 3.10+ 环境无需安装任何第三方包即可运行：
+
+```bash
+# 直接运行（无需安装）
+python3 -m cli --help
+```
+
+### 用法
+
+```bash
+# 列出可用模型
+comfy-rest-ext-cli models
+
+# 生成视频（T2V）
+comfy-rest-ext-cli generate "a cat walking on the moon"
+
+# 生成视频（I2V，指定参考图）
+comfy-rest-ext-cli generate "make it cinematic" --image ref.png
+
+# 查询任务状态
+comfy-rest-ext-cli status video_xxxx
+
+# 列出历史任务
+comfy-rest-ext-cli list
+
+# 等待任务完成（轮询，返回 view_url）
+comfy-rest-ext-cli wait video_xxxx --timeout 300
+
+# 队列模型下载（CivitAI / HuggingFace / 直链）
+comfy-rest-ext-cli download https://civitai.com/models/123
+
+# 所有命令支持 --json 输出（机器可读）
+comfy-rest-ext-cli --json list
+
+# 指向非默认 ComfyUI 地址
+comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
+```
+
+环境变量：`COMFY_REST_EXT_BASE_URL`（默认 `http://127.0.0.1:8188`）、`COMFY_REST_EXT_TIMEOUT`（默认 `60`）。
 
 ## API 文档
 
