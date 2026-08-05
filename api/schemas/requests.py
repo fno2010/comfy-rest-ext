@@ -106,3 +106,4 @@ class VideoGenerateRequest(BaseModel):
     duration: float = 5.0
     seed: int = 0
     first_frame: Optional[str] = None
+    ref_images: Optional[list] = None

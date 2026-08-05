@@ -27,12 +27,13 @@ class VideoTask:
     task_id: str
     status: Literal["queued", "running", "completed", "failed", "cancelled"]
     prompt: str
-    task_type: str  # t2va | fl2va
+    task_type: str  # t2va | fl2va | r2v
     width: int
     height: int
     length: int
     seed: int
     first_frame: Optional[str] = None
+    ref_images: Optional[list] = None
     prompt_id: Optional[str] = None
     progress: float = 0.0
     output_path: Optional[str] = None
@@ -65,18 +66,24 @@ def build_h3_workflow(
     length: int,
     seed: int,
     first_frame_path: Optional[str] = None,
+    ref_images: Optional[list] = None,
     diffusion_model: str = "minimax_h3_fl2va_pruned_nvfp4.safetensors",
     text_encoder: str = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
     video_vae: str = "minimax_h3_video_vae_fp16.safetensors",
     audio_vae: str = "minimax_h3_audio_vae_fp32.safetensors",
+    ref2va_model: str = "minimax_h3_ref2va_pruned_nvfp4.safetensors",
 ) -> Dict[str, Any]:
-    """Build the API-format workflow for MiniMax-H3 T2V/I2V.
+    """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V.
 
     Node graph:
       UNETLoader -> MiniMaxH3SigmaShift -> KSampler -> SaveVideo
-      CLIPLoader -> MiniMaxH3ImageToVideo (cond+latent) -> KSampler
+      CLIPLoader -> conditioning node (cond+latent) -> KSampler
       VAELoader (video) -> VAE decode
       VAELoader (audio) -> audio decode (inside pipeline latent)
+
+    R2V (ref_images given) uses the ref2va checkpoint and the
+    MiniMaxH3ReferenceToVideo node; the prompt references images via
+    <Picture N> tags in insertion order.
     """
     workflow: Dict[str, Any] = {}
 
@@ -84,8 +91,10 @@ def build_h3_workflow(
         workflow[nid] = {"class_type": class_type, "inputs": inputs}
         return nid
 
+    is_r2v = bool(ref_images)
+    unet = ref2va_model if is_r2v else diffusion_model
     add("1", "UNETLoader", {
-        "unet_name": diffusion_model,
+        "unet_name": unet,
         "weight_dtype": "default",
     })
     add("2", "CLIPLoader", {
@@ -101,44 +110,76 @@ def build_h3_workflow(
         "shift_audio": 3.0,
     })
 
-    cond_inputs: Dict[str, Any] = {
-        "clip": ["2", 0],
-        "vae": ["3", 0],
-        "prompt": prompt,
-        "width": width,
-        "height": height,
-        "length": length,
-    }
-    if first_frame_path:
-        cond_inputs["first_frame"] = ["6", 0]
-        add("6", "LoadImage", {"image": first_frame_path})
-    add("7", "MiniMaxH3ImageToVideo", cond_inputs)
+    nid = 6
+    if is_r2v:
+        cond_inputs: Dict[str, Any] = {
+            "clip": ["2", 0],
+            "vae": ["3", 0],
+            "audio_vae": ["4", 0],
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "length": length,
+            "ref_image_size": "match",
+        }
+        ref_slots: Dict[str, Any] = {}
+        for i, ref in enumerate(ref_images or []):
+            add(str(nid), "LoadImage", {"image": ref})
+            ref_slots[f"ref_image_{i}"] = [str(nid), 0]
+            nid += 1
+        cond_inputs["ref_images"] = ref_slots
+        cond_node = str(nid)
+        add(cond_node, "MiniMaxH3ReferenceToVideo", cond_inputs)
+    else:
+        cond_inputs = {
+            "clip": ["2", 0],
+            "vae": ["3", 0],
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "length": length,
+        }
+        if first_frame_path:
+            cond_inputs["first_frame"] = [str(nid), 0]
+            add(str(nid), "LoadImage", {"image": first_frame_path})
+            nid += 1
+        cond_node = str(nid)
+        add(cond_node, "MiniMaxH3ImageToVideo", cond_inputs)
 
-    add("8", "KSampler", {
+    nid += 1
+    sampler_id = str(nid)
+    add(sampler_id, "KSampler", {
         "model": ["5", 0],
         "seed": seed,
         "steps": 20,
         "cfg": 1.0,
         "sampler_name": "euler",
         "scheduler": "simple",
-        "positive": ["7", 0],
-        "negative": ["7", 0],
-        "latent_image": ["7", 1],
+        "positive": [cond_node, 0],
+        "negative": [cond_node, 0],
+        "latent_image": [cond_node, 1],
         "denoise": 1.0,
     })
 
-    add("10", "VAEDecode", {"samples": ["8", 0], "vae": ["3", 0]})
-    add("11", "VAEDecodeAudio", {"samples": ["8", 0], "vae": ["4", 0]})
+    nid += 1
+    vae_decode_id = str(nid)
+    add(vae_decode_id, "VAEDecode", {"samples": [sampler_id, 0], "vae": ["3", 0]})
+    nid += 1
+    vae_decode_audio_id = str(nid)
+    add(vae_decode_audio_id, "VAEDecodeAudio", {"samples": [sampler_id, 0], "vae": ["4", 0]})
 
-    add("12", "CreateVideo", {
-        "images": ["10", 0],
+    nid += 1
+    create_video_id = str(nid)
+    add(create_video_id, "CreateVideo", {
+        "images": [vae_decode_id, 0],
         "fps": 24,
-        "audio": ["11", 0],
+        "audio": [vae_decode_audio_id, 0],
         "bit_depth": 8,
     })
 
-    add("9", "SaveVideo", {
-        "video": ["12", 0],
+    nid += 1
+    add(str(nid), "SaveVideo", {
+        "video": [create_video_id, 0],
         "filename_prefix": "video/comfy-rest-ext",
         "format": "auto",
         "codec": "auto",
@@ -218,6 +259,7 @@ def _task_to_record(task: VideoTask) -> dict:
         "length": task.length,
         "seed": task.seed,
         "first_frame": task.first_frame,
+        "ref_images": task.ref_images,
         "prompt_id": task.prompt_id,
         "progress": task.progress,
         "output_path": task.output_path,
@@ -239,6 +281,7 @@ def _record_to_task(record: dict) -> VideoTask:
         length=record.get("length", 101),
         seed=record.get("seed", 0),
         first_frame=record.get("first_frame"),
+        ref_images=record.get("ref_images"),
         prompt_id=record.get("prompt_id"),
         progress=record.get("progress", 0.0),
         output_path=record.get("output_path"),
@@ -340,6 +383,7 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         length=task.length,
         seed=task.seed,
         first_frame_path=task.first_frame,
+        ref_images=task.ref_images,
     )
 
     prompt_id = str(uuid.uuid4())

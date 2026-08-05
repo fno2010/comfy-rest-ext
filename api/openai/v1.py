@@ -37,8 +37,9 @@ routes = PromptServer.instance.routes
 MODEL_IDS = [
     "minimax-h3-t2v",
     "minimax-h3-i2v",
+    "minimax-h3-r2v",
 ]
-SUPPORTED_TASKS = ("t2va", "fl2va")
+SUPPORTED_TASKS = ("t2va", "fl2va", "r2v")
 
 
 def _model_card(model_id: str, created: int) -> dict:
@@ -55,6 +56,9 @@ def _video_response(task: VideoTask) -> dict:
     status = task.status
     if status == "running":
         status = "in_progress"
+    inference_time_s = None
+    if task.completed_at and task.created_at:
+        inference_time_s = round(task.completed_at - task.created_at, 2)
     return {
         "id": task.task_id,
         "object": "video",
@@ -69,6 +73,7 @@ def _video_response(task: VideoTask) -> dict:
         "media_type": "video/mp4",
         "file_name": task.output_path,
         "view_url": comfyui_view_url(task.output_path),
+        "inference_time_s": inference_time_s,
         "error": (
             {"code": "generation_error", "message": task.error}
             if task.error else None
@@ -77,12 +82,18 @@ def _video_response(task: VideoTask) -> dict:
 
 
 def _model_for_task(task_type: str) -> str:
-    return "minimax-h3-i2v" if task_type == "fl2va" else "minimax-h3-t2v"
+    if task_type == "fl2va":
+        return "minimax-h3-i2v"
+    if task_type == "r2v":
+        return "minimax-h3-r2v"
+    return "minimax-h3-t2v"
 
 
 def _task_type_from_model(model: Optional[str]) -> str:
     if model and model.endswith("-i2v"):
         return "fl2va"
+    if model and model.endswith("-r2v"):
+        return "r2v"
     return "t2va"
 
 
@@ -123,6 +134,8 @@ async def create_video(request: web.Request) -> web.Response:
     task_type = _task_type_from_model(model)
     if fields.get("task"):
         task_type = fields["task"]
+    if task_type not in SUPPORTED_TASKS:
+        return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
     width = _parse_int(fields.get("width"), 1344)
     height = _parse_int(fields.get("height"), 768)
@@ -130,14 +143,25 @@ async def create_video(request: web.Request) -> web.Response:
     seed = _parse_int(fields.get("seed"), 0)
 
     first_frame = None
-    if fields.get("_first_frame_data"):
-        first_frame = await _upload_first_frame(fields["_first_frame_data"])
-    elif fields.get("input_reference"):
-        first_frame = await _upload_input_reference(fields["input_reference"])
-    if task_type == "fl2va" and first_frame is None:
-        return web.json_response(
-            {"error": "fl2va requires input_reference image"}, status=400
-        )
+    ref_images = None
+    if task_type == "r2v":
+        if fields.get("_ref_images_data"):
+            ref_images = [
+                await _save_upload(data, "ref_image") for data in fields["_ref_images_data"]
+            ]
+        if not ref_images:
+            return web.json_response(
+                {"error": "r2v requires at least one reference image"}, status=400
+            )
+    else:
+        if fields.get("_first_frame_data"):
+            first_frame = await _upload_first_frame(fields["_first_frame_data"])
+        elif fields.get("input_reference"):
+            first_frame = await _upload_input_reference(fields["input_reference"])
+        if task_type == "fl2va" and first_frame is None:
+            return web.json_response(
+                {"error": "fl2va requires input_reference image"}, status=400
+            )
 
     task_id = f"video_{uuid.uuid4().hex}"
     length = frames_for_seconds(seconds)
@@ -152,6 +176,7 @@ async def create_video(request: web.Request) -> web.Response:
         length=length,
         seed=seed,
         first_frame=first_frame,
+        ref_images=ref_images,
         created_at=time.time(),
     )
     get_video_manager().create(task)
@@ -172,21 +197,30 @@ async def _parse_json(request: web.Request):
 
 
 async def _parse_multipart(request: web.Request):
-    """Parse a multipart/form-data video request (OpenAI SDK shape)."""
+    """Parse a multipart/form-data video request (OpenAI SDK shape).
+
+    Image parts are collected into `_ref_images_data` (ordered); for
+    backward compatibility the first image is also stored in
+    `_first_frame_data`.
+    """
     reader = MultipartReader.from_response(request)
     fields: dict = {}
-    first_frame_data: Optional[bytes] = None
+    ref_images_data: list = []
     while True:
         part = await reader.next()
         if part is None:
             break
         if part.headers.get("Content-Type", "").startswith(("image/", "video/")):
-            first_frame_data = await part.read()
-            fields["_first_frame_data"] = first_frame_data
+            data = await part.read()
+            ref_images_data.append(data)
+            if not fields.get("_first_frame_data"):
+                fields["_first_frame_data"] = data
         else:
             name = part.name
             value = (await part.read()).decode("utf-8", errors="replace")
             fields[name] = value
+    if ref_images_data:
+        fields["_ref_images_data"] = ref_images_data
     return fields
 
 

@@ -69,6 +69,10 @@ async def create_video_task(request: web.Request) -> web.Response:
     first_frame = None
     if req.first_frame:
         first_frame = await _resolve_first_frame(req.first_frame)
+    if req.task == "r2v" and not req.ref_images:
+        return web.json_response(
+            {"error": "r2v requires at least one reference image"}, status=400
+        )
 
     task = VideoTask(
         task_id=task_id,
@@ -80,6 +84,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         length=length,
         seed=req.seed,
         first_frame=first_frame,
+        ref_images=req.ref_images,
         created_at=time.time(),
     )
     get_video_manager().create(task)
@@ -101,6 +106,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         "duration": req.duration,
         "length": length,
         "first_frame": first_frame,
+        "ref_images": req.ref_images,
     })
 
 

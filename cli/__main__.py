@@ -38,8 +38,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("generate", help="generate a video")
     p.add_argument("prompt", help="text prompt")
-    p.add_argument("--image", help="input reference image for I2V")
-    p.add_argument("--model", help="model id (minimax-h3-t2v / minimax-h3-i2v)")
+    p.add_argument("--image", action="append", default=None,
+                   help="reference image for I2V/R2V (repeatable for R2V)")
+    p.add_argument("--model", help="model id (minimax-h3-t2v / minimax-h3-i2v / minimax-h3-r2v)")
     p.add_argument("--width", type=int, help="frame width (default 1344)")
     p.add_argument("--height", type=int, help="frame height (default 768)")
     p.add_argument("--seconds", type=float, help="video length in seconds")
