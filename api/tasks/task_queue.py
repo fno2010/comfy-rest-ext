@@ -71,6 +71,10 @@ class TaskQueue:
         self._cancellations[task_id] = asyncio.Event()
 
         async def run():
+            if self._cancellations[task_id].is_set():
+                info.status = TaskStatus.CANCELLED
+                info.completed_at = datetime.now().timestamp()
+                return
             info.status = TaskStatus.RUNNING
             info.started_at = datetime.now().timestamp()
             try:
@@ -114,7 +118,12 @@ class TaskQueue:
             cancel_event.set()
 
         if not task.done():
-            task.cancel()
+            if not task.cancelled():
+                task.cancel()
+            info = self._infos.get(task_id)
+            if info and info.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                info.status = TaskStatus.CANCELLED
+                info.completed_at = datetime.now().timestamp()
             logger.info(f"Cancelled task {task_id}")
             return True
         return False

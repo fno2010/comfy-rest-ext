@@ -43,28 +43,38 @@ class TestTaskQueue:
     @pytest.mark.asyncio
     async def test_task_cancellation(self, task_queue):
         async def long_coro():
-            while True:
-                await asyncio.sleep(1)
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                raise
 
         task_id = task_queue.create_task(long_coro(), name="long-task")
         task_queue.cancel(task_id)
 
-        # Give it time to cancel
-        await asyncio.sleep(0.01)
+        # Give the running coroutine time to observe the cancellation
+        for _ in range(20):
+            info = task_queue.get_info(task_id)
+            if info.status == TaskStatus.CANCELLED:
+                return
+            await asyncio.sleep(0.05)
 
         info = task_queue.get_info(task_id)
         assert info.status == TaskStatus.CANCELLED
 
-    def test_get_info(self, task_queue):
+    @pytest.mark.asyncio
+    async def test_get_info(self, task_queue):
         async def dummy():
             pass
 
         task_id = task_queue.create_task(dummy(), name="test")
+        await asyncio.sleep(0.01)
         info = task_queue.get_info(task_id)
         assert info is not None
         assert info.task_id == task_id
 
-    def test_list_tasks(self, task_queue):
+    @pytest.mark.asyncio
+    async def test_list_tasks(self, task_queue):
         async def dummy1():
             pass
 

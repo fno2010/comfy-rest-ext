@@ -9,8 +9,14 @@ import logging
 logger = logging.getLogger("comfy-rest-ext")
 
 # Import route registration at module load time
-from .api import routes  # noqa: F401
-from .api.schemas import requests  # noqa: F401
+try:
+    from .api import routes  # noqa: F401
+    from .api.schemas import requests  # noqa: F401
+except ImportError:
+    # Outside a package context (e.g. pytest with rootdir at the project
+    # root, which triggers this file as an anonymous package init). Route
+    # registration is irrelevant in that case.
+    pass
 
 
 async def comfy_entrypoint():

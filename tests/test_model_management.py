@@ -4,9 +4,11 @@ Tests for model management functionality.
 
 import os
 import pytest
-from api.models.management import (
+from api.tasks.download_task import (
     check_civitai_url,
     check_huggingface_url,
+)
+from api.models.management import (
     parse_safetensors_header,
     get_file_hash,
 )
