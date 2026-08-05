@@ -112,7 +112,7 @@ def cmd_list(client: ComfyRestClient, args: Any) -> int:
 
 
 def cmd_wait(client: ComfyRestClient, args: Any) -> int:
-    deadline = time.time() + (args.timeout or 600)
+    deadline = time.time() + args.timeout if args.timeout else None
     while True:
         try:
             task = client.get_video(args.video_id)
@@ -131,7 +131,7 @@ def cmd_wait(client: ComfyRestClient, args: Any) -> int:
             if task.get("view_url"):
                 print(f"view_url:  {task['view_url']}")
             return exit_code
-        if time.time() >= deadline:
+        if deadline is not None and time.time() >= deadline:
             return _emit_error("timed out waiting for video task")
         time.sleep(POLL_INTERVAL)
 

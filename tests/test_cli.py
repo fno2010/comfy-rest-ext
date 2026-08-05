@@ -146,6 +146,42 @@ def test_cmd_wait_failed(monkeypatch, capsys):
     assert commands.cmd_wait(client, args) == 1
 
 
+def test_cmd_wait_no_timeout_waits_until_done(monkeypatch, capsys):
+    client = FakeClient()
+    client.videos["video_1"]["status"] = "in_progress"
+    monkeypatch.setattr(commands, "POLL_INTERVAL", 0.0)
+
+    poll_count = {"n": 0}
+    original_get = client.get_video
+
+    def get_video_transitioning(video_id):
+        poll_count["n"] += 1
+        if poll_count["n"] >= 2:
+            client.videos[video_id]["status"] = "completed"
+        return original_get(video_id)
+
+    monkeypatch.setattr(client, "get_video", get_video_transitioning)
+    args = Args(json=True, video_id="video_1", timeout=None, quiet=True)
+    assert commands.cmd_wait(client, args) == 0
+    task = json.loads(capsys.readouterr().out)
+    assert task["status"] == "completed"
+
+
+def test_cmd_wait_timeout_elapsed(monkeypatch, capsys):
+    client = FakeClient()
+    client.videos["video_1"]["status"] = "in_progress"
+    monkeypatch.setattr(commands, "POLL_INTERVAL", 0.0)
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(commands.time, "time", lambda: clock["t"])
+    monkeypatch.setattr(
+        commands.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + 1.0)
+    )
+    args = Args(json=True, video_id="video_1", timeout=5, quiet=True)
+    assert commands.cmd_wait(client, args) == 1
+    assert "timed out" in capsys.readouterr().err
+
+
 def test_cmd_download_json(capsys):
     client = FakeClient()
     args = Args(json=True, url="https://civitai.com/models/123",

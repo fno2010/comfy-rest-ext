@@ -55,7 +55,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("wait", help="wait for a video task to finish")
     p.add_argument("video_id", help="video task id")
-    p.add_argument("--timeout", type=float, help="max seconds to wait")
+    p.add_argument("--timeout", type=float,
+                   help="max seconds to wait (default: wait indefinitely)")
     p.add_argument("--quiet", action="store_true",
                    help="suppress progress lines")
     p.set_defaults(func=commands.cmd_wait)
