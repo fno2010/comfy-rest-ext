@@ -39,7 +39,7 @@ class FakeClient:
         self.created.append(task)
         return task
 
-    def create_video_multipart(self, payload, files):
+    def create_video_multipart(self, payload, file_field, filename, file_bytes):
         return self.create_video(payload)
 
     def get_video(self, video_id):

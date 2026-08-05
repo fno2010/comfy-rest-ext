@@ -34,14 +34,13 @@ curl http://127.0.0.1:8188/v2/extension/health
 
 ## CLI 工具
 
-`comfy-rest-ext-cli` 是面向 OpenAI 兼容视频 API 的命令行客户端，零额外依赖（基于 httpx）。
+`comfy-rest-ext-cli` 是面向 OpenAI 兼容视频 API 的命令行客户端。
 
-### 安装
+**零外部依赖**——仅使用 Python 标准库（`urllib.request`），任何 Python 3.10+ 环境无需安装任何第三方包即可运行：
 
 ```bash
-pip install -e .
-# 或直接运行（不安装）：
-python -m cli --help
+# 直接运行（无需安装）
+python3 -m cli --help
 ```
 
 ### 用法

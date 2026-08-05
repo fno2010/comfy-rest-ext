@@ -57,9 +57,13 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
     try:
         if args.image:
             with open(args.image, "rb") as f:
-                data = f.read()
-            files = {"first_frame": (args.image, data, "image/png")}
-            task = client.create_video_multipart(payload, files)
+                file_bytes = f.read()
+            task = client.create_video_multipart(
+                payload,
+                file_field="first_frame",
+                filename=args.image,
+                file_bytes=file_bytes,
+            )
         else:
             task = client.create_video(payload)
     except FileNotFoundError:
