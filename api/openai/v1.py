@@ -34,20 +34,57 @@ logger = logging.getLogger("comfy-rest-ext.openai")
 
 routes = PromptServer.instance.routes
 
+CANONICAL_MODEL_ID = "minimax-h3"
 MODEL_IDS = [
+    CANONICAL_MODEL_ID,
     "minimax-h3-t2v",
     "minimax-h3-i2v",
+    "minimax-h3-r2v",
 ]
-SUPPORTED_TASKS = ("t2va", "fl2va")
+# Legacy aliases -> task_type; the canonical id maps to None (infer).
+MODEL_TASK_ALIASES = {
+    "minimax-h3-t2v": "t2va",
+    "minimax-h3-i2v": "fl2va",
+    "minimax-h3-r2v": "r2v",
+}
+SUPPORTED_TASKS = ("t2va", "fl2va", "r2v")
 
 
 def _model_card(model_id: str, created: int) -> dict:
+    task_type = MODEL_TASK_ALIASES.get(model_id)
     return {
         "id": model_id,
         "object": "model",
         "created": created,
         "owned_by": "comfy-rest-ext",
+        "task_type": task_type or "auto",
     }
+
+
+def _task_type_from_model(model: Optional[str]) -> Optional[str]:
+    """Map a requested model id to a task type.
+
+    Returns the task type for legacy aliases (minimax-h3-i2v -> fl2va),
+    None for the canonical id or no model (caller infers from request
+    content), and raises KeyError for unknown ids (-> 400 mismatch).
+    """
+    if not model:
+        return None
+    if model == CANONICAL_MODEL_ID:
+        return None
+    if model in MODEL_TASK_ALIASES:
+        return MODEL_TASK_ALIASES[model]
+    raise KeyError(model)
+
+
+def _infer_task_type(fields: dict) -> str:
+    """Infer task type from request content (image presence/count)."""
+    images = fields.get("_ref_images_data") or fields.get("ref_images") or []
+    if len(images) > 1:
+        return "r2v"
+    if images or fields.get("_first_frame_data") or fields.get("input_reference"):
+        return "fl2va"
+    return "t2va"
 
 
 def _video_response(task: VideoTask) -> dict:
@@ -55,6 +92,9 @@ def _video_response(task: VideoTask) -> dict:
     status = task.status
     if status == "running":
         status = "in_progress"
+    inference_time_s = None
+    if task.completed_at and task.created_at:
+        inference_time_s = round(task.completed_at - task.created_at, 2)
     return {
         "id": task.task_id,
         "object": "video",
@@ -69,6 +109,7 @@ def _video_response(task: VideoTask) -> dict:
         "media_type": "video/mp4",
         "file_name": task.output_path,
         "view_url": comfyui_view_url(task.output_path),
+        "inference_time_s": inference_time_s,
         "error": (
             {"code": "generation_error", "message": task.error}
             if task.error else None
@@ -77,13 +118,7 @@ def _video_response(task: VideoTask) -> dict:
 
 
 def _model_for_task(task_type: str) -> str:
-    return "minimax-h3-i2v" if task_type == "fl2va" else "minimax-h3-t2v"
-
-
-def _task_type_from_model(model: Optional[str]) -> str:
-    if model and model.endswith("-i2v"):
-        return "fl2va"
-    return "t2va"
+    return CANONICAL_MODEL_ID
 
 
 @routes.get("/v1/models")
@@ -120,9 +155,23 @@ async def create_video(request: web.Request) -> web.Response:
         return web.json_response({"error": "prompt is required"}, status=400)
 
     model = fields.get("model")
-    task_type = _task_type_from_model(model)
+    try:
+        model_task_type = _task_type_from_model(model)
+    except KeyError:
+        return web.json_response(
+            {"error": f"Model mismatch: '{model}' is not served. "
+                      f"Use '{CANONICAL_MODEL_ID}'."},
+            status=400,
+        )
+
     if fields.get("task"):
         task_type = fields["task"]
+    elif model_task_type is not None:
+        task_type = model_task_type
+    else:
+        task_type = _infer_task_type(fields)
+    if task_type not in SUPPORTED_TASKS:
+        return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
     width = _parse_int(fields.get("width"), 1344)
     height = _parse_int(fields.get("height"), 768)
@@ -130,14 +179,29 @@ async def create_video(request: web.Request) -> web.Response:
     seed = _parse_int(fields.get("seed"), 0)
 
     first_frame = None
-    if fields.get("_first_frame_data"):
-        first_frame = await _upload_first_frame(fields["_first_frame_data"])
-    elif fields.get("input_reference"):
-        first_frame = await _upload_input_reference(fields["input_reference"])
-    if task_type == "fl2va" and first_frame is None:
-        return web.json_response(
-            {"error": "fl2va requires input_reference image"}, status=400
-        )
+    ref_images = None
+    if task_type == "r2v":
+        if fields.get("_ref_images_data"):
+            ref_images = [
+                await _save_upload(data, "ref_image") for data in fields["_ref_images_data"]
+            ]
+        elif fields.get("ref_images"):
+            ref_images = [
+                await _resolve_ref_image(ref) for ref in fields["ref_images"]
+            ]
+        if not ref_images:
+            return web.json_response(
+                {"error": "r2v requires at least one reference image"}, status=400
+            )
+    else:
+        if fields.get("_first_frame_data"):
+            first_frame = await _upload_first_frame(fields["_first_frame_data"])
+        elif fields.get("input_reference"):
+            first_frame = await _upload_input_reference(fields["input_reference"])
+        if task_type == "fl2va" and first_frame is None:
+            return web.json_response(
+                {"error": "fl2va requires input_reference image"}, status=400
+            )
 
     task_id = f"video_{uuid.uuid4().hex}"
     length = frames_for_seconds(seconds)
@@ -152,6 +216,7 @@ async def create_video(request: web.Request) -> web.Response:
         length=length,
         seed=seed,
         first_frame=first_frame,
+        ref_images=ref_images,
         created_at=time.time(),
     )
     get_video_manager().create(task)
@@ -172,21 +237,30 @@ async def _parse_json(request: web.Request):
 
 
 async def _parse_multipart(request: web.Request):
-    """Parse a multipart/form-data video request (OpenAI SDK shape)."""
+    """Parse a multipart/form-data video request (OpenAI SDK shape).
+
+    Image parts are collected into `_ref_images_data` (ordered); for
+    backward compatibility the first image is also stored in
+    `_first_frame_data`.
+    """
     reader = MultipartReader.from_response(request)
     fields: dict = {}
-    first_frame_data: Optional[bytes] = None
+    ref_images_data: list = []
     while True:
         part = await reader.next()
         if part is None:
             break
         if part.headers.get("Content-Type", "").startswith(("image/", "video/")):
-            first_frame_data = await part.read()
-            fields["_first_frame_data"] = first_frame_data
+            data = await part.read()
+            ref_images_data.append(data)
+            if not fields.get("_first_frame_data"):
+                fields["_first_frame_data"] = data
         else:
             name = part.name
             value = (await part.read()).decode("utf-8", errors="replace")
             fields[name] = value
+    if ref_images_data:
+        fields["_ref_images_data"] = ref_images_data
     return fields
 
 
@@ -233,6 +307,19 @@ async def _save_upload(data: bytes, prefix: str) -> Optional[str]:
     with open(os.path.join(input_dir, filename), "wb") as f:
         f.write(data)
     return filename
+
+
+async def _resolve_ref_image(ref: str) -> Optional[str]:
+    """Resolve a JSON r2v reference to a ComfyUI input filename.
+
+    Accepts an existing input filename, a data:image/... URL, or an
+    http(s) URL (downloaded and saved to the input dir).
+    """
+    if ref.startswith("data:image/"):
+        return await _upload_input_reference(ref)
+    if ref.startswith("http://") or ref.startswith("https://"):
+        return await _upload_input_reference(ref)
+    return ref
 
 
 def _get_task_or_restore(video_id: str) -> Optional[VideoTask]:

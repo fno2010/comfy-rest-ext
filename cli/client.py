@@ -103,11 +103,9 @@ class ComfyRestClient:
     def create_video_multipart(
         self,
         payload: Dict[str, Any],
-        file_field: str,
-        filename: str,
-        file_bytes: bytes,
+        files: list,
     ) -> Dict[str, Any]:
-        boundary = f"----comfyrestext{os.getpid()}{id(file_bytes):x}"
+        boundary = f"----comfyrestext{os.getpid()}{id(payload):x}"
         parts: list = []
         for key, value in payload.items():
             parts.append(
@@ -117,15 +115,16 @@ class ComfyRestClient:
                     f"{value}\r\n"
                 ).encode("utf-8")
             )
-        parts.append(
-            (
-                f"--{boundary}\r\n"
-                f'Content-Disposition: form-data; name="{file_field}"; '
-                f'filename="{filename}"\r\n'
-                f"Content-Type: {_guess_image_type(filename)}\r\n\r\n"
-            ).encode("utf-8")
-        )
-        parts.append(file_bytes)
+        for file_field, filename, file_bytes in files:
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="{file_field}"; '
+                    f'filename="{filename}"\r\n'
+                    f"Content-Type: {_guess_image_type(filename)}\r\n\r\n"
+                ).encode("utf-8")
+            )
+            parts.append(file_bytes)
         parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
         body = b"".join(parts)
         return self._request(

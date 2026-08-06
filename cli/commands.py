@@ -56,18 +56,18 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
     payload = _build_video_payload(args)
     try:
         if args.image:
-            with open(args.image, "rb") as f:
-                file_bytes = f.read()
-            task = client.create_video_multipart(
-                payload,
-                file_field="first_frame",
-                filename=args.image,
-                file_bytes=file_bytes,
-            )
+            images = args.image if isinstance(args.image, list) else [args.image]
+            files = []
+            for img in images:
+                with open(img, "rb") as f:
+                    files.append(("input_reference", img, f.read()))
+            task = client.create_video_multipart(payload, files)
         else:
             task = client.create_video(payload)
-    except FileNotFoundError:
-        return _emit_error(f"image file not found: {args.image}")
+    except OSError as e:
+        if isinstance(e, FileNotFoundError):
+            return _emit_error(f"image file not found: {e.filename}")
+        return _emit_error(f"image file error: {e}")
     except ApiError as e:
         return _emit_error(str(e))
     if args.json:

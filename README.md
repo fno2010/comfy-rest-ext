@@ -4,7 +4,7 @@ ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 R
 
 ## 功能
 
-- **OpenAI 兼容视频生成 API** — T2V / I2V 生成、任务持久化、历史查询（MiniMax-H3）
+- **OpenAI 兼容视频生成 API** — T2V / I2V / R2V 生成、任务持久化、历史查询（MiniMax-H3）
 - **模型下载** — 从 CivitAI、HuggingFace、直链下载模型到本地
 - **模型管理** — 递归列出模型、获取元数据、删除模型
 - **工作流依赖安装** — 从 workflow JSON 解析依赖并自动安装
@@ -54,6 +54,15 @@ comfy-rest-ext-cli generate "a cat walking on the moon"
 
 # 生成视频（I2V，指定参考图）
 comfy-rest-ext-cli generate "make it cinematic" --image ref.png
+
+# 生成视频（R2V，多张参考图，prompt 用 <Picture N> 引用）
+# 不传 --model 时自动推断：多图→R2V、单图→I2V、无图→T2V
+comfy-rest-ext-cli generate "Use <Picture 1> as style reference" \
+  --image ref1.png --image ref2.png
+
+# 模型 id（可省略，默认 minimax-h3 自动推断任务类型）
+# 别名 minimax-h3-t2v / minimax-h3-i2v / minimax-h3-r2v 仍兼容
+comfy-rest-ext-cli generate "t2v" --model minimax-h3
 
 # 查询任务状态
 comfy-rest-ext-cli status video_xxxx
