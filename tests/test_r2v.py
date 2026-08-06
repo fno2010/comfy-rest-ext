@@ -13,7 +13,12 @@ sys.modules["server"] = server_mod
 
 import folder_paths  # noqa: E402  (installed by tests/conftest.py)
 
-from api.openai.v1 import _model_for_task, _task_type_from_model  # noqa: E402
+from api.openai.v1 import (  # noqa: E402
+    _model_for_task,
+    _task_type_from_model,
+    _infer_task_type,
+    CANONICAL_MODEL_ID,
+)
 from api.tasks.video_task import (  # noqa: E402
     VideoTask,
     build_h3_workflow,
@@ -89,17 +94,42 @@ def test_build_h3_workflow_r2v_single_reference():
     assert wf[ref_id]["inputs"]["ref_images"] == {"ref_image_0": [load_id, 0]}
 
 
-def test_model_for_task_r2v():
-    assert _model_for_task("r2v") == "minimax-h3-r2v"
-    assert _model_for_task("fl2va") == "minimax-h3-i2v"
-    assert _model_for_task("t2va") == "minimax-h3-t2v"
+def test_model_for_task_returns_canonical():
+    assert _model_for_task("r2v") == CANONICAL_MODEL_ID
+    assert _model_for_task("fl2va") == CANONICAL_MODEL_ID
+    assert _model_for_task("t2va") == CANONICAL_MODEL_ID
 
 
-def test_task_type_from_model_r2v():
+def test_task_type_from_model_aliases():
     assert _task_type_from_model("minimax-h3-r2v") == "r2v"
     assert _task_type_from_model("minimax-h3-i2v") == "fl2va"
     assert _task_type_from_model("minimax-h3-t2v") == "t2va"
-    assert _task_type_from_model(None) == "t2va"
+
+
+def test_task_type_from_model_canonical_and_none():
+    assert _task_type_from_model(CANONICAL_MODEL_ID) is None
+    assert _task_type_from_model(None) is None
+
+
+def test_task_type_from_model_unknown_raises():
+    import pytest
+    with pytest.raises(KeyError):
+        _task_type_from_model("gpt-5")
+
+
+def test_infer_task_type_no_image_is_t2v():
+    assert _infer_task_type({}) == "t2va"
+
+
+def test_infer_task_type_single_image_is_fl2va():
+    assert _infer_task_type({"_ref_images_data": [b"x"]}) == "fl2va"
+    assert _infer_task_type({"_first_frame_data": b"x"}) == "fl2va"
+    assert _infer_task_type({"input_reference": "img.png"}) == "fl2va"
+
+
+def test_infer_task_type_multiple_images_is_r2v():
+    assert _infer_task_type({"_ref_images_data": [b"a", b"b"]}) == "r2v"
+    assert _infer_task_type({"ref_images": ["a.png", "b.png"]}) == "r2v"
 
 
 def test_video_response_includes_inference_time_s():
@@ -115,7 +145,7 @@ def test_video_response_includes_inference_time_s():
     from api.openai.v1 import _video_response
     resp = _video_response(task)
     assert resp["inference_time_s"] == 30.0
-    assert resp["model"] == "minimax-h3-r2v"
+    assert resp["model"] == CANONICAL_MODEL_ID
 
 
 def test_video_response_inference_time_null_when_not_done():

@@ -812,13 +812,18 @@ ws.addEventListener('message', (event) => {
 **JSON 请求体（OpenAI 兼容字段 + 扩展）：**
 ```json
 {
-  "model": "minimax-h3-t2v",
+  "model": "minimax-h3",
   "prompt": "A red cube rolling across a white floor",
   "seconds": "4",
   "size": "1344x768",
   "seed": 42
 }
 ```
+
+**model 字段语义：**
+- 默认/`minimax-h3`：任务类型**从请求内容自动推断**（多图→R2V、单图→I2V、无图→T2V）
+- 旧别名 `minimax-h3-t2v` / `minimax-h3-i2v` / `minimax-h3-r2v`：显式指定任务类型（向后兼容）
+- 未知 model：返回 400 `Model mismatch`（对齐 vllm-omni）
 
 **multipart 字段（I2V）：**
 ```bash

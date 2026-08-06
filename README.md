@@ -56,8 +56,13 @@ comfy-rest-ext-cli generate "a cat walking on the moon"
 comfy-rest-ext-cli generate "make it cinematic" --image ref.png
 
 # 生成视频（R2V，多张参考图，prompt 用 <Picture N> 引用）
+# 不传 --model 时自动推断：多图→R2V、单图→I2V、无图→T2V
 comfy-rest-ext-cli generate "Use <Picture 1> as style reference" \
-  --image ref1.png --image ref2.png --model minimax-h3-r2v
+  --image ref1.png --image ref2.png
+
+# 模型 id（可省略，默认 minimax-h3 自动推断任务类型）
+# 别名 minimax-h3-t2v / minimax-h3-i2v / minimax-h3-r2v 仍兼容
+comfy-rest-ext-cli generate "t2v" --model minimax-h3
 
 # 查询任务状态
 comfy-rest-ext-cli status video_xxxx
