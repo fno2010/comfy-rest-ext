@@ -197,3 +197,43 @@ def test_cmd_download_status_text(capsys):
     assert commands.cmd_download_status(client, args) == 0
     out = capsys.readouterr().out
     assert "completed" in out
+
+
+def test_multipart_body_has_crlf_between_file_parts():
+    import cli.client as client_mod
+    from cli.client import ComfyRestClient
+
+    client = ComfyRestClient(base_url="http://127.0.0.1:1")
+
+    boundary = "----testboundary"
+    payload = {"prompt": "x", "model": "minimax-h3"}
+    files = [
+        ("input_reference", "a.png", b"AAA"),
+        ("input_reference", "b.png", b"BBB"),
+    ]
+
+    parts = []
+    for key, value in payload.items():
+        parts.append(
+            (f"--{boundary}\r\n"
+             f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
+             f"{value}\r\n").encode("utf-8")
+        )
+    for file_field, filename, file_bytes in files:
+        parts.append(
+            (f"--{boundary}\r\n"
+             f'Content-Disposition: form-data; name="{file_field}"; '
+             f'filename="{filename}"\r\n'
+             f"Content-Type: {client_mod._guess_image_type(filename)}\r\n\r\n"
+             ).encode("utf-8")
+        )
+        parts.append(file_bytes)
+        parts.append(b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(parts)
+
+    # Each file's data must be followed by \r\n before the next boundary,
+    # otherwise the server's multipart parser merges file data with boundary.
+    assert body.count(b"AAA\r\n------") == 1
+    assert body.count(b"BBB\r\n------") == 1
+    assert body.endswith(b"--\r\n")
