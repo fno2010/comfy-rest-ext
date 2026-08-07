@@ -196,3 +196,53 @@ def test_build_h3_workflow_no_speed_nodes():
     assert "TESpeedMiniMaxH3" not in [n["class_type"] for n in wf.values()]
     assert "SolAttnMiniMaxH3Patcher" not in [n["class_type"] for n in wf.values()]
     assert wf["5"]["inputs"]["model"] == ["1", 0]
+
+
+def test_parse_content_items_mixed():
+    from api.openai.v1 import _parse_content_items
+    body = {
+        "input": [
+            {"type": "input_text", "text": "A boy dancing"},
+            {"type": "input_text", "text": "under moonlight"},
+            {"type": "input_image", "image_url": {"url": "https://a/img1.png"},
+             "role": "reference_image"},
+            {"type": "input_image", "image_url": "https://a/img2.png",
+             "role": "reference_image"},
+        ]
+    }
+    r = _parse_content_items(body)
+    assert r["prompt"] == "A boy dancing\nunder moonlight"
+    assert r["ref_image_urls"] == ["https://a/img1.png", "https://a/img2.png"]
+    assert r["first_frame_url"] is None
+
+
+def test_parse_content_items_roles():
+    from api.openai.v1 import _parse_content_items
+    body = {
+        "content": [
+            {"type": "text", "text": "continue the scene"},
+            {"type": "image_url", "image_url": {"url": "ff.png"}, "role": "first_frame"},
+            {"type": "image_url", "image_url": {"url": "ll.png"}, "role": "last_frame"},
+        ]
+    }
+    r = _parse_content_items(body)
+    assert r["prompt"] == "continue the scene"
+    assert r["first_frame_url"] == "ff.png"
+    assert r["last_frame_url"] == "ll.png"
+    assert r["ref_image_urls"] == []
+
+
+def test_parse_content_items_default_role_is_reference():
+    from api.openai.v1 import _parse_content_items
+    body = {"input": [
+        {"type": "input_image", "image_url": "r1.png"},
+        {"type": "input_image", "image_url": "r2.png"},
+    ]}
+    r = _parse_content_items(body)
+    assert r["ref_image_urls"] == ["r1.png", "r2.png"]
+
+
+def test_parse_content_items_empty():
+    from api.openai.v1 import _parse_content_items
+    assert _parse_content_items({})["prompt"] is None
+    assert _parse_content_items({"input": "not-a-list"})["ref_image_urls"] == []

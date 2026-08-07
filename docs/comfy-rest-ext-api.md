@@ -825,6 +825,23 @@ ws.addEventListener('message', (event) => {
 - 旧别名 `minimax-h3-t2v` / `minimax-h3-i2v` / `minimax-h3-r2v`：显式指定任务类型（向后兼容）
 - 未知 model：返回 400 `Model mismatch`（对齐 vllm-omni）
 
+**content[] / input[] 数组格式（对齐 OpenAI Responses / MiniMax V2）：**
+```json
+{
+  "model": "minimax-h3",
+  "input": [
+    {"type": "input_text", "text": "Use <Picture 1> as character reference"},
+    {"type": "input_image", "image_url": "https://.../ref1.png", "role": "reference_image"},
+    {"type": "input_image", "image_url": "https://.../ref2.png", "role": "reference_image"}
+  ],
+  "seconds": 5
+}
+```
+- `type: "input_text"`（或 `"text"`）：贡献 prompt 文本，多个会换行拼接
+- `type: "input_image"`（或 `"image_url"`）：`image_url` 可为 URL / data URL / ComfyUI input 目录文件名
+- `role`：`reference_image`（默认，最多 9 张 → R2V）、`first_frame` / `last_frame`（→ I2V 首尾帧）
+- `input` 和 `content` 字段名等价
+
 **multipart 字段（I2V）：**
 ```bash
 curl -X POST http://host:8188/v1/videos \
