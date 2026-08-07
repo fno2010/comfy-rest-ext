@@ -866,6 +866,20 @@ R2V 使用 `ref2va` checkpoint，prompt 中通过 `<Picture 1>`、`<Picture 2>` 
 ```
 `inference_time_s`：任务完成后为 `completed_at - created_at`（秒），否则为 `null`。
 
+**加速模式（speed 字段，可选）：**
+- `auto`（默认）：跟随服务器环境变量（`H3_TE_SPEED` / `H3_SOL_STACK`）
+- `none`：关闭加速
+- `te-speed`：块级缓存加速（需安装 TE-Speed-MiniMaxH3 节点 + 核心补丁），实测 ~1.6×
+- `sol-stack`：Sol-Attn + FirstBlockCache（需安装 ComfyUI_sol-attn_Blackwell），实测 ~1.35×
+
+```bash
+curl -X POST http://host:8188/v1/videos \
+  -F "model=minimax-h3" \
+  -F "prompt=a cube rolling" \
+  -F "seconds=3" \
+  -F "speed=te-speed"
+```
+
 ### GET `/v1/videos/{video_id}` — 轮询任务状态
 
 `status`: `queued` | `in_progress` | `completed` | `failed`；`progress`: 0-100

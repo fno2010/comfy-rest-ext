@@ -107,3 +107,4 @@ class VideoGenerateRequest(BaseModel):
     seed: int = 0
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
+    speed: str = "auto"

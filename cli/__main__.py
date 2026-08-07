@@ -45,6 +45,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--height", type=int, help="frame height (default 768)")
     p.add_argument("--seconds", type=float, help="video length in seconds")
     p.add_argument("--seed", type=int, help="generation seed")
+    p.add_argument("--speed", choices=["auto", "none", "te-speed", "sol-stack"],
+                   help="acceleration mode (default auto)")
     p.set_defaults(func=commands.cmd_generate)
 
     p = sub.add_parser("status", help="show a video task's status")

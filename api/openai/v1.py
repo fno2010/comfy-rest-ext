@@ -173,6 +173,13 @@ async def create_video(request: web.Request) -> web.Response:
     if task_type not in SUPPORTED_TASKS:
         return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
+    speed = fields.get("speed", "auto")
+    if speed not in ("auto", "none", "te-speed", "sol-stack"):
+        return web.json_response(
+            {"error": f"unsupported speed: {speed}. Use auto|none|te-speed|sol-stack"},
+            status=400,
+        )
+
     width = _parse_int(fields.get("width"), 1344)
     height = _parse_int(fields.get("height"), 768)
     seconds = _parse_float(fields.get("seconds"), 5.0)
@@ -217,6 +224,7 @@ async def create_video(request: web.Request) -> web.Response:
         seed=seed,
         first_frame=first_frame,
         ref_images=ref_images,
+        speed=speed,
         created_at=time.time(),
     )
     get_video_manager().create(task)

@@ -167,3 +167,32 @@ def test_frames_for_seconds_snaps_to_grid():
     assert frames_for_seconds(5.0) == 124
     assert frames_for_seconds(1.0) == 39
     assert frames_for_seconds(15.0) == 362
+
+
+def test_build_h3_workflow_te_speed_node():
+    wf = build_h3_workflow(
+        prompt="p", width=1344, height=768, length=101, seed=0, te_speed=True
+    )
+    assert wf["1b"]["class_type"] == "TESpeedMiniMaxH3"
+    assert wf["1b"]["inputs"]["cache_depth"] == 0.75
+    # SigmaShift feeds from the TE-Speed output
+    assert wf["5"]["inputs"]["model"] == ["1b", 0]
+
+
+def test_build_h3_workflow_sol_stack_nodes():
+    wf = build_h3_workflow(
+        prompt="p", width=1344, height=768, length=101, seed=0, sol_stack=True
+    )
+    assert wf["1b"]["class_type"] == "SolAttnMiniMaxH3Patcher"
+    assert wf["1c"]["class_type"] == "H3FirstBlockCache"
+    assert wf["1c"]["inputs"]["model"] == ["1b", 0]
+    assert wf["5"]["inputs"]["model"] == ["1c", 0]
+
+
+def test_build_h3_workflow_no_speed_nodes():
+    wf = build_h3_workflow(
+        prompt="p", width=1344, height=768, length=101, seed=0
+    )
+    assert "TESpeedMiniMaxH3" not in [n["class_type"] for n in wf.values()]
+    assert "SolAttnMiniMaxH3Patcher" not in [n["class_type"] for n in wf.values()]
+    assert wf["5"]["inputs"]["model"] == ["1", 0]
