@@ -89,7 +89,7 @@ def test_cmd_generate_json(capsys):
     assert commands.cmd_generate(client, args) == 0
     task = json.loads(capsys.readouterr().out)
     assert task["status"] == "queued"
-    assert task["prompt"] == "a dog"
+    assert task["input"] == [{"type": "input_text", "text": "a dog"}]
     assert client.created
 
 
@@ -237,3 +237,42 @@ def test_multipart_body_has_crlf_between_file_parts():
     assert body.count(b"AAA\r\n------") == 1
     assert body.count(b"BBB\r\n------") == 1
     assert body.endswith(b"--\r\n")
+
+
+def test_build_video_request_single_image_first_frame():
+    import os, tempfile
+    from cli import commands
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
+        path = f.name
+    try:
+        args = Args(prompt="p", image=path, model=None, width=None,
+                    height=None, seconds=None, seed=None, speed=None)
+        req = commands._build_video_request(args)
+        assert req["input"][0] == {"type": "input_text", "text": "p"}
+        img = req["input"][1]
+        assert img["type"] == "input_image"
+        assert img["role"] == "first_frame"
+        assert img["image_url"].startswith("data:image/png;base64,")
+    finally:
+        os.unlink(path)
+
+
+def test_build_video_request_multi_image_reference():
+    import os, tempfile
+    from cli import commands
+    paths = []
+    try:
+        for _ in range(2):
+            f = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            f.write(b"\x89PNG\r\n\x1a\n" + b"y" * 64)
+            f.close()
+            paths.append(f.name)
+        args = Args(prompt="p", image=paths, model=None, width=None,
+                    height=None, seconds=None, seed=None, speed=None)
+        req = commands._build_video_request(args)
+        roles = [i["role"] for i in req["input"][1:]]
+        assert roles == ["reference_image", "reference_image"]
+    finally:
+        for p in paths:
+            os.unlink(p)
