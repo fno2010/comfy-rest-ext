@@ -49,6 +49,8 @@ def _build_video_payload(args: Any) -> Dict[str, Any]:
         payload["seconds"] = args.seconds
     if args.seed is not None:
         payload["seed"] = args.seed
+    if getattr(args, "speed", None):
+        payload["speed"] = args.speed
     return payload
 
 

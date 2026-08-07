@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 import uuid
@@ -34,6 +35,7 @@ class VideoTask:
     seed: int
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
+    speed: Optional[str] = None
     prompt_id: Optional[str] = None
     progress: float = 0.0
     output_path: Optional[str] = None
@@ -72,6 +74,11 @@ def build_h3_workflow(
     video_vae: str = "minimax_h3_video_vae_fp16.safetensors",
     audio_vae: str = "minimax_h3_audio_vae_fp32.safetensors",
     ref2va_model: str = "minimax_h3_ref2va_pruned_nvfp4.safetensors",
+    sampler_name: str = "euler",
+    scheduler: str = "simple",
+    steps: int = 20,
+    te_speed: bool = False,
+    sol_stack: bool = False,
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V.
 
@@ -104,8 +111,36 @@ def build_h3_workflow(
     add("3", "VAELoader", {"vae_name": video_vae})
     add("4", "VAELoader", {"vae_name": audio_vae})
 
+    model_out = ["1", 0]
+    if te_speed:
+        add("1b", "TESpeedMiniMaxH3", {
+            "model": ["1", 0],
+            "processing_control_value": 0.12,
+            "processing_percent_1": 0.1,
+            "processing_percent_2": 0.9,
+            "mcs": 2,
+            "device": "auto",
+            "cache_depth": 0.75,
+        })
+        model_out = ["1b", 0]
+    elif sol_stack:
+        add("1b", "SolAttnMiniMaxH3Patcher", {
+            "model": ["1", 0],
+            "enabled": True,
+            "tau": 1.0,
+            "thresh_type": "diag",
+        })
+        add("1c", "H3FirstBlockCache", {
+            "model": ["1b", 0],
+            "threshold": 0.08,
+            "start_step": 2,
+            "end_dense_steps": 2,
+            "max_consecutive_skips": 2,
+        })
+        model_out = ["1c", 0]
+
     add("5", "MiniMaxH3SigmaShift", {
-        "model": ["1", 0],
+        "model": model_out,
         "shift_video": 12.0,
         "shift_audio": 3.0,
     })
@@ -151,10 +186,10 @@ def build_h3_workflow(
     add(sampler_id, "KSampler", {
         "model": ["5", 0],
         "seed": seed,
-        "steps": 20,
+        "steps": steps,
         "cfg": 1.0,
-        "sampler_name": "euler",
-        "scheduler": "simple",
+        "sampler_name": sampler_name,
+        "scheduler": scheduler,
         "positive": [cond_node, 0],
         "negative": [cond_node, 0],
         "latent_image": [cond_node, 1],
@@ -260,6 +295,7 @@ def _task_to_record(task: VideoTask) -> dict:
         "seed": task.seed,
         "first_frame": task.first_frame,
         "ref_images": task.ref_images,
+        "speed": task.speed,
         "prompt_id": task.prompt_id,
         "progress": task.progress,
         "output_path": task.output_path,
@@ -282,6 +318,7 @@ def _record_to_task(record: dict) -> VideoTask:
         seed=record.get("seed", 0),
         first_frame=record.get("first_frame"),
         ref_images=record.get("ref_images"),
+        speed=record.get("speed"),
         prompt_id=record.get("prompt_id"),
         progress=record.get("progress", 0.0),
         output_path=record.get("output_path"),
@@ -376,6 +413,17 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         record.pop("task_id", None)
         manager.update(task.task_id, **record)
 
+    speed = (task.speed or "auto").lower()
+    if speed == "te-speed":
+        te_speed, sol_stack = True, False
+    elif speed == "sol-stack":
+        te_speed, sol_stack = False, True
+    elif speed == "none":
+        te_speed, sol_stack = False, False
+    else:
+        te_speed = os.environ.get("H3_TE_SPEED", "0") == "1"
+        sol_stack = os.environ.get("H3_SOL_STACK", "0") == "1"
+
     workflow = build_h3_workflow(
         prompt=task.prompt,
         width=task.width,
@@ -384,6 +432,11 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         seed=task.seed,
         first_frame_path=task.first_frame,
         ref_images=task.ref_images,
+        sampler_name=os.environ.get("H3_SAMPLER", "euler"),
+        scheduler=os.environ.get("H3_SCHEDULER", "simple"),
+        steps=int(os.environ.get("H3_STEPS", "20")),
+        te_speed=te_speed,
+        sol_stack=sol_stack,
     )
 
     prompt_id = str(uuid.uuid4())

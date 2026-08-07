@@ -64,6 +64,12 @@ comfy-rest-ext-cli generate "Use <Picture 1> as style reference" \
 # 别名 minimax-h3-t2v / minimax-h3-i2v / minimax-h3-r2v 仍兼容
 comfy-rest-ext-cli generate "t2v" --model minimax-h3
 
+# 加速模式（可选，默认 auto 跟随服务器配置）
+#   none      关闭加速（最稳）
+#   te-speed  块级缓存，实测 ~1.6×（TE-Speed-MiniMaxH3 节点）
+#   sol-stack Sol-Attn + FirstBlockCache，实测 ~1.35×
+comfy-rest-ext-cli generate "fast" --seconds 3 --speed te-speed
+
 # 查询任务状态
 comfy-rest-ext-cli status video_xxxx
 

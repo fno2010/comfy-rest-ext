@@ -85,6 +85,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         seed=req.seed,
         first_frame=first_frame,
         ref_images=req.ref_images,
+        speed=req.speed,
         created_at=time.time(),
     )
     get_video_manager().create(task)
@@ -107,6 +108,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         "length": length,
         "first_frame": first_frame,
         "ref_images": req.ref_images,
+        "speed": req.speed,
     })
 
 
