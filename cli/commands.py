@@ -85,7 +85,11 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
     if isinstance(images, str):
         images = [images]
     if images:
-        role = "reference_image" if len(images) > 1 else "first_frame"
+        model = getattr(args, "model", None)
+        if len(images) > 1 or (model and model.endswith("-r2v")):
+            role = "reference_image"
+        else:
+            role = "first_frame"
         for img in images:
             with open(img, "rb") as f:
                 data = f.read()

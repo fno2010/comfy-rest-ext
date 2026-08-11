@@ -75,10 +75,8 @@ def test_build_h3_workflow_r2v_uses_ref2va_and_reference_node():
     assert cond["vae"] == ["3", 0]
     assert cond["audio_vae"] == ["4", 0]
     assert cond["ref_image_size"] == "match"
-    assert cond["ref_images"] == {
-        "ref_image_0": [load_ids[0], 0],
-        "ref_image_1": [load_ids[1], 0],
-    }
+    assert cond["ref_images.ref_image_0"] == [load_ids[0], 0]
+    assert cond["ref_images.ref_image_1"] == [load_ids[1], 0]
     sampler_id = _find(wf, "KSampler")
     assert wf[sampler_id]["inputs"]["positive"] == [ref_id, 0]
     assert wf[sampler_id]["inputs"]["latent_image"] == [ref_id, 1]
@@ -91,7 +89,7 @@ def test_build_h3_workflow_r2v_single_reference():
     )
     ref_id = _find(wf, "MiniMaxH3ReferenceToVideo")
     load_id = _find(wf, "LoadImage")
-    assert wf[ref_id]["inputs"]["ref_images"] == {"ref_image_0": [load_id, 0]}
+    assert wf[ref_id]["inputs"]["ref_images.ref_image_0"] == [load_id, 0]
 
 
 def test_model_for_task_returns_canonical():
