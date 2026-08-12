@@ -60,6 +60,19 @@ comfy-rest-ext-cli generate "make it cinematic" --image ref.png
 comfy-rest-ext-cli generate "Use <Picture 1> as style reference" \
   --image ref1.png --image ref2.png
 
+# JSON content[] 格式（对齐 OpenAI Responses / MiniMax V2 规范）
+curl -X POST http://host:8188/v1/videos \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "minimax-h3",
+    "input": [
+      {"type": "input_text", "text": "Use <Picture 1> as character, <Picture 2> as style"},
+      {"type": "input_image", "image_url": "https://.../ref1.png", "role": "reference_image"},
+      {"type": "input_image", "image_url": "https://.../ref2.png", "role": "reference_image"}
+    ],
+    "seconds": 5
+  }'
+
 # 模型 id（可省略，默认 minimax-h3 自动推断任务类型）
 # 别名 minimax-h3-t2v / minimax-h3-i2v / minimax-h3-r2v 仍兼容
 comfy-rest-ext-cli generate "t2v" --model minimax-h3

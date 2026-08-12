@@ -79,6 +79,7 @@ def build_h3_workflow(
     steps: int = 20,
     te_speed: bool = False,
     sol_stack: bool = False,
+    ref_image_size: str = "match",
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V.
 
@@ -155,14 +156,14 @@ def build_h3_workflow(
             "width": width,
             "height": height,
             "length": length,
-            "ref_image_size": "match",
+            "ref_image_size": ref_image_size,
         }
         ref_slots: Dict[str, Any] = {}
         for i, ref in enumerate(ref_images or []):
             add(str(nid), "LoadImage", {"image": ref})
-            ref_slots[f"ref_image_{i}"] = [str(nid), 0]
+            ref_slots[f"ref_images.ref_image_{i}"] = [str(nid), 0]
             nid += 1
-        cond_inputs["ref_images"] = ref_slots
+        cond_inputs.update(ref_slots)
         cond_node = str(nid)
         add(cond_node, "MiniMaxH3ReferenceToVideo", cond_inputs)
     else:
@@ -437,6 +438,10 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         steps=int(os.environ.get("H3_STEPS", "20")),
         te_speed=te_speed,
         sol_stack=sol_stack,
+        ref_image_size=os.environ.get("H3_REF_SIZE", "match"),
+        ref2va_model=os.environ.get(
+            "H3_REF2VA_MODEL", "minimax_h3_ref2va_pruned_nvfp4.safetensors"
+        ),
     )
 
     prompt_id = str(uuid.uuid4())

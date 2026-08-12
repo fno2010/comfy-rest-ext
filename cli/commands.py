@@ -7,7 +7,9 @@ output goes to stdout; --json switches every command to raw JSON output.
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import sys
 import time
 from typing import Any, Dict, Optional, Sequence
@@ -55,17 +57,8 @@ def _build_video_payload(args: Any) -> Dict[str, Any]:
 
 
 def cmd_generate(client: ComfyRestClient, args: Any) -> int:
-    payload = _build_video_payload(args)
     try:
-        if args.image:
-            images = args.image if isinstance(args.image, list) else [args.image]
-            files = []
-            for img in images:
-                with open(img, "rb") as f:
-                    files.append(("input_reference", img, f.read()))
-            task = client.create_video_multipart(payload, files)
-        else:
-            task = client.create_video(payload)
+        task = client.create_video(_build_video_request(args))
     except OSError as e:
         if isinstance(e, FileNotFoundError):
             return _emit_error(f"image file not found: {e.filename}")
@@ -77,6 +70,39 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
     print(f"task {task['id']} queued (status: {task['status']})")
     print(f"view later: {task['id']}")
     return 0
+
+
+def _build_video_request(args: Any) -> Dict[str, Any]:
+    """Build a content[]/input[] video request (industry-standard format).
+
+    Text goes into an input_text item; uploaded images become input_image
+    items. A single image is a first_frame (I2V); multiple images are
+    reference_image items (R2V) referenced via <Picture N> tags.
+    """
+    payload = _build_video_payload(args)
+    items: list = [{"type": "input_text", "text": args.prompt}]
+    images = getattr(args, "image", None) or []
+    if isinstance(images, str):
+        images = [images]
+    if images:
+        model = getattr(args, "model", None)
+        if len(images) > 1 or (model and model.endswith("-r2v")):
+            role = "reference_image"
+        else:
+            role = "first_frame"
+        for img in images:
+            with open(img, "rb") as f:
+                data = f.read()
+            ext = os.path.splitext(img)[1].lower().lstrip(".") or "png"
+            b64 = base64.b64encode(data).decode("ascii")
+            items.append({
+                "type": "input_image",
+                "image_url": f"data:image/{ext};base64,{b64}",
+                "role": role,
+            })
+    payload["input"] = items
+    payload.pop("prompt", None)
+    return payload
 
 
 def cmd_status(client: ComfyRestClient, args: Any) -> int:

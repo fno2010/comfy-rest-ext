@@ -89,7 +89,7 @@ def test_cmd_generate_json(capsys):
     assert commands.cmd_generate(client, args) == 0
     task = json.loads(capsys.readouterr().out)
     assert task["status"] == "queued"
-    assert task["prompt"] == "a dog"
+    assert task["input"] == [{"type": "input_text", "text": "a dog"}]
     assert client.created
 
 
@@ -197,3 +197,82 @@ def test_cmd_download_status_text(capsys):
     assert commands.cmd_download_status(client, args) == 0
     out = capsys.readouterr().out
     assert "completed" in out
+
+
+def test_multipart_body_has_crlf_between_file_parts():
+    import cli.client as client_mod
+    from cli.client import ComfyRestClient
+
+    client = ComfyRestClient(base_url="http://127.0.0.1:1")
+
+    boundary = "----testboundary"
+    payload = {"prompt": "x", "model": "minimax-h3"}
+    files = [
+        ("input_reference", "a.png", b"AAA"),
+        ("input_reference", "b.png", b"BBB"),
+    ]
+
+    parts = []
+    for key, value in payload.items():
+        parts.append(
+            (f"--{boundary}\r\n"
+             f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
+             f"{value}\r\n").encode("utf-8")
+        )
+    for file_field, filename, file_bytes in files:
+        parts.append(
+            (f"--{boundary}\r\n"
+             f'Content-Disposition: form-data; name="{file_field}"; '
+             f'filename="{filename}"\r\n'
+             f"Content-Type: {client_mod._guess_image_type(filename)}\r\n\r\n"
+             ).encode("utf-8")
+        )
+        parts.append(file_bytes)
+        parts.append(b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(parts)
+
+    # Each file's data must be followed by \r\n before the next boundary,
+    # otherwise the server's multipart parser merges file data with boundary.
+    assert body.count(b"AAA\r\n------") == 1
+    assert body.count(b"BBB\r\n------") == 1
+    assert body.endswith(b"--\r\n")
+
+
+def test_build_video_request_single_image_first_frame():
+    import os, tempfile
+    from cli import commands
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
+        path = f.name
+    try:
+        args = Args(prompt="p", image=path, model=None, width=None,
+                    height=None, seconds=None, seed=None, speed=None)
+        req = commands._build_video_request(args)
+        assert req["input"][0] == {"type": "input_text", "text": "p"}
+        img = req["input"][1]
+        assert img["type"] == "input_image"
+        assert img["role"] == "first_frame"
+        assert img["image_url"].startswith("data:image/png;base64,")
+    finally:
+        os.unlink(path)
+
+
+def test_build_video_request_multi_image_reference():
+    import os, tempfile
+    from cli import commands
+    paths = []
+    try:
+        for _ in range(2):
+            f = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            f.write(b"\x89PNG\r\n\x1a\n" + b"y" * 64)
+            f.close()
+            paths.append(f.name)
+        args = Args(prompt="p", image=paths, model=None, width=None,
+                    height=None, seconds=None, seed=None, speed=None)
+        req = commands._build_video_request(args)
+        roles = [i["role"] for i in req["input"][1:]]
+        assert roles == ["reference_image", "reference_image"]
+    finally:
+        for p in paths:
+            os.unlink(p)

@@ -82,7 +82,8 @@ def _infer_task_type(fields: dict) -> str:
     images = fields.get("_ref_images_data") or fields.get("ref_images") or []
     if len(images) > 1:
         return "r2v"
-    if images or fields.get("_first_frame_data") or fields.get("input_reference"):
+    if (images or fields.get("_first_frame_data") or fields.get("input_reference")
+            or fields.get("first_frame_url")):
         return "fl2va"
     return "t2va"
 
@@ -150,6 +151,18 @@ async def create_video(request: web.Request) -> web.Response:
     if isinstance(fields, web.Response):
         return fields
 
+    content_items = None
+    if not ctype.startswith("multipart/") and (fields.get("input") or fields.get("content")):
+        content_items = _parse_content_items(fields)
+        if content_items["prompt"]:
+            fields["prompt"] = content_items["prompt"]
+        if content_items["ref_image_urls"]:
+            fields["ref_images"] = content_items["ref_image_urls"]
+        if content_items["first_frame_url"]:
+            fields["first_frame_url"] = content_items["first_frame_url"]
+        if content_items["last_frame_url"]:
+            fields["last_frame_url"] = content_items["last_frame_url"]
+
     prompt = fields.get("prompt")
     if not prompt:
         return web.json_response({"error": "prompt is required"}, status=400)
@@ -203,6 +216,8 @@ async def create_video(request: web.Request) -> web.Response:
     else:
         if fields.get("_first_frame_data"):
             first_frame = await _upload_first_frame(fields["_first_frame_data"])
+        elif fields.get("first_frame_url"):
+            first_frame = await _resolve_ref_image(fields["first_frame_url"])
         elif fields.get("input_reference"):
             first_frame = await _upload_input_reference(fields["input_reference"])
         if task_type == "fl2va" and first_frame is None:
@@ -242,6 +257,55 @@ async def _parse_json(request: web.Request):
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
     return body
+
+
+def _parse_content_items(body: dict) -> dict:
+    """Extract prompt text and role-tagged image refs from input[]/content[].
+
+    Accepts the industry-standard media array (OpenAI Responses input items,
+    MiniMax V2 content[]): items with type=input_text contribute prompt text;
+    items with type=input_image carry image_url plus an optional role
+    (reference_image | first_frame | last_frame).
+
+    Returns a normalized dict with keys: prompt, ref_image_urls (list),
+    first_frame_url (str|None), last_frame_url (str|None).
+    """
+    items = body.get("input") or body.get("content") or []
+    if not isinstance(items, list):
+        return {"prompt": None, "ref_image_urls": [], "first_frame_url": None,
+                "last_frame_url": None}
+
+    texts: list = []
+    ref_urls: list = []
+    first_frame_url = None
+    last_frame_url = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        itype = item.get("type")
+        if itype in ("input_text", "text"):
+            t = item.get("text")
+            if t:
+                texts.append(t)
+        elif itype in ("input_image", "image_url"):
+            url = item.get("image_url")
+            if isinstance(url, dict):
+                url = url.get("url")
+            if not url:
+                continue
+            role = item.get("role", "reference_image")
+            if role == "first_frame":
+                first_frame_url = url
+            elif role == "last_frame":
+                last_frame_url = url
+            else:
+                ref_urls.append(url)
+    return {
+        "prompt": "\n".join(texts) if texts else None,
+        "ref_image_urls": ref_urls,
+        "first_frame_url": first_frame_url,
+        "last_frame_url": last_frame_url,
+    }
 
 
 async def _parse_multipart(request: web.Request):

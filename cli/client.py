@@ -125,7 +125,8 @@ class ComfyRestClient:
                 ).encode("utf-8")
             )
             parts.append(file_bytes)
-        parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+            parts.append(b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode("utf-8"))
         body = b"".join(parts)
         return self._request(
             "POST",
