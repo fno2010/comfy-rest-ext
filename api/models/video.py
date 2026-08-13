@@ -120,13 +120,8 @@ async def _resolve_first_frame(ref: str) -> Optional[str]:
     import base64
     if ref.startswith("data:image/"):
         _, b64 = ref.split(",", 1)
-        import folder_paths
-        input_dir = folder_paths.get_input_directory()
-        os.makedirs(input_dir, exist_ok=True)
-        filename = f"first_frame_{uuid.uuid4().hex[:8]}.png"
-        with open(os.path.join(input_dir, filename), "wb") as f:
-            f.write(base64.b64decode(b64))
-        return filename
+        from ..input_assets import save_input_asset
+        return save_input_asset(base64.b64decode(b64), "first_frame")
     return ref if ref and not ref.startswith("http") else None
 
 

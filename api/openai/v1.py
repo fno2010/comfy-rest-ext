@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 import uuid
 from typing import Optional
@@ -380,13 +379,8 @@ async def _upload_input_reference(ref: str) -> Optional[str]:
 
 async def _save_upload(data: bytes, prefix: str) -> Optional[str]:
     """Write image bytes into ComfyUI input dir, returning the filename."""
-    import folder_paths
-    input_dir = folder_paths.get_input_directory()
-    os.makedirs(input_dir, exist_ok=True)
-    filename = f"{prefix}_{uuid.uuid4().hex[:8]}.png"
-    with open(os.path.join(input_dir, filename), "wb") as f:
-        f.write(data)
-    return filename
+    from ..input_assets import save_input_asset
+    return save_input_asset(data, prefix)
 
 
 async def _resolve_ref_image(ref: str) -> Optional[str]:
