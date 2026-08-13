@@ -96,6 +96,10 @@ def _video_response(task: VideoTask) -> dict:
     inference_time_s = None
     if task.completed_at and task.created_at:
         inference_time_s = round(task.completed_at - task.created_at, 2)
+    elapsed_s = None
+    if task.started_at:
+        base = task.completed_at or time.time()
+        elapsed_s = round(base - task.started_at, 2)
     return {
         "id": task.task_id,
         "object": "video",
@@ -103,6 +107,10 @@ def _video_response(task: VideoTask) -> dict:
         "prompt": task.prompt,
         "status": status,
         "progress": int(task.progress * 100),
+        "current_node": task.current_node,
+        "node_progress": int(task.node_progress * 100),
+        "elapsed": elapsed_s,
+        "eta": round(task.eta, 1) if task.eta is not None else None,
         "size": f"{task.width}x{task.height}",
         "seconds": str(task.length / 24),
         "created_at": int(task.created_at),

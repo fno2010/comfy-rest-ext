@@ -119,6 +119,68 @@ def test_cmd_status_missing(capsys):
     assert "404" in capsys.readouterr().err
 
 
+def test_cmd_status_text_shows_progress_fields(capsys):
+    client = FakeClient()
+    client.videos["video_1"].update({
+        "status": "in_progress",
+        "progress": 45,
+        "current_node": "KSampler",
+        "node_progress": 50,
+        "elapsed": 30.0,
+        "eta": 90.0,
+    })
+    args = Args(json=False, video_id="video_1")
+    assert commands.cmd_status(client, args) == 0
+    out = capsys.readouterr().out
+    assert "node:      KSampler (50%)" in out
+    assert "elapsed:   30s" in out
+    assert "eta:       1m30s" in out
+
+
+def test_cmd_status_text_skips_missing_progress(capsys):
+    client = FakeClient()  # video_1 has no current_node/elapsed/eta
+    args = Args(json=False, video_id="video_1")
+    assert commands.cmd_status(client, args) == 0
+    out = capsys.readouterr().out
+    assert "node:" not in out
+    assert "elapsed:" not in out
+    assert "eta:" not in out
+
+
+def test_cmd_wait_text_shows_node_and_eta(monkeypatch, capsys):
+    client = FakeClient()
+    client.videos["video_1"].update({
+        "status": "in_progress",
+        "progress": 45,
+        "current_node": "KSampler",
+        "node_progress": 50,
+        "eta": 90.0,
+    })
+    monkeypatch.setattr(commands, "POLL_INTERVAL", 0.0)
+
+    poll_count = {"n": 0}
+    original_get = client.get_video
+
+    def get_video_transitioning(video_id):
+        poll_count["n"] += 1
+        if poll_count["n"] >= 2:
+            client.videos[video_id]["status"] = "completed"
+        return original_get(video_id)
+
+    monkeypatch.setattr(client, "get_video", get_video_transitioning)
+    args = Args(json=False, video_id="video_1", timeout=60, quiet=False)
+    assert commands.cmd_wait(client, args) == 0
+    err = capsys.readouterr().err
+    assert "KSampler 50%" in err
+    assert "eta 1m30s" in err
+
+
+def test_fmt_duration():
+    assert commands._fmt_duration(5) == "5s"
+    assert commands._fmt_duration(90) == "1m30s"
+    assert commands._fmt_duration(3661) == "1h01m01s"
+
+
 def test_cmd_list_json(capsys):
     client = FakeClient()
     args = Args(json=True)

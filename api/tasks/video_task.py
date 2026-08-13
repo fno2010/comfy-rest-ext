@@ -38,9 +38,14 @@ class VideoTask:
     speed: Optional[str] = None
     prompt_id: Optional[str] = None
     progress: float = 0.0
+    current_node: Optional[str] = None
+    node_progress: float = 0.0
+    elapsed: float = 0.0
+    eta: Optional[float] = None
     output_path: Optional[str] = None
     error: Optional[str] = None
     created_at: float = 0.0
+    started_at: Optional[float] = None
     completed_at: Optional[float] = None
     node_errors: Optional[Dict[str, Any]] = None
 
@@ -299,9 +304,14 @@ def _task_to_record(task: VideoTask) -> dict:
         "speed": task.speed,
         "prompt_id": task.prompt_id,
         "progress": task.progress,
+        "current_node": task.current_node,
+        "node_progress": task.node_progress,
+        "elapsed": task.elapsed,
+        "eta": task.eta,
         "output_path": task.output_path,
         "error": task.error,
         "created_at": task.created_at,
+        "started_at": task.started_at,
         "completed_at": task.completed_at,
     }
 
@@ -322,9 +332,14 @@ def _record_to_task(record: dict) -> VideoTask:
         speed=record.get("speed"),
         prompt_id=record.get("prompt_id"),
         progress=record.get("progress", 0.0),
+        current_node=record.get("current_node"),
+        node_progress=record.get("node_progress", 0.0),
+        elapsed=record.get("elapsed", 0.0),
+        eta=record.get("eta"),
         output_path=record.get("output_path"),
         error=record.get("error"),
         created_at=record.get("created_at", 0.0),
+        started_at=record.get("started_at"),
         completed_at=record.get("completed_at"),
     )
 
@@ -401,6 +416,118 @@ def comfyui_view_url(output_path: Optional[str]) -> Optional[str]:
     return f"/view?{params}"
 
 
+# Weighted total-progress model for the H3 video chain.
+#
+# The chain is: conditioning nodes (fast, no step progress) -> KSampler
+# (dominant cost, per-step progress) -> VAEDecode + VAEDecodeAudio
+# (heavy, no step progress) -> CreateVideo + SaveVideo (no progress).
+# Only KSampler feeds the ProgressRegistry at step granularity, so the
+# total is modeled with fixed phase weights and KSampler scaled by
+# current_step/total_steps.
+COND_PHASE_WEIGHT = 0.05
+KSAMPLER_PHASE_WEIGHT = 0.80
+DECODE_PHASE_WEIGHT = 0.08
+SAVE_PHASE_WEIGHT = 0.07
+DECODE_SAVE_TAIL_ESTIMATE = 60.0  # seconds, empirical for H3 video
+
+# Node class types in build_h3_workflow that have no step progress.
+_DECODE_CLASSES = {"VAEDecode", "VAEDecodeAudio"}
+_SAVE_CLASSES = {"CreateVideo", "SaveVideo"}
+
+
+def _class_type_of(workflow: Dict[str, Any], node_id: str) -> Optional[str]:
+    """Map an execution node id back to its workflow class_type."""
+    node = workflow.get(node_id)
+    if node:
+        return node.get("class_type")
+    return None
+
+
+def _read_progress(
+    task: VideoTask,
+    workflow: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Read real progress from ComfyUI's in-process ProgressRegistry.
+
+    ComfyUI 0.30+ keeps a module-level global registry of per-node
+    progress (state/value/max) that is cross-thread readable. The plugin
+    runs in-process, so the polling loop can read it directly without
+    hooks or websocket subscriptions.
+
+    Returns None when the registry is unavailable (e.g. another prompt
+    is currently executing, or running outside ComfyUI / in tests).
+    """
+    try:
+        from comfy_execution.progress import get_progress_state
+    except ImportError:
+        return None
+
+    try:
+        registry = get_progress_state()
+    except Exception:
+        return None
+    if registry is None or getattr(registry, "prompt_id", None) != task.prompt_id:
+        return None
+
+    nodes = getattr(registry, "nodes", None)
+    if not nodes:
+        return None
+
+    # Find the currently running node (state == "running").
+    running = [
+        nid for nid, st in nodes.items()
+        if getattr(st.get("state"), "value", st.get("state")) == "running"
+    ]
+    if not running:
+        return None
+    node_id = running[0]
+    state = nodes[node_id]
+    max_value = state.get("max") or 0
+    value = state.get("value") or 0
+    node_progress = (value / max_value) if max_value else 0.0
+    class_type = _class_type_of(workflow, node_id) or node_id
+
+    # Weighted total progress across the chain phases.
+    if class_type == "KSampler":
+        total = COND_PHASE_WEIGHT + KSAMPLER_PHASE_WEIGHT * node_progress
+    elif class_type in _DECODE_CLASSES:
+        total = COND_PHASE_WEIGHT + KSAMPLER_PHASE_WEIGHT + DECODE_PHASE_WEIGHT * node_progress
+    elif class_type in _SAVE_CLASSES:
+        total = (
+            COND_PHASE_WEIGHT + KSAMPLER_PHASE_WEIGHT
+            + DECODE_PHASE_WEIGHT + SAVE_PHASE_WEIGHT * node_progress
+        )
+    else:
+        # Conditioning / loader phase — early, mostly static.
+        total = COND_PHASE_WEIGHT * node_progress
+
+    return {
+        "current_node": class_type,
+        "node_progress": node_progress,
+        "progress": min(total, 1.0),
+        "steps": (value, max_value) if class_type == "KSampler" else None,
+    }
+
+
+def _estimate_eta(task: VideoTask, progress: Dict[str, Any]) -> Optional[float]:
+    """Estimate remaining seconds via step-level linear extrapolation.
+
+    When KSampler is running: extrapolate from average step time plus a
+    fixed tail for VAE decode + video encode. Otherwise fall back to a
+    simple linear extrapolation from the weighted total.
+    """
+    elapsed = time.time() - (task.started_at or task.created_at)
+    if elapsed <= 0 or progress["progress"] <= 0:
+        return None
+    steps = progress.get("steps")
+    if steps and steps[1] > 0 and steps[0] > 0:
+        step_avg = elapsed / steps[0]
+        remaining = step_avg * (steps[1] - steps[0]) + DECODE_SAVE_TAIL_ESTIMATE
+        return round(remaining, 1)
+    remaining = elapsed / progress["progress"] * (1 - progress["progress"])
+    return round(remaining, 1)
+
+
 async def submit_video_task(task: VideoTask) -> VideoTask:
     """Submit the task to ComfyUI's in-process queue and track until done."""
     from server import PromptServer
@@ -467,11 +594,21 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
     number = getattr(server, "number", 0)
     outputs_to_execute = valid[2] if valid[2] is not None else []
     prompt_queue.put((number, prompt_id, workflow, {}, outputs_to_execute, {}))
+    task.started_at = time.time()
     sync_status()
 
     deadline = time.time() + 3600
     while time.time() < deadline:
         await asyncio.sleep(1.0)
+        if task.status == "running":
+            progress = _read_progress(task, workflow)
+            if progress is not None:
+                task.progress = progress["progress"]
+                task.current_node = progress["current_node"]
+                task.node_progress = progress["node_progress"]
+                task.elapsed = time.time() - task.started_at
+                task.eta = _estimate_eta(task, progress)
+                sync_status()
         history = prompt_queue.get_history()
         if prompt_id not in history:
             continue
@@ -491,11 +628,13 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
                     task.status = "completed"
                     task.completed_at = time.time()
                     task.progress = 1.0
+                    task.eta = None
                     sync_status()
                     return task
         task.status = "completed"
         task.completed_at = time.time()
         task.progress = 1.0
+        task.eta = None
         sync_status()
         return task
 

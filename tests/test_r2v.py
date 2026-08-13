@@ -6,6 +6,8 @@ import sys
 import types
 from unittest.mock import MagicMock
 
+import pytest
+
 # Provide a fake `server` module before importing the api package.
 server_mod = types.ModuleType("server")
 server_mod.PromptServer = MagicMock()
@@ -165,6 +167,161 @@ def test_frames_for_seconds_snaps_to_grid():
     assert frames_for_seconds(5.0) == 124
     assert frames_for_seconds(1.0) == 39
     assert frames_for_seconds(15.0) == 362
+
+
+# ---------------------------------------------------------------------------
+# Progress model (_read_progress / _estimate_eta)
+# ---------------------------------------------------------------------------
+
+
+class FakeRegistry:
+    """Minimal stand-in for ComfyUI's ProgressRegistry."""
+
+    def __init__(self, prompt_id, nodes):
+        self.prompt_id = prompt_id
+        self.nodes = nodes
+
+
+class FakeNodeState(dict):
+    """Node state dict whose 'state' is an enum-like object."""
+
+    def __init__(self, state, value, max):
+        self.state = state
+        self.value = value
+        self.max = max
+        super().__init__(state=state, value=value, max=max)
+
+
+class _State:
+    def __init__(self, name):
+        self.value = name
+
+
+@pytest.fixture
+def progress_module(monkeypatch):
+    """Install a fake comfy_execution.progress so _read_progress imports it.
+
+    _read_progress does `from comfy_execution.progress import
+    get_progress_state`, so the fake must live in sys.modules.
+    """
+    import api.tasks.video_task as vt
+    progress = types.ModuleType("comfy_execution.progress")
+    progress.get_progress_state = lambda: None
+    monkeypatch.setitem(sys.modules, "comfy_execution.progress", progress)
+    return vt
+
+
+def test_read_progress_ksampler_weighted_total(progress_module):
+    vt = progress_module
+    task = VideoTask(
+        task_id="video_x", status="running", prompt="p", task_type="t2va",
+        width=1344, height=768, length=101, seed=0,
+        prompt_id="prompt_1", created_at=1000.0, started_at=1000.0,
+    )
+    wf = vt.build_h3_workflow(prompt="p", width=1344, height=768,
+                              length=101, seed=0)
+    sampler_id = _find(wf, "KSampler")
+    registry = FakeRegistry(
+        "prompt_1",
+        {sampler_id: FakeNodeState(_State("running"), value=10, max=20)},
+    )
+    sys.modules["comfy_execution.progress"].get_progress_state = lambda: registry
+    out = vt._read_progress(task, wf)
+    assert out is not None
+    assert out["current_node"] == "KSampler"
+    assert out["node_progress"] == 0.5
+    assert abs(out["progress"] - (0.05 + 0.80 * 0.5)) < 1e-9
+    assert out["steps"] == (10, 20)
+
+
+def test_read_progress_other_prompt_returns_none(progress_module):
+    vt = progress_module
+    task = VideoTask(
+        task_id="video_x", status="running", prompt="p", task_type="t2va",
+        width=1344, height=768, length=101, seed=0,
+        prompt_id="prompt_1", created_at=1000.0, started_at=1000.0,
+    )
+    wf = vt.build_h3_workflow(prompt="p", width=1344, height=768,
+                              length=101, seed=0)
+    sampler_id = _find(wf, "KSampler")
+    registry = FakeRegistry(
+        "OTHER_PROMPT",
+        {sampler_id: FakeNodeState(_State("running"), value=10, max=20)},
+    )
+    sys.modules["comfy_execution.progress"].get_progress_state = lambda: registry
+    assert vt._read_progress(task, wf) is None
+
+
+def test_read_progress_no_import_returns_none():
+    """Without comfy_execution installed, read must degrade gracefully."""
+    import sys as _sys
+    import api.tasks.video_task as vt
+    task = VideoTask(
+        task_id="video_x", status="running", prompt="p", task_type="t2va",
+        width=1344, height=768, length=101, seed=0, created_at=1000.0,
+    )
+    wf = vt.build_h3_workflow(prompt="p", width=1344, height=768,
+                              length=101, seed=0)
+    saved = _sys.modules.pop("comfy_execution.progress", None)
+    try:
+        assert vt._read_progress(task, wf) is None
+    finally:
+        if saved is not None:
+            _sys.modules["comfy_execution.progress"] = saved
+
+
+def test_estimate_eta_ksampler_step_extrapolation(progress_module, monkeypatch):
+    vt = progress_module
+    task = VideoTask(
+        task_id="video_x", status="running", prompt="p", task_type="t2va",
+        width=1344, height=768, length=101, seed=0, created_at=990.0,
+        started_at=1000.0,
+    )
+    monkeypatch.setattr(vt.time, "time", lambda: 1030.0)
+    progress = {"current_node": "KSampler", "progress": 0.45,
+                "node_progress": 0.5, "steps": (10, 20)}
+    eta = vt._estimate_eta(task, progress)
+    # elapsed=30s, step_avg=3s/step, remaining 10 steps = 30s + 60s tail
+    assert eta == 90.0
+
+
+def test_estimate_eta_non_ksampler_linear(progress_module, monkeypatch):
+    vt = progress_module
+    task = VideoTask(
+        task_id="video_x", status="running", prompt="p", task_type="t2va",
+        width=1344, height=768, length=101, seed=0, created_at=990.0,
+        started_at=1000.0,
+    )
+    monkeypatch.setattr(vt.time, "time", lambda: 1030.0)
+    progress = {"current_node": "VAEDecode", "progress": 0.85,
+                "node_progress": 0.0, "steps": None}
+    eta = vt._estimate_eta(task, progress)
+    # elapsed=30s (started_at=1000 -> 1030) at 85% => 30/0.85*0.15 ≈ 5.29s
+    assert eta == pytest.approx(round(30 / 0.85 * 0.15, 1), rel=1e-9)
+
+
+def test_video_response_exposes_progress_fields():
+    task = VideoTask(
+        task_id="video_x",
+        status="running",
+        prompt="p",
+        task_type="r2v",
+        width=1344, height=768, length=101, seed=0,
+        created_at=1000.0,
+        started_at=1010.0,
+        progress=0.45,
+        current_node="KSampler",
+        node_progress=0.5,
+        eta=90.0,
+    )
+    from api.openai.v1 import _video_response
+    resp = _video_response(task)
+    assert resp["status"] == "in_progress"
+    assert resp["progress"] == 45
+    assert resp["current_node"] == "KSampler"
+    assert resp["node_progress"] == 50
+    assert resp["elapsed"] is not None
+    assert resp["eta"] == 90.0
 
 
 def test_build_h3_workflow_te_speed_node():

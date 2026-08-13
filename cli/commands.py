@@ -19,6 +19,18 @@ from .client import ApiError, ComfyRestClient
 POLL_INTERVAL = 5.0
 
 
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds as a compact duration string."""
+    seconds = max(0, int(round(seconds)))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m{s:02d}s"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
+
 def _emit(data: Any, as_json: bool) -> int:
     if as_json:
         print(json.dumps(data, indent=2, ensure_ascii=False))
@@ -115,6 +127,13 @@ def cmd_status(client: ComfyRestClient, args: Any) -> int:
     print(f"id:        {task['id']}")
     print(f"status:    {task['status']}")
     print(f"progress:  {task.get('progress', 0)}%")
+    node = task.get("current_node")
+    if node:
+        print(f"node:      {node} ({task.get('node_progress', 0)}%)")
+    if task.get("elapsed") is not None:
+        print(f"elapsed:   {_fmt_duration(task['elapsed'])}")
+    if task.get("eta") is not None:
+        print(f"eta:       {_fmt_duration(task['eta'])}")
     print(f"model:     {task.get('model', '')}")
     print(f"size:      {task.get('size', '')}")
     print(f"seconds:   {task.get('seconds', '')}")
@@ -148,8 +167,14 @@ def cmd_wait(client: ComfyRestClient, args: Any) -> int:
             return _emit_error(str(e))
         status = task["status"]
         if not args.json and not args.quiet:
-            print(f"[{task['id']}] {status} "
-                  f"{task.get('progress', 0)}%", file=sys.stderr)
+            line = f"[{task['id']}] {status} {task.get('progress', 0)}%"
+            node = task.get("current_node")
+            if node:
+                line += f" @ {node} {task.get('node_progress', 0)}%"
+            eta = task.get("eta")
+            if eta is not None:
+                line += f" (eta {_fmt_duration(eta)})"
+            print(line, file=sys.stderr)
         if status in ("completed", "failed", "cancelled"):
             exit_code = 0 if status == "completed" else 1
             if args.json:
