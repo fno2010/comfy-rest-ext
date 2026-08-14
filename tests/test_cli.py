@@ -338,3 +338,44 @@ def test_build_video_request_multi_image_reference():
     finally:
         for p in paths:
             os.unlink(p)
+
+
+def test_build_payload_layer_opts_build_speed_object():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, turbo="turbo-v4", block_cache="fbc",
+        step_cache=None, attention="sol", vae_decode=None, steps=8,
+        image=None, video_id=None, timeout=None, quiet=False,
+        task_id=None, url=None, folder=None, filename=None,
+    )
+    payload = commands._build_video_payload(args)
+    assert payload["speed"] == {
+        "turbo": "turbo-v4", "block_cache": "fbc", "attention": "sol",
+        "steps": 8,
+    }
+
+
+def test_build_payload_legacy_speed_string():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed="te-speed", turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None, steps=None,
+        image=None, video_id=None, timeout=None, quiet=False,
+        task_id=None, url=None, folder=None, filename=None,
+    )
+    payload = commands._build_video_payload(args)
+    assert payload["speed"] == "te-speed"
+
+
+def test_build_payload_speed_and_layers_conflict():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed="te-speed", turbo="turbo-v4", block_cache=None,
+        step_cache=None, attention=None, vae_decode=None, steps=None,
+        image=None, video_id=None, timeout=None, quiet=False,
+        task_id=None, url=None, folder=None, filename=None,
+    )
+    import pytest as _pytest
+    with _pytest.raises(commands.ApiError) as exc:
+        commands._build_video_payload(args)
+    assert "conflicts" in str(exc.value)
