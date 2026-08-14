@@ -63,8 +63,32 @@ def _build_video_payload(args: Any) -> Dict[str, Any]:
         payload["seconds"] = args.seconds
     if args.seed is not None:
         payload["seed"] = args.seed
-    if getattr(args, "speed", None):
-        payload["speed"] = args.speed
+
+    # Speed: legacy string XOR composable per-layer options. Passing both
+    # is ambiguous — fail loudly instead of silently preferring one.
+    layer_opts = {
+        "turbo": getattr(args, "turbo", None),
+        "block_cache": getattr(args, "block_cache", None),
+        "step_cache": getattr(args, "step_cache", None),
+        "attention": getattr(args, "attention", None),
+        "vae_decode": getattr(args, "vae_decode", None),
+    }
+    steps = getattr(args, "steps", None)
+    legacy_speed = getattr(args, "speed", None)
+    active_layers = {k: v for k, v in layer_opts.items() if v not in (None, "none", "default")}
+    if legacy_speed and legacy_speed != "auto" and (active_layers or steps):
+        raise ApiError(
+            400,
+            "--speed conflicts with --steps/--turbo/--block-cache/--step-cache/"
+            "--attention/--vae-decode; use one or the other",
+        )
+    if active_layers or steps:
+        speed_obj: Dict[str, Any] = {k: v for k, v in layer_opts.items() if v is not None}
+        if steps:
+            speed_obj["steps"] = steps
+        payload["speed"] = speed_obj
+    elif legacy_speed:
+        payload["speed"] = legacy_speed
     return payload
 
 

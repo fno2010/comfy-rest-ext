@@ -194,11 +194,14 @@ async def create_video(request: web.Request) -> web.Response:
         return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
     speed = fields.get("speed", "auto")
-    if speed not in ("auto", "none", "te-speed", "sol-stack"):
-        return web.json_response(
-            {"error": f"unsupported speed: {speed}. Use auto|none|te-speed|sol-stack"},
-            status=400,
-        )
+    try:
+        from ..accel import check_config_available, parse_accel_config
+        accel_cfg = parse_accel_config(speed)
+    except ValueError as e:
+        return web.json_response({"error": f"invalid speed: {e}"}, status=400)
+    missing_node = check_config_available(accel_cfg)
+    if missing_node:
+        return web.json_response({"error": f"invalid speed: {missing_node}"}, status=400)
 
     width = _parse_int(fields.get("width"), 1344)
     height = _parse_int(fields.get("height"), 768)

@@ -46,7 +46,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seconds", type=float, help="video length in seconds")
     p.add_argument("--seed", type=int, help="generation seed")
     p.add_argument("--speed", choices=["auto", "none", "te-speed", "sol-stack"],
-                   help="acceleration mode (default auto)")
+                   help="acceleration mode (legacy; default auto)")
+    p.add_argument("--steps", type=int, help="sampling steps")
+    p.add_argument("--turbo", choices=["none", "turbo-v4"],
+                   help="Turbo LoRA step compression (default none)")
+    p.add_argument("--block-cache", choices=["none", "te-speed", "fbc", "cachedit"],
+                   help="block-level cache (default none; mutually exclusive within layer)")
+    p.add_argument("--step-cache", choices=["none", "easycache", "lazycache", "teacache", "spectrum"],
+                   help="step-level cache (default none; mutually exclusive within layer)")
+    p.add_argument("--attention", choices=["none", "sol", "sage", "flash"],
+                   help="attention kernel (default none; mutually exclusive within layer)")
+    p.add_argument("--vae-decode", choices=["default", "batched"],
+                   help="VAE decode strategy (default default)")
     p.set_defaults(func=commands.cmd_generate)
 
     p = sub.add_parser("status", help="show a video task's status")
