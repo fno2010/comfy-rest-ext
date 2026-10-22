@@ -2,8 +2,23 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict
+
+
+def resolve_asset(task: Any, key: str, env_key: str, default: str) -> str:
+    """Resolve a model asset name.
+
+    Precedence: environment variable > model config `assets` > built-in
+    default. This keeps existing env-based deployments working while
+    letting models.json point a model at different checkpoint files.
+    """
+    env_value = os.environ.get(env_key)
+    if env_value:
+        return env_value
+    assets = getattr(task, "assets", None) or {}
+    return assets.get(key) or default
 
 
 def require_asset(folder: str, name: str) -> None:

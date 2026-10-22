@@ -42,6 +42,7 @@ class GenerationTask:
     model_id: str = "minimax-h3"
     modality: str = "video"
     params: Dict[str, Any] = field(default_factory=dict)
+    assets: Dict[str, str] = field(default_factory=dict)
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
     speed: Optional[Any] = None  # legacy str or AccelConfig dict
@@ -405,6 +406,7 @@ async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
 
     try:
         spec = get_model(task.model_id)
+        task.assets = dict(spec.assets)
         built = spec.build(task)
     except Exception as e:
         task.status = "failed"

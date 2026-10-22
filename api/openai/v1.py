@@ -39,7 +39,6 @@ routes = PromptServer.instance.routes
 
 CANONICAL_MODEL_ID = "minimax-h3"
 MODEL_IDS = list(all_model_ids())
-SUPPORTED_TASKS = get_model(CANONICAL_MODEL_ID).tasks
 
 
 def _model_card(model_id: str, created: int) -> dict:
@@ -194,7 +193,7 @@ async def create_video(request: web.Request) -> web.Response:
         task_type = model_task_type
     else:
         task_type = _infer_task_type(fields)
-    if task_type not in SUPPORTED_TASKS:
+    if task_type not in spec.tasks:
         return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
     speed = fields.get("speed", "auto")

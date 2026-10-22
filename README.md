@@ -63,6 +63,81 @@ GET /v2/extension/image/{id}/content?index=N
 
 不调用 ComfyUI 的 `/view`、`/prompt`、`/object_info`，也不依赖 ComfyUI 前端 SDK。
 
+## 模型配置（models.json）
+
+内置模型定义在 `api/catalog.py`，可在 ComfyUI 的 system user 目录下放置 `models.json` 覆盖或新增模型，无需改代码：
+
+```text
+<system_user_directory("comfy_rest_ext")>/models.json
+```
+
+也可用 `COMFY_REST_MODEL_CONFIG=/path/to/models.json` 指定其他路径。配置在扩展加载时读取一次，修改后重启 ComfyUI。
+
+```json
+{
+  "models": {
+    "anima-base": {
+      "assets": {
+        "unet": "anima-base-v1.0.safetensors",
+        "text_encoder": "qwen_3_06b_base.safetensors",
+        "vae": "qwen_image_vae.safetensors"
+      },
+      "defaults": {"steps": 36, "cfg": 4.5}
+    },
+    "my-anima": {
+      "builder": "anima",
+      "modality": "image",
+      "tasks": ["t2i"],
+      "aliases": ["my-anima-alt"],
+      "alias_tasks": {"my-anima-alt": "t2i"},
+      "defaults": {"steps": 30, "cfg": 4.0},
+      "capabilities": ["negative_prompt", "n", "seed"],
+      "assets": {
+        "unet": "anima-base-v1.0.safetensors",
+        "text_encoder": "qwen_3_06b_base.safetensors",
+        "vae": "qwen_image_vae.safetensors"
+      },
+      "size": {
+        "default_width": 1024,
+        "default_height": 1024,
+        "min_width": 512,
+        "min_height": 512,
+        "max_width": 1536,
+        "max_height": 1536,
+        "step": 16,
+        "max_pixels": 2359296,
+        "default_megapixels": 1.0
+      },
+      "max_n": 8,
+      "output_mime": "image/png",
+      "timeout_s": 900
+    }
+  }
+}
+```
+
+字段说明：
+
+| 字段 | 说明 |
+|---|---|
+| `builder` | `h3` / `anima` / `qwen_image_21`；新模型必填，覆盖时可省略 |
+| `modality` | `video` 或 `image` |
+| `tasks` | 如 `["t2va","fl2va","r2v"]` 或 `["t2i","edit"]` |
+| `aliases` / `alias_tasks` | 兼容别名及别名对应 task |
+| `defaults` | 覆盖模型默认参数（steps/cfg/sampler/scheduler/negative_prompt 等） |
+| `assets` | 模型文件名；键随 builder 不同（见下） |
+| `size` | 图片模型必需；字段对应 `SizePolicy` |
+| `capabilities` | 如 `negative_prompt` / `n` / `seed` / `alpha` / `edit` |
+| `max_n` / `timeout_s` / `output_mime` | 请求上限、任务超时、输出 MIME |
+
+`assets` 键：
+
+- `h3`: `unet`, `ref2va`, `text_encoder`, `video_vae`, `audio_vae`, `turbo_lora`
+- `anima`: `unet`, `turbo_unet`, `text_encoder`, `vae`, `turbo_lora`
+- `qwen_image_21`: `unet`, `turbo_unet`, `text_encoder`, `vae`
+
+优先级：**环境变量 > models.json `assets` > 内置默认值**；已有部署的 `H3_*` / `ANIMA_*` / `QWEN_IMAGE_21_*` 环境变量保持不变。配置错误会回滚到内置注册表并在日志中报告，不会留下半应用的模型列表。
+
 ## CLI 工具
 
 `comfy-rest-ext-cli` 是面向 OpenAI 兼容视频 API 的命令行客户端。
