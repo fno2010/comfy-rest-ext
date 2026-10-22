@@ -64,24 +64,35 @@ async def create_video_task(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 
+    if not isinstance(body, dict):
+        return web.json_response({"error": "JSON body must be an object"}, status=400)
+
+    # Legacy route is H3-only; ignore any `model` field from old clients.
     try:
-        spec = get_model(body.get("model") or "minimax-h3")
+        spec = get_model("minimax-h3")
     except KeyError:
         spec = None
     defaults = spec.defaults if spec else {}
+
+    # Apply models.json defaults before Pydantic validation so numeric
+    # strings are coerced exactly like explicit request fields.
+    request_body = dict(body)
+    request_body.pop("model", None)
+    for field, default_key in (
+        ("width", "width"),
+        ("height", "height"),
+        ("duration", "seconds"),
+        ("seed", "seed"),
+    ):
+        if field not in request_body and default_key in defaults:
+            request_body[field] = defaults[default_key]
     try:
-        req = VideoGenerateRequest(**body)
+        req = VideoGenerateRequest(**request_body)
     except Exception as e:
         return web.json_response({"error": f"Invalid request: {e}"}, status=400)
 
-    # models.json defaults apply here too; explicit body fields win.
-    width = body.get("width", defaults.get("width", req.width))
-    height = body.get("height", defaults.get("height", req.height))
-    duration = body.get("duration", defaults.get("seconds", req.duration))
-    seed = body.get("seed", defaults.get("seed", req.seed))
-
     task_id = str(uuid.uuid4())
-    length = frames_for_seconds(duration)
+    length = frames_for_seconds(req.duration)
 
     first_frame = None
     if req.first_frame:
@@ -96,13 +107,13 @@ async def create_video_task(request: web.Request) -> web.Response:
         status="queued",
         prompt=req.prompt,
         task_type=req.task,
-        width=width,
-        height=height,
+        width=req.width,
+        height=req.height,
         length=length,
-        seed=seed,
+        seed=req.seed,
         model_id=spec.id if spec else "minimax-h3",
         modality="video",
-        params={"duration": duration},
+        params={"duration": req.duration},
         first_frame=first_frame,
         ref_images=req.ref_images,
         speed=req.speed,
@@ -122,9 +133,9 @@ async def create_video_task(request: web.Request) -> web.Response:
         "status": "queued",
         "task": req.task,
         "prompt": req.prompt,
-        "width": width,
-        "height": height,
-        "duration": duration,
+        "width": req.width,
+        "height": req.height,
+        "duration": req.duration,
         "length": length,
         "first_frame": first_frame,
         "ref_images": req.ref_images,

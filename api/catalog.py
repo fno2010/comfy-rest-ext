@@ -687,6 +687,8 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
         raise ModelConfigError(f"{model_id}: max_n/timeout_s must be integers") from e
     if max_n < 1 or timeout_s < 1:
         raise ModelConfigError(f"{model_id}: max_n and timeout_s must be positive")
+    if "n" in defaults and not (1 <= defaults["n"] <= max_n):
+        raise ModelConfigError(f"{model_id}: defaults.n must be in [1, max_n]")
 
     output_mime = entry.get(
         "output_mime",

@@ -513,3 +513,37 @@ async def test_legacy_video_route_uses_spec_defaults(tmp_path, monkeypatch):
     captured.clear()
     await video.create_video_task(Request({"prompt": "a cat", "width": 768}))
     assert captured["task"].width == 768
+
+    # Pydantic coerces explicit string numerics before they reach the task.
+    captured.clear()
+    response = await video.create_video_task(Request({
+        "prompt": "a cat", "width": "640", "height": "640",
+        "duration": "3", "seed": "9",
+    }))
+    assert response.status == 200
+    body = json.loads(response.text)
+    assert (body["width"], body["height"], body["duration"]) == (640, 640, 3.0)
+    task = captured["task"]
+    assert (task.width, task.height, task.seed) == (640, 640, 9)
+    assert task.length == frames_for_seconds(3.0)
+
+    # Non-object bodies are a 400, not an uncaught AttributeError.
+    response = await video.create_video_task(Request([]))
+    assert response.status == 400
+
+    # The legacy route remains H3-only; a model field is ignored.
+    captured.clear()
+    response = await video.create_video_task(Request({"prompt": "a cat", "model": [1]}))
+    assert response.status == 200
+    assert captured["task"].model_id == "minimax-h3"
+
+
+def test_image_defaults_n_must_fit_max_n(tmp_path):
+    with pytest.raises(catalog.ModelConfigError):
+        catalog.load_model_config(_write(tmp_path, {
+            "bad-n": _new_image("bad-n", defaults={"steps": 1, "n": 4}),
+        }))
+    with pytest.raises(catalog.ModelConfigError):
+        catalog.load_model_config(_write(tmp_path, {
+            "zero-n": _new_image("zero-n", defaults={"steps": 1, "n": 0}),
+        }))
