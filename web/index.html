@@ -27,16 +27,16 @@
     font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   header {
-    position: sticky; top: 0; z-index: 5;
+    position: sticky; top: 0; z-index: 10;
     background: rgba(13,17,23,.94);
     border-bottom: 1px solid var(--border);
     backdrop-filter: blur(8px);
   }
   .bar {
-    max-width: 1400px; margin: 0 auto; padding: 14px 20px;
-    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    max-width: 1400px; margin: 0 auto; padding: 12px 20px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   }
-  h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  h1 { font-size: 18px; margin: 0; font-weight: 650; white-space: nowrap; }
   h1 span { color: var(--accent); }
   .spacer { flex: 1; }
   .muted { color: var(--muted); }
@@ -45,16 +45,25 @@
     background: var(--panel-2); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px;
     padding: 6px 10px; cursor: pointer; font: inherit;
-    text-decoration: none;
+    text-decoration: none; white-space: nowrap;
   }
   button:hover, .btn:hover { border-color: var(--accent); }
-  input[type=search] {
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=search], select {
     background: var(--panel); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px;
-    padding: 7px 10px; min-width: 220px; font: inherit;
+    padding: 7px 10px; font: inherit;
   }
-  .toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-  main { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  input[type=search] { min-width: 240px; }
+  select { cursor: pointer; }
+  .toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+  .spin {
+    display: inline-block; width: 12px; height: 12px; margin-right: 5px;
+    border: 2px solid #ffffff33; border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  main { max-width: 1400px; margin: 0 auto; padding: 18px 20px 40px; }
   .stats {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 10px; margin-bottom: 16px;
@@ -64,32 +73,46 @@
     border-radius: 8px; padding: 10px 12px;
   }
   .stat b { display: block; font-size: 22px; line-height: 1.2; }
-  .stat span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-  .filters {
-    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-    margin-bottom: 18px;
-  }
-  .chip {
-    background: transparent; border: 1px solid var(--border);
-    border-radius: 999px; padding: 5px 12px; color: var(--muted);
-  }
-  .chip.active { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+  .stat span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
   .notice {
     display: none; background: #3d1418; border: 1px solid #6e2329;
-    color: #ffb3ad; padding: 10px 12px; border-radius: 8px; margin-bottom: 16px;
+    color: #ffb3ad; padding: 9px 12px; border-radius: 8px; margin-bottom: 14px;
   }
   .notice.show { display: block; }
-  section { margin-bottom: 26px; }
-  .section-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
-  .section-head h2 { font-size: 16px; margin: 0; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px;
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .toolbar + .toolbar { margin-top: -2px; }
+  .segmented {
+    display: inline-flex; background: #0b0f14; border: 1px solid var(--border);
+    border-radius: 7px; padding: 2px; gap: 2px;
+  }
+  .segmented button {
+    border: 0; background: transparent; color: var(--muted);
+    padding: 5px 12px; border-radius: 5px;
+  }
+  .segmented button.active { background: var(--accent); color: #06101f; font-weight: 600; }
+  .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 11px; color: var(--muted);
+  }
+  .chip.active { background: #1f6feb; border-color: #1f6feb; color: #fff; font-weight: 600; }
+  .field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .field select, .field input { padding: 5px 8px; }
   .grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-    gap: 14px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 12px; margin-top: 12px;
   }
   .card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 9px;
-    min-height: 180px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+    min-height: 170px; content-visibility: auto; contain-intrinsic-size: 260px;
   }
   .card.running { border-color: #2f5f9e; }
   .card.completed { border-color: #245c35; }
@@ -101,7 +124,7 @@
   }
   .kind.video { color: var(--purple); }
   .kind.image { color: var(--accent); }
-  .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text); }
+  .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .badge {
     margin-left: auto; font-size: 11px; font-weight: 600;
     padding: 3px 8px; border-radius: 999px; background: #21262d; color: var(--muted);
@@ -111,9 +134,9 @@
   .badge.failed { background: #4a1d20; color: #ffa198; }
   .badge.queued { background: #3d3213; color: #e3b341; }
   .prompt {
-    margin: 0; color: var(--text); overflow: hidden;
-    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-    word-break: break-word;
+    margin: 0; overflow: hidden; display: -webkit-box;
+    -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    word-break: break-word; min-height: 2.9em;
   }
   .prompt.empty { color: var(--muted); font-style: italic; }
   .progress {
@@ -123,11 +146,11 @@
   .progress > i {
     display: block; height: 100%; width: 0;
     background: linear-gradient(90deg, #1f6feb, #58a6ff);
-    transition: width .35s ease;
+    transition: width .3s ease;
   }
   .card.completed .progress > i { background: linear-gradient(90deg, #238636, #3fb950); }
   .card.failed .progress > i { background: var(--red); }
-  .meta { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+  .meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
   .meta b { color: var(--text); font-weight: 500; }
   .error {
     color: #ffa198; background: #2d1215; border: 1px solid #5c1f24;
@@ -139,24 +162,47 @@
     background: #000; border-radius: 6px; border: 1px solid var(--border);
     display: block;
   }
-  .media .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+  .media .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
   .media .thumbs img { cursor: zoom-in; aspect-ratio: 1; object-fit: cover; }
   .media video { max-height: 300px; }
-  .card-foot { margin-top: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .card-foot { margin-top: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   .card-foot a { color: var(--accent); text-decoration: none; font-size: 12px; }
   .card-foot a:hover { text-decoration: underline; }
-  .empty { color: var(--muted); padding: 18px 0; }
+  .empty { color: var(--muted); padding: 26px 4px; text-align: center; }
+  .pager {
+    display: flex; align-items: center; gap: 8px; justify-content: flex-end;
+    margin-top: 14px; flex-wrap: wrap;
+  }
+  .pager .pages { display: flex; gap: 4px; flex-wrap: wrap; }
+  .pager .pages button { min-width: 32px; padding: 5px 8px; }
+  .pager .pages button.active { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
   dialog {
     border: 1px solid var(--border); background: var(--panel); color: var(--text);
-    border-radius: 10px; padding: 10px; max-width: 94vw; max-height: 94vh;
+    border-radius: 10px; padding: 14px; max-width: 94vw; max-height: 90vh;
   }
   dialog::backdrop { background: rgba(0,0,0,.82); }
-  dialog img { max-width: 90vw; max-height: 86vh; display: block; border-radius: 6px; }
-  @media (max-width: 640px) {
-    .bar { padding: 12px; }
+  dialog h2 { margin: 0 0 10px; font-size: 16px; }
+  dialog img { max-width: 90vw; max-height: 84vh; display: block; border-radius: 6px; }
+  .dialog-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .dialog-head h2 { margin: 0; }
+  .models {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 10px; overflow: auto; max-height: 68vh;
+  }
+  .model-card {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .model-card header { display: flex; align-items: center; gap: 8px; }
+  .model-card code { font-size: 12px; word-break: break-all; }
+  .model-card .badge { margin-left: auto; }
+  .model-card .line { color: var(--muted); font-size: 12px; }
+  @media (max-width: 720px) {
+    .bar { padding: 10px 12px; }
     main { padding: 12px; }
-    input[type=search] { min-width: 0; flex: 1; }
+    input[type=search] { min-width: 0; flex: 1 1 180px; }
     .grid { grid-template-columns: 1fr; }
+    .pager { justify-content: center; }
   }
 </style>
 </head>
@@ -166,10 +212,10 @@
     <h1>Comfy-REST-Ext <span>Tasks</span></h1>
     <span id="updated" class="muted small"></span>
     <div class="spacer"></div>
-    <input id="search" type="search" placeholder="Filter by model, prompt, or id">
-    <label class="toggle small"><input id="auto" type="checkbox" checked> auto refresh</label>
-    <button id="refresh" type="button">Refresh</button>
-    <a class="btn" href="/v1/models" target="_blank" rel="noreferrer">Models</a>
+    <input id="search" type="search" placeholder="Search model, prompt, or id">
+    <label class="toggle small"><input id="auto" type="checkbox" checked> auto</label>
+    <button id="refresh" type="button"><span id="refresh-icon"></span>Refresh</button>
+    <button id="models-btn" type="button">Models</button>
   </div>
 </header>
 
@@ -183,23 +229,68 @@
     <div class="stat"><b id="stat-image-running">0</b><span>Images active</span></div>
   </div>
 
-  <div class="filters">
-    <button class="chip active" data-status="all" type="button">All</button>
-    <button class="chip" data-status="active" type="button">Active</button>
-    <button class="chip" data-status="completed" type="button">Completed</button>
-    <button class="chip" data-status="failed" type="button">Failed</button>
+  <div class="panel">
+    <div class="toolbar">
+      <div id="kind-tabs" class="segmented">
+        <button data-kind="all" type="button" class="active">All</button>
+        <button data-kind="video" type="button">Videos</button>
+        <button data-kind="image" type="button">Images</button>
+      </div>
+      <div class="spacer"></div>
+      <label class="field">Sort
+        <select id="sort">
+          <option value="smart">Active first</option>
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="model">Model</option>
+          <option value="progress">Progress</option>
+        </select>
+      </label>
+      <label class="field">Per page
+        <select id="page-size">
+          <option value="12">12</option>
+          <option value="24">24</option>
+          <option value="48">48</option>
+          <option value="96">96</option>
+        </select>
+      </label>
+    </div>
+    <div class="toolbar">
+      <div id="status-chips" class="chips">
+        <button class="chip active" data-status="all" type="button">All</button>
+        <button class="chip" data-status="active" type="button">Active</button>
+        <button class="chip" data-status="completed" type="button">Completed</button>
+        <button class="chip" data-status="failed" type="button">Failed</button>
+      </div>
+      <label class="field">Model
+        <select id="model-filter"><option value="">All models</option></select>
+      </label>
+      <span id="filter-summary" class="muted small"></span>
+    </div>
+
+    <div id="task-grid" class="grid"></div>
+    <div id="empty" class="empty" hidden>No tasks match these filters.</div>
+
+    <div class="pager">
+      <button id="first-page" type="button">First</button>
+      <button id="prev-page" type="button">Prev</button>
+      <div id="pages" class="pages"></div>
+      <button id="next-page" type="button">Next</button>
+      <button id="last-page" type="button">Last</button>
+      <span id="page-info" class="muted small"></span>
+    </div>
   </div>
-
-  <section id="video-section">
-    <div class="section-head"><h2>Videos</h2><span id="video-count" class="muted small"></span></div>
-    <div id="videos" class="grid"></div>
-  </section>
-
-  <section id="image-section">
-    <div class="section-head"><h2>Images</h2><span id="image-count" class="muted small"></span></div>
-    <div id="images" class="grid"></div>
-  </section>
 </main>
+
+<dialog id="models-dialog">
+  <div class="dialog-head">
+    <h2>Models</h2>
+    <span id="models-note" class="muted small"></span>
+    <div class="spacer"></div>
+    <button id="models-close" type="button">Close</button>
+  </div>
+  <div id="models-grid" class="models"></div>
+</dialog>
 
 <dialog id="lightbox">
   <img id="lightbox-img" alt="">
@@ -209,18 +300,26 @@
 (() => {
   "use strict";
 
+  const ACTIVE = new Set(["queued", "running", "in_progress"]);
+  const STATUS_LABEL = { in_progress: "running", running: "running" };
+
   const state = {
     videos: [],
     images: [],
-    status: "all",
-    query: "",
-    timer: null,
+    catalog: [],
+    filters: { kind: "all", status: "all", model: "", query: "" },
+    sort: "smart",
+    page: 1,
+    pageSize: Number(localStorage.getItem("comfy-rest-ext.pageSize")) || 12,
     loading: false,
+    timer: null,
     fetchedAt: null,
+    modelOptionsSig: "",
   };
 
   const $ = (id) => document.getElementById(id);
-  const ACTIVE = new Set(["queued", "running", "in_progress"]);
+  const grid = $("task-grid");
+  const cardCache = new Map();
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -250,7 +349,7 @@
   }
 
   function statusLabel(status) {
-    return ({ in_progress: "running", running: "running" })[status] || status || "unknown";
+    return STATUS_LABEL[status] || status || "unknown";
   }
 
   function normalizeVideo(task) {
@@ -268,6 +367,7 @@
       elapsed: task.elapsed,
       size: task.size || "",
       seconds: task.seconds,
+      n: 0,
       created_at: task.created_at,
       completed_at: task.completed_at,
       error: task.error,
@@ -290,6 +390,7 @@
       eta: task.eta,
       elapsed: null,
       size: task.size || "",
+      seconds: null,
       n: task.n || 1,
       created_at: task.created_at,
       completed_at: task.completed_at,
@@ -299,42 +400,98 @@
     };
   }
 
-  function matches(task) {
-    if (state.status === "active" && !ACTIVE.has(task.status)) return false;
-    if (state.status === "completed" && task.status !== "completed") return false;
-    if (state.status === "failed" && task.status !== "failed") return false;
-    if (!state.query) return true;
-    const q = state.query.toLowerCase();
-    return [task.id, task.model, task.prompt, task.status]
-      .some((v) => String(v || "").toLowerCase().includes(q));
+  function allTasks() {
+    return state.videos.concat(state.images);
   }
 
-  function sortTasks(tasks) {
-    return tasks.slice().sort((a, b) => {
-      const aa = ACTIVE.has(a.status) ? 0 : 1;
-      const bb = ACTIVE.has(b.status) ? 0 : 1;
-      if (aa !== bb) return aa - bb;
-      return (b.created_at || 0) - (a.created_at || 0);
+  function hasActive() {
+    return allTasks().some((task) => ACTIVE.has(task.status));
+  }
+
+  function matches(task) {
+    const f = state.filters;
+    if (f.kind !== "all" && task.kind !== f.kind) return false;
+    if (f.model && task.model !== f.model) return false;
+    if (f.status === "active" && !ACTIVE.has(task.status)) return false;
+    if (f.status === "completed" && task.status !== "completed") return false;
+    if (f.status === "failed" && task.status !== "failed") return false;
+    if (f.query) {
+      const q = f.query.toLowerCase();
+      if (![task.id, task.model, task.prompt, task.status]
+        .some((value) => String(value || "").toLowerCase().includes(q))) return false;
+    }
+    return true;
+  }
+
+  function filteredTasks() {
+    return allTasks().filter(matches).sort((a, b) => {
+      if (state.sort === "smart") {
+        const activeA = ACTIVE.has(a.status) ? 0 : 1;
+        const activeB = ACTIVE.has(b.status) ? 0 : 1;
+        if (activeA !== activeB) return activeA - activeB;
+        return (b.created_at || 0) - (a.created_at || 0);
+      }
+      if (state.sort === "newest") return (b.created_at || 0) - (a.created_at || 0);
+      if (state.sort === "oldest") return (a.created_at || 0) - (b.created_at || 0);
+      if (state.sort === "model") {
+        const cmp = String(a.model).localeCompare(String(b.model));
+        return cmp || (b.created_at || 0) - (a.created_at || 0);
+      }
+      return (b.progress || 0) - (a.progress || 0);
     });
   }
 
-  function mediaHtml(task) {
-    if (!task.media.length || task.status !== "completed") return "";
-    if (task.kind === "video") {
-      return `<div class="media"><video controls preload="none" src="${esc(task.media[0])}"></video></div>`;
-    }
-    return `<div class="media"><div class="thumbs">${task.media.map((url, i) =>
-      `<img loading="lazy" src="${esc(url)}" alt="output ${i + 1}" data-full="${esc(url)}">`
-    ).join("")}</div></div>`;
+  function createCard(task) {
+    const el = document.createElement("article");
+    el.className = "card";
+    el.innerHTML = `
+      <div class="card-top">
+        <span class="kind"></span>
+        <span class="model"></span>
+        <span class="badge"></span>
+      </div>
+      <p class="prompt"></p>
+      <div class="progress"><i></i></div>
+      <div class="meta"></div>
+      <div class="error" hidden></div>
+      <div class="media" hidden></div>
+      <div class="card-foot">
+        <a class="json-link" target="_blank" rel="noreferrer">JSON</a>
+        <a class="open-link" target="_blank" rel="noreferrer" hidden>Open output</a>
+      </div>`;
+    return {
+      el,
+      kind: el.querySelector(".kind"),
+      model: el.querySelector(".model"),
+      badge: el.querySelector(".badge"),
+      prompt: el.querySelector(".prompt"),
+      progress: el.querySelector(".progress > i"),
+      meta: el.querySelector(".meta"),
+      error: el.querySelector(".error"),
+      media: el.querySelector(".media"),
+      json: el.querySelector(".json-link"),
+      open: el.querySelector(".open-link"),
+      mediaSig: null,
+    };
   }
 
-  function cardHtml(task) {
+  function updateCard(card, task) {
     const cls = statusClass(task.status);
-    const progress = Math.max(0, Math.min(100, task.progress || 0));
+    card.el.className = "card " + cls;
+    card.el.dataset.id = task.id;
+    card.kind.textContent = task.kind === "video" ? "VIDEO" : "IMAGE";
+    card.kind.className = "kind " + task.kind;
+    card.model.textContent = task.model || "unknown";
+    card.badge.textContent = statusLabel(task.status);
+    card.badge.className = "badge " + cls;
+    card.prompt.textContent = task.prompt || "(no prompt)";
+    card.prompt.classList.toggle("empty", !task.prompt);
+    card.progress.style.width = Math.max(0, Math.min(100, task.progress || 0)) + "%";
+
     const meta = [];
     if (task.size) meta.push(`<span>size <b>${esc(task.size)}</b></span>`);
     if (task.seconds) meta.push(`<span>seconds <b>${esc(task.seconds)}</b></span>`);
-    if (task.n && task.kind === "image") meta.push(`<span>n <b>${esc(task.n)}</b></span>`);
+    if (task.n) meta.push(`<span>n <b>${esc(task.n)}</b></span>`);
     if (task.current_node && ACTIVE.has(task.status)) {
       meta.push(`<span>node <b>${esc(task.current_node)}</b> ${esc(task.node_progress)}%</span>`);
     }
@@ -343,105 +500,366 @@
     } else if (task.elapsed != null) {
       meta.push(`<span>elapsed <b>${esc(fmtDuration(task.elapsed))}</b></span>`);
     }
-    meta.push(`<span>${esc(fmtTime(task.created_at))}</span>`);
+    meta.push(`<span title="${esc(fmtTime(task.created_at))}">${esc(fmtTime(task.created_at))}</span>`);
+    card.meta.innerHTML = meta.join("");
 
-    const error = task.error && task.error.message
-      ? `<div class="error">${esc(task.error.message)}</div>` : "";
+    const message = task.error && task.error.message ? task.error.message : "";
+    card.error.hidden = !message;
+    card.error.textContent = message;
 
-    const links = [`<a href="${esc(task.json_url)}" target="_blank" rel="noreferrer">JSON</a>`];
-    if (task.media.length) {
-      links.push(`<a href="${esc(task.media[0])}" target="_blank" rel="noreferrer">Open output</a>`);
+    const mediaSig = task.status + "|" + task.media.join("|");
+    if (mediaSig !== card.mediaSig) {
+      card.mediaSig = mediaSig;
+      card.media.replaceChildren();
+      if (task.status === "completed" && task.media.length) {
+        card.media.hidden = false;
+        if (task.kind === "video") {
+          const video = document.createElement("video");
+          video.controls = true;
+          video.preload = "none";
+          video.playsInline = true;
+          video.src = task.media[0];
+          card.media.append(video);
+        } else {
+          const thumbs = document.createElement("div");
+          thumbs.className = "thumbs";
+          task.media.forEach((url, index) => {
+            const img = document.createElement("img");
+            img.loading = "lazy";
+            img.src = url;
+            img.alt = "output " + (index + 1);
+            img.dataset.full = url;
+            thumbs.append(img);
+          });
+          card.media.append(thumbs);
+        }
+      } else {
+        card.media.hidden = true;
+      }
     }
 
-    return `<article class="card ${cls}">
-      <div class="card-top">
-        <span class="kind ${task.kind}">${task.kind === "video" ? "VIDEO" : "IMAGE"}</span>
-        <span class="model">${esc(task.model || "unknown")}</span>
-        <span class="badge ${cls}">${esc(statusLabel(task.status))}</span>
-      </div>
-      <p class="prompt${task.prompt ? "" : " empty"}">${esc(task.prompt || "(no prompt)")}</p>
-      <div class="progress"><i style="width:${progress}%"></i></div>
-      <div class="meta">${meta.join("")}</div>
-      ${error}
-      ${mediaHtml(task)}
-      <div class="card-foot">${links.join("")}</div>
-    </article>`;
+    card.json.href = task.json_url;
+    if (task.media.length) {
+      card.open.hidden = false;
+      card.open.href = task.media[0];
+    } else {
+      card.open.hidden = true;
+      card.open.removeAttribute("href");
+    }
   }
 
-  function renderSection(tasks, container, counter) {
-    const filtered = sortTasks(tasks.filter(matches));
-    container.innerHTML = filtered.length
-      ? filtered.map(cardHtml).join("")
-      : `<div class="empty">No ${container.id} match this filter.</div>`;
-    counter.textContent = filtered.length + " shown";
+  function getCard(task) {
+    let card = cardCache.get(task.id);
+    if (!card) {
+      card = createCard(task);
+      cardCache.set(task.id, card);
+    }
+    updateCard(card, task);
+    return card.el;
   }
 
-  function summarize() {
-    const vActive = state.videos.filter((t) => ACTIVE.has(t.status)).length;
-    const iActive = state.images.filter((t) => ACTIVE.has(t.status)).length;
-    $("stat-video-total").textContent = state.videos.length;
-    $("stat-video-running").textContent = vActive;
-    $("stat-image-total").textContent = state.images.length;
-    $("stat-image-running").textContent = iActive;
+  function renderStats() {
+    const videos = state.videos;
+    const images = state.images;
+    const active = (list) => list.filter((task) => ACTIVE.has(task.status)).length;
+    $("stat-video-total").textContent = videos.length;
+    $("stat-video-running").textContent = active(videos);
+    $("stat-image-total").textContent = images.length;
+    $("stat-image-running").textContent = active(images);
   }
 
-  function render() {
-    summarize();
-    renderSection(state.videos, $("videos"), $("video-count"));
-    renderSection(state.images, $("images"), $("image-count"));
+  function renderModelOptions() {
+    const select = $("model-filter");
+    const current = state.filters.model;
+    const models = new Set(allTasks().map((task) => task.model).filter(Boolean));
+    for (const model of state.catalog) {
+      if (model.canonical && model.canonical !== model.id) continue;
+      models.add(model.id);
+    }
+    if (current) models.add(current);
+    const sorted = Array.from(models).sort();
+    const signature = sorted.join("\n");
+    if (signature !== state.modelOptionsSig) {
+      state.modelOptionsSig = signature;
+      const options = ['<option value="">All models</option>'];
+      for (const model of sorted) {
+        options.push(`<option value="${esc(model)}">${esc(model)}</option>`);
+      }
+      select.innerHTML = options.join("");
+    }
+    select.value = current;
+  }
+
+  function renderFilterSummary(total, shown) {
+    $("filter-summary").textContent = `${shown} of ${total} tasks`;
+  }
+
+  function renderPager(total, pages) {
+    const page = state.page;
+    document.querySelector(".pager").hidden = total === 0;
+    $("page-info").textContent = `Page ${page} / ${pages}`;
+    $("first-page").disabled = page <= 1;
+    $("prev-page").disabled = page <= 1;
+    $("next-page").disabled = page >= pages;
+    $("last-page").disabled = page >= pages;
+
+    const container = $("pages");
+    const buttons = [];
+    const add = (n) => buttons.push(
+      `<button type="button" data-page="${n}" class="${n === page ? "active" : ""}">${n}</button>`
+    );
+    const pageSet = new Set([1, pages, page - 1, page, page + 1]);
+    const sorted = Array.from(pageSet).filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+    let previous = 0;
+    for (const n of sorted) {
+      if (previous && n - previous > 1) buttons.push('<span class="muted">…</span>');
+      add(n);
+      previous = n;
+    }
+    container.innerHTML = buttons.join("");
+  }
+
+  function renderList() {
+    const filtered = filteredTasks();
+    const total = filtered.length;
+    const pages = Math.max(1, Math.ceil(total / state.pageSize));
+    if (state.page > pages) state.page = pages;
+    if (state.page < 1) state.page = 1;
+    const start = (state.page - 1) * state.pageSize;
+    const pageTasks = filtered.slice(start, start + state.pageSize);
+
+    const allIds = new Set(allTasks().map((task) => task.id));
+    for (const id of Array.from(cardCache.keys())) {
+      if (!allIds.has(id)) cardCache.delete(id);
+    }
+
+    const desired = pageTasks.map(getCard);
+    const current = Array.from(grid.children);
+    if (current.length !== desired.length || current.some((node, i) => node !== desired[i])) {
+      for (const node of current) {
+        if (node.tagName === "ARTICLE" && node.querySelector("video")) {
+          node.querySelector("video").pause();
+        }
+      }
+      grid.replaceChildren(...desired);
+    }
+
+    $("empty").hidden = total !== 0;
+    grid.hidden = total === 0;
+    renderFilterSummary(allTasks().length, total);
+    renderPager(total, pages);
+  }
+
+  function renderAll() {
+    renderStats();
+    renderModelOptions();
+    renderList();
   }
 
   async function fetchJson(url) {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) throw new Error(url + " -> HTTP " + response.status);
-    return response.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(url + " -> HTTP " + response.status);
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function setBusy(busy) {
+    $("refresh-icon").innerHTML = busy ? '<span class="spin"></span>' : "";
+    $("refresh").disabled = busy;
+  }
+
+  function showNotice(message) {
+    const notice = $("notice");
+    notice.textContent = message;
+    notice.classList.toggle("show", Boolean(message));
   }
 
   async function load() {
     if (state.loading) return;
     state.loading = true;
+    setBusy(true);
     try {
-      const [videoData, imageData] = await Promise.all([
+      const [videos, images] = await Promise.allSettled([
         fetchJson("/v1/videos"),
         fetchJson("/v2/extension/image"),
       ]);
-      state.videos = (videoData.data || []).map(normalizeVideo);
-      state.images = (imageData.tasks || []).map(normalizeImage);
-      state.fetchedAt = new Date();
-      $("updated").textContent = "updated " + state.fetchedAt.toLocaleTimeString();
-      $("notice").classList.remove("show");
-      render();
-    } catch (error) {
-      const notice = $("notice");
-      notice.textContent = "Refresh failed: " + error.message;
-      notice.classList.add("show");
+      const errors = [];
+      if (videos.status === "fulfilled") {
+        state.videos = (videos.value.data || []).map(normalizeVideo);
+      } else {
+        errors.push("videos: " + videos.reason.message);
+      }
+      if (images.status === "fulfilled") {
+        state.images = (images.value.tasks || []).map(normalizeImage);
+      } else {
+        errors.push("images: " + images.reason.message);
+      }
+      if (errors.length === 2) {
+        showNotice("Refresh failed: " + errors.join("; "));
+      } else {
+        showNotice(errors.length ? "Partial refresh: " + errors.join("; ") : "");
+        state.fetchedAt = new Date();
+        $("updated").textContent = "updated " + state.fetchedAt.toLocaleTimeString();
+        renderAll();
+      }
     } finally {
       state.loading = false;
+      setBusy(false);
+      schedule();
     }
   }
 
   function schedule() {
-    if (state.timer) clearInterval(state.timer);
+    if (state.timer) clearTimeout(state.timer);
     state.timer = null;
-    if ($("auto").checked) {
-      state.timer = setInterval(() => {
-        if (document.visibilityState === "visible") load();
-      }, 2500);
+    if (!$("auto").checked || document.hidden) return;
+    state.timer = setTimeout(load, hasActive() ? 2000 : 5000);
+  }
+
+  function resetPageAndRender() {
+    state.page = 1;
+    renderList();
+  }
+
+  function setKind(kind) {
+    state.filters.kind = kind;
+    document.querySelectorAll("#kind-tabs button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.kind === kind);
+    });
+    resetPageAndRender();
+  }
+
+  function setStatus(status) {
+    state.filters.status = status;
+    document.querySelectorAll("#status-chips .chip").forEach((button) => {
+      button.classList.toggle("active", button.dataset.status === status);
+    });
+    resetPageAndRender();
+  }
+
+  function goPage(page) {
+    const filtered = filteredTasks();
+    const pages = Math.max(1, Math.ceil(filtered.length / state.pageSize));
+    state.page = Math.max(1, Math.min(pages, page));
+    renderList();
+  }
+
+  async function openModels() {
+    const dialog = $("models-dialog");
+    dialog.showModal();
+    if (state.catalog.length) {
+      renderModels();
+      return;
+    }
+    $("models-note").textContent = "loading…";
+    try {
+      const data = await fetchJson("/v1/models");
+      state.catalog = data.data || [];
+      $("models-note").textContent = state.catalog.length + " models";
+      renderModels();
+      renderModelOptions();
+    } catch (error) {
+      $("models-note").textContent = "failed: " + error.message;
     }
   }
 
-  $("refresh").addEventListener("click", load);
-  $("auto").addEventListener("change", schedule);
-  $("search").addEventListener("input", (event) => {
-    state.query = event.target.value.trim();
-    render();
+  function renderModels() {
+    const container = $("models-grid");
+    const models = state.catalog.filter(
+      (model) => !model.canonical || model.canonical === model.id
+    );
+    container.innerHTML = models.map((model) => {
+      const defaults = model.defaults || {};
+      const bits = [];
+      if (defaults.size) bits.push("size " + defaults.size);
+      if (defaults.steps) bits.push("steps " + defaults.steps);
+      if (defaults.cfg != null) bits.push("cfg " + defaults.cfg);
+      if (defaults.sampler) bits.push(defaults.sampler);
+      if (defaults.resolution) bits.push("resolution " + defaults.resolution);
+      const caps = (model.capabilities || []).join(", ");
+      return `<article class="model-card">
+        <header><code>${esc(model.id)}</code><span class="badge ${model.modality === "image" ? "running" : ""}">${esc(model.modality || "video")}</span></header>
+        <div class="line">tasks: ${esc((model.tasks || []).join(", ") || "—")}</div>
+        ${bits.length ? `<div class="line">${esc(bits.join(" · "))}</div>` : ""}
+        ${caps ? `<div class="line">${esc(caps)}</div>` : ""}
+        <div class="line" style="margin-top:auto">
+          <button type="button" data-model="${esc(model.id)}">Filter tasks</button>
+        </div>
+      </article>`;
+    }).join("");
+  }
+
+  function filterByModel(model, modality) {
+    state.filters.model = model;
+    $("model-filter").value = model;
+    if (modality === "video" || modality === "image") {
+      state.filters.kind = modality;
+      document.querySelectorAll("#kind-tabs button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.kind === modality);
+      });
+    }
+    resetPageAndRender();
+  }
+
+  $("refresh").addEventListener("click", () => {
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = null;
+    load();
   });
-  document.querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      state.status = chip.dataset.status;
-      document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c === chip));
-      render();
-    });
+  $("auto").addEventListener("change", schedule);
+  $("search").addEventListener("input", (() => {
+    let timer = null;
+    return (event) => {
+      const value = event.target.value.trim();
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        state.filters.query = value;
+        resetPageAndRender();
+      }, 180);
+    };
+  })());
+  document.querySelectorAll("#kind-tabs button").forEach((button) => {
+    button.addEventListener("click", () => setKind(button.dataset.kind));
+  });
+  document.querySelectorAll("#status-chips .chip").forEach((button) => {
+    button.addEventListener("click", () => setStatus(button.dataset.status));
+  });
+  $("sort").addEventListener("change", (event) => {
+    state.sort = event.target.value;
+    resetPageAndRender();
+  });
+  $("page-size").addEventListener("change", (event) => {
+    state.pageSize = Number(event.target.value) || 12;
+    localStorage.setItem("comfy-rest-ext.pageSize", String(state.pageSize));
+    resetPageAndRender();
+  });
+  $("model-filter").addEventListener("change", (event) => {
+    state.filters.model = event.target.value;
+    resetPageAndRender();
+  });
+  $("first-page").addEventListener("click", () => goPage(1));
+  $("prev-page").addEventListener("click", () => goPage(state.page - 1));
+  $("next-page").addEventListener("click", () => goPage(state.page + 1));
+  $("last-page").addEventListener("click", () => {
+    goPage(Math.max(1, Math.ceil(filteredTasks().length / state.pageSize)));
+  });
+  $("pages").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-page]");
+    if (button) goPage(Number(button.dataset.page));
+  });
+  $("models-btn").addEventListener("click", openModels);
+  $("models-close").addEventListener("click", () => $("models-dialog").close());
+  $("models-grid").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-model]");
+    if (!button) return;
+    const model = state.catalog.find((item) => item.id === button.dataset.model);
+    filterByModel(button.dataset.model, model && model.modality);
+    $("models-dialog").close();
   });
   document.addEventListener("click", (event) => {
     const img = event.target.closest("img[data-full]");
@@ -454,9 +872,17 @@
   $("lightbox").addEventListener("click", (event) => {
     if (event.target === $("lightbox")) $("lightbox").close();
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (state.timer) clearTimeout(state.timer);
+      state.timer = null;
+    } else {
+      load();
+    }
+  });
 
+  $("page-size").value = String(state.pageSize);
   load();
-  schedule();
 })();
 </script>
 </body>

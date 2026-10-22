@@ -891,7 +891,7 @@ GET /v2/extension/image
 GET /v2/extension/image/{id}/content?index=N
 ```
 
-不调用 ComfyUI 原生 API、`/view` 或前端 SDK。支持自动刷新、状态筛选、进度/ETA、视频播放和图片预览。
+不调用 ComfyUI 原生 API、`/view` 或前端 SDK。支持自动刷新（有活跃任务时 2s，否则 5s）、分页、排序、类型/状态/模型筛选、搜索，以及 Models 弹窗（读取 `/v1/models`，不跳转 JSON）。卡片采用增量更新，视频播放不会被轮询刷新打断。
 
 ---
 
