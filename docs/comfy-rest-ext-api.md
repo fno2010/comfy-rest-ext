@@ -712,14 +712,19 @@ ws.addEventListener('message', (event) => {
 | POST | `/v2/extension/video/generate` | 提交视频生成任务 |
 | GET | `/v2/extension/video/{task_id}` | 查询视频生成状态 |
 | GET | `/v2/extension/video` | 列出视频生成任务 |
+| POST | `/v2/extension/image/generate` | 提交图片生成任务（异步） |
+| GET | `/v2/extension/image/{task_id}` | 查询图片生成状态 |
+| GET | `/v2/extension/image` | 列出图片生成任务 |
 | GET | `/v1/models` | 列出模型（OpenAI 兼容） |
+| POST | `/v1/images/generations` | 生成图片（OpenAI 兼容，同步） |
+| POST | `/v1/images/edits` | 编辑图片（OpenAI 兼容，multipart） |
 | POST | `/v1/videos` | 创建视频任务（OpenAI 兼容） |
 | GET | `/v1/videos/{video_id}` | 查询视频任务（OpenAI 兼容） |
 | GET | `/v1/videos/{video_id}/content` | 下载视频（OpenAI 兼容） |
 | GET | `/v1/videos` | 列出视频任务（OpenAI 兼容） |
 | DELETE | `/v1/videos/{video_id}` | 删除视频任务（OpenAI 兼容） |
 
-**总计：37 个端点**
+**总计：42 个端点**
 
 ---
 
@@ -786,6 +791,88 @@ ws.addEventListener('message', (event) => {
 **状态值：** `queued` | `running` | `completed` | `failed`
 
 ### GET `/v2/extension/video` — 列出活跃任务
+
+---
+
+## 图片生成
+
+图片模型通过 `model` 字段路由：
+
+| model id | 任务 | 默认尺寸 | 默认采样 |
+|---|---|---|---|
+| `anima-base` | `t2i` | 1024x1024 | 30 steps / cfg 4 / euler / simple |
+| `anima-turbo` | `t2i` | 1024x1024 | 8 steps / cfg 1 / euler / simple |
+| `qwen-image-2.1` | `t2i`, `edit` | 1024x1024 | 25 steps / cfg 1 / euler / simple |
+| `qwen-image-2.1-turbo` | `t2i`, `edit` | 1024x1024 | 8-step ManualSigmas |
+
+### POST `/v1/images/generations` — 同步生成
+
+**请求体：**
+
+```json
+{
+  "model": "anima-base",
+  "prompt": "masterpiece, best quality, 1girl, ...",
+  "negative_prompt": "worst quality, ...",
+  "size": "1024x1024",
+  "n": 1,
+  "response_format": "b64_json",
+  "seed": 42,
+  "steps": 30,
+  "cfg": 4.0,
+  "sampler": "euler",
+  "scheduler": "simple"
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `model` | 必填，图片模型 id |
+| `prompt` | 必填 |
+| `size` | `WIDTHxHEIGHT` 或 `auto`；也可用 `width`/`height` |
+| `aspect_ratio` | Qwen-Image 2.1：如 `16:9`，配合 `megapixels` |
+| `megapixels` | Qwen-Image 2.1：目标像素数（1.0 ≈ 1024²，4.0 ≈ 2048²） |
+| `n` | 1..模型上限（Anima 8，Qwen-Image 2.1 4） |
+| `response_format` | `b64_json`（默认）或 `url` |
+| `negative_prompt` | Qwen-Image 2.1 在 cfg=1 时实际不生效 |
+| `seed` / `steps` / `cfg` / `sampler` / `scheduler` | 扩展字段 |
+| `quality` / `style` | 接受但不改变生成参数 |
+| `output_format` | 仅支持 `png`（Qwen-Image 2.1 的 alpha 通道） |
+| `stream` / `partial_images` | 不支持，返回 400 |
+
+**响应：**
+
+```json
+{
+  "created": 1792590000,
+  "model": "anima-base",
+  "size": "1024x1024",
+  "data": [{"b64_json": "...", "revised_prompt": "..."}]
+}
+```
+
+`response_format=url` 时 `data[]` 为 `{"url": "http://.../view?..."}`；URL 基址优先取 `PUBLIC_BASE_URL`，否则取请求 origin。
+
+### POST `/v1/images/edits` — 编辑（Qwen-Image 2.1）
+
+`multipart/form-data`，字段：`model`、`prompt`、`image`（可重复，1..16 张）、`n`、`response_format`、`resolution`（0..4096，步长 32）。
+
+```bash
+curl -X POST http://host:8188/v1/images/edits \
+  -F model=qwen-image-2.1 \
+  -F prompt='Keep <image1> unchanged, put the shirt from <image2> on the character' \
+  -F image=@portrait.png -F image=@shirt.png
+```
+
+参考图按顺序映射到 `<image1>`…`<imageN>`；`image1` 是被编辑图。`mask` 不支持（返回 400）。
+
+### 异步端点
+
+- `POST /v2/extension/image/generate` — JSON 请求，立即返回 `{"id":"image_...","status":"queued"}`。
+- `GET /v2/extension/image/{task_id}` — 查询状态、进度、`view_urls`。
+- `GET /v2/extension/image` — 列出图片任务。
+
+同步请求超时返回 504，任务不会自动取消；可继续轮询异步端点。
 
 ---
 
@@ -905,7 +992,9 @@ curl -X POST http://host:8188/v1/videos \
 
 返回 `video/mp4` 二进制流。
 
-### GET `/v1/videos` — 列出任务
+### GET `/v1/videos` — 列出视频任务
+
+只返回 `modality=video` 的任务；图片任务通过 `GET /v2/extension/image` 查询。
 
 ### DELETE `/v1/videos/{video_id}` — 删除任务记录
 

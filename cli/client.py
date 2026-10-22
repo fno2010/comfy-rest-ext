@@ -100,6 +100,53 @@ class ComfyRestClient:
     def create_video(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._json_request("POST", "/v1/videos", payload)
 
+    def create_image(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._json_request("POST", "/v1/images/generations", payload)
+
+    def create_image_edit(
+        self,
+        payload: Dict[str, Any],
+        files: list,
+    ) -> Dict[str, Any]:
+        boundary = f"----comfyrestext{os.getpid()}{id(payload):x}"
+        parts: list = []
+        for key, value in payload.items():
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
+                    f"{value}\r\n"
+                ).encode("utf-8")
+            )
+        for file_field, filename, file_bytes in files:
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="{file_field}"; '
+                    f'filename="{filename}"\r\n'
+                    f"Content-Type: {_guess_image_type(filename)}\r\n\r\n"
+                ).encode("utf-8")
+            )
+            parts.append(file_bytes)
+            parts.append(b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+        body = b"".join(parts)
+        return self._request(
+            "POST",
+            "/v1/images/edits",
+            body=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+
+    def list_images(self) -> list:
+        data = self._request("GET", "/v2/extension/image")
+        return data.get("tasks", []) if isinstance(data, dict) else []
+
+    def get_image(self, image_id: str) -> Dict[str, Any]:
+        return self._request(
+            "GET", f"/v2/extension/image/{urllib.parse.quote(image_id)}"
+        )
+
     def create_video_multipart(
         self,
         payload: Dict[str, Any],

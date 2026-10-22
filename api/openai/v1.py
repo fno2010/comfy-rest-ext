@@ -28,52 +28,51 @@ from ..tasks.video_task import (
     comfyui_view_url,
 )
 from ..tasks.video_persistence import get_video_persistence
+from ..catalog import (
+    all_model_ids,
+    alias_task_type,
+    get_model,
+)
 
 logger = logging.getLogger("comfy-rest-ext.openai")
 
 routes = PromptServer.instance.routes
 
 CANONICAL_MODEL_ID = "minimax-h3"
-MODEL_IDS = [
-    CANONICAL_MODEL_ID,
-    "minimax-h3-t2v",
-    "minimax-h3-i2v",
-    "minimax-h3-r2v",
-]
-# Legacy aliases -> task_type; the canonical id maps to None (infer).
-MODEL_TASK_ALIASES = {
-    "minimax-h3-t2v": "t2va",
-    "minimax-h3-i2v": "fl2va",
-    "minimax-h3-r2v": "r2v",
-}
-SUPPORTED_TASKS = ("t2va", "fl2va", "r2v")
+MODEL_IDS = list(all_model_ids())
+SUPPORTED_TASKS = get_model(CANONICAL_MODEL_ID).tasks
 
 
 def _model_card(model_id: str, created: int) -> dict:
-    task_type = MODEL_TASK_ALIASES.get(model_id)
+    spec = get_model(model_id)
+    task_type = alias_task_type(model_id)
     return {
         "id": model_id,
         "object": "model",
         "created": created,
         "owned_by": "comfy-rest-ext",
+        "canonical": spec.id,
+        "modality": spec.modality,
+        "tasks": list(spec.tasks),
         "task_type": task_type or "auto",
+        "capabilities": sorted(spec.capabilities),
+        "defaults": dict(spec.defaults),
     }
 
 
 def _task_type_from_model(model: Optional[str]) -> Optional[str]:
-    """Map a requested model id to a task type.
+    """Map a requested video model id to a task type.
 
     Returns the task type for legacy aliases (minimax-h3-i2v -> fl2va),
     None for the canonical id or no model (caller infers from request
-    content), and raises KeyError for unknown ids (-> 400 mismatch).
+    content), and raises KeyError for unknown/non-video ids.
     """
     if not model:
         return None
-    if model == CANONICAL_MODEL_ID:
-        return None
-    if model in MODEL_TASK_ALIASES:
-        return MODEL_TASK_ALIASES[model]
-    raise KeyError(model)
+    spec = get_model(model)
+    if spec.modality != "video":
+        raise KeyError(model)
+    return alias_task_type(model)
 
 
 def _infer_task_type(fields: dict) -> str:
@@ -102,7 +101,7 @@ def _video_response(task: VideoTask) -> dict:
     return {
         "id": task.task_id,
         "object": "video",
-        "model": _model_for_task(task.task_type),
+        "model": task.model_id or _model_for_task(task.task_type),
         "prompt": task.prompt,
         "status": status,
         "progress": int(task.progress * 100),
@@ -114,7 +113,7 @@ def _video_response(task: VideoTask) -> dict:
         "seconds": str(task.length / 24),
         "created_at": int(task.created_at),
         "completed_at": int(task.completed_at) if task.completed_at else None,
-        "media_type": "video/mp4",
+        "media_type": task.output_mime or "video/mp4",
         "file_name": task.output_path,
         "view_url": comfyui_view_url(task.output_path),
         "inference_time_s": inference_time_s,
@@ -158,7 +157,6 @@ async def create_video(request: web.Request) -> web.Response:
     if isinstance(fields, web.Response):
         return fields
 
-    content_items = None
     if not ctype.startswith("multipart/") and (fields.get("input") or fields.get("content")):
         content_items = _parse_content_items(fields)
         if content_items["prompt"]:
@@ -174,13 +172,16 @@ async def create_video(request: web.Request) -> web.Response:
     if not prompt:
         return web.json_response({"error": "prompt is required"}, status=400)
 
-    model = fields.get("model")
+    model = fields.get("model") or CANONICAL_MODEL_ID
     try:
+        spec = get_model(model)
+        if spec.modality != "video":
+            raise KeyError(model)
         model_task_type = _task_type_from_model(model)
     except KeyError:
         return web.json_response(
-            {"error": f"Model mismatch: '{model}' is not served. "
-                      f"Use '{CANONICAL_MODEL_ID}'."},
+            {"error": f"Model mismatch: '{model}' is not a served video model. "
+                      f"Use '{CANONICAL_MODEL_ID}' or an image endpoint."},
             status=400,
         )
 
@@ -247,6 +248,9 @@ async def create_video(request: web.Request) -> web.Response:
         height=height,
         length=length,
         seed=seed,
+        model_id=spec.id,
+        modality="video",
+        params={"seconds": seconds},
         first_frame=first_frame,
         ref_images=ref_images,
         speed=speed,
@@ -418,7 +422,7 @@ async def retrieve_video(request: web.Request) -> web.Response:
     """Retrieve the job record for a video generation task."""
     video_id = request.match_info["video_id"]
     task = _get_task_or_restore(video_id)
-    if not task:
+    if not task or task.modality != "video":
         return web.json_response({"error": "Video not found"}, status=404)
     return web.json_response(_video_response(task))
 
@@ -426,17 +430,22 @@ async def retrieve_video(request: web.Request) -> web.Response:
 @routes.get("/v1/videos")
 async def list_videos(request: web.Request) -> web.Response:
     """List video generation jobs (active + history)."""
+    manager = get_video_manager()
+    all_tasks = manager.list_all()
     tasks = [
         _video_response(t)
-        for t in get_video_manager().list_all().values()
+        for t in all_tasks.values()
+        if t.modality == "video"
     ]
     history = get_video_persistence().list_active()
-    seen = {t.task_id for t in get_video_manager().list_all().values()}
+    seen = set(all_tasks.keys())
     for record in history.values():
         if record.get("task_id") in seen:
             continue
+        if record.get("modality", "video") != "video":
+            continue
         task = _record_to_task(record)
-        get_video_manager().restore(task)
+        manager.restore(task)
         tasks.append(_video_response(task))
     return web.json_response({
         "object": "list",
@@ -449,7 +458,7 @@ async def download_video_content(request: web.Request) -> web.Response:
     """Download the generated MP4 for a completed job."""
     video_id = request.match_info["video_id"]
     task = _get_task_or_restore(video_id)
-    if not task:
+    if not task or task.modality != "video":
         return web.json_response({"error": "Video not found"}, status=404)
     if task.status != "completed" or not task.output_path:
         return web.json_response(
@@ -464,7 +473,7 @@ async def delete_video(request: web.Request) -> web.Response:
     """Delete a video generation job record."""
     video_id = request.match_info["video_id"]
     task = _get_task_or_restore(video_id)
-    if not task:
+    if not task or task.modality != "video":
         return web.json_response({"error": "Video not found"}, status=404)
     return web.json_response({
         "id": video_id,

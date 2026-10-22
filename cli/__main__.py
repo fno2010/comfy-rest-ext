@@ -60,12 +60,65 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="VAE decode strategy (default default)")
     p.set_defaults(func=commands.cmd_generate)
 
+    p = sub.add_parser("image", help="generate an image (OpenAI Images API)")
+    p.add_argument("prompt", help="text prompt")
+    p.add_argument("--model", default="anima-base",
+                   help="image model id (default anima-base)")
+    p.add_argument("--size", help="WIDTHxHEIGHT or auto")
+    p.add_argument("--width", type=int, help="output width")
+    p.add_argument("--height", type=int, help="output height")
+    p.add_argument("--aspect-ratio", help="e.g. 16:9 (Qwen-Image 2.1)")
+    p.add_argument("--megapixels", type=float, help="target megapixels (Qwen-Image 2.1)")
+    p.add_argument("--n", type=int, help="number of images")
+    p.add_argument("--negative", help="negative prompt")
+    p.add_argument("--steps", type=int, help="sampling steps")
+    p.add_argument("--cfg", type=float, help="CFG scale")
+    p.add_argument("--sampler", help="sampler name (default euler)")
+    p.add_argument("--scheduler", help="scheduler name (default simple)")
+    p.add_argument("--seed", type=int, help="generation seed")
+    p.add_argument("--response-format", choices=["b64_json", "url"],
+                   default="b64_json", help="response format (default b64_json)")
+    p.add_argument("--quality", help="OpenAI quality field (accepted, informational)")
+    p.add_argument("--style", help="OpenAI style field (accepted, informational)")
+    p.add_argument("--out", default="image.png", help="output path (default image.png)")
+    p.set_defaults(func=commands.cmd_image)
+
+    p = sub.add_parser("image-edit", help="edit an image (Qwen-Image 2.1)")
+    p.add_argument("prompt", help="edit instruction; reference images are <image1>..<imageN>")
+    p.add_argument("--image", action="append", default=[],
+                   help="reference image (repeatable; image1 is the image being edited)")
+    p.add_argument("--model", default="qwen-image-2.1",
+                   help="image model id (default qwen-image-2.1)")
+    p.add_argument("--size", help="WIDTHxHEIGHT or auto")
+    p.add_argument("--width", type=int, help="output width")
+    p.add_argument("--height", type=int, help="output height")
+    p.add_argument("--n", type=int, help="number of outputs")
+    p.add_argument("--negative", help="negative prompt")
+    p.add_argument("--steps", type=int, help="sampling steps")
+    p.add_argument("--cfg", type=float, help="CFG scale")
+    p.add_argument("--sampler", help="sampler name (default euler)")
+    p.add_argument("--scheduler", help="scheduler name (default simple)")
+    p.add_argument("--seed", type=int, help="generation seed")
+    p.add_argument("--response-format", choices=["b64_json", "url"],
+                   default="b64_json", help="response format (default b64_json)")
+    p.add_argument("--quality", help="OpenAI quality field (accepted, informational)")
+    p.add_argument("--style", help="OpenAI style field (accepted, informational)")
+    p.add_argument("--out", default="image.png", help="output path (default image.png)")
+    p.set_defaults(func=commands.cmd_image_edit)
+
     p = sub.add_parser("status", help="show a video task's status")
     p.add_argument("video_id", help="video task id")
     p.set_defaults(func=commands.cmd_status)
 
     p = sub.add_parser("list", help="list video tasks")
     p.set_defaults(func=commands.cmd_list)
+
+    p = sub.add_parser("images", help="list image tasks")
+    p.set_defaults(func=commands.cmd_images)
+
+    p = sub.add_parser("image-status", help="show an image task's status")
+    p.add_argument("image_id", help="image task id")
+    p.set_defaults(func=commands.cmd_image_status)
 
     p = sub.add_parser("wait", help="wait for a video task to finish")
     p.add_argument("video_id", help="video task id")
