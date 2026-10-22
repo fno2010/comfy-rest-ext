@@ -85,6 +85,7 @@ def _image_task_summary(task: GenerationTask) -> dict:
         "progress": int(task.progress * 100),
         "size": _size_of(task),
         "n": int((task.params or {}).get("n", 1)),
+        "media_type": task.output_mime or "image/png",
         "current_node": task.current_node,
         "node_progress": int(task.node_progress * 100),
         "eta": round(task.eta, 1) if task.eta is not None else None,
@@ -113,7 +114,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
     if not edit and "t2i" not in spec.tasks and "edit" not in spec.tasks:
         raise BadRequest(f"model {spec.id!r} does not support image generation", "model")
 
-    n = _int_field(body, "n", 1)
+    n = _int_field(body, "n", int(spec.defaults.get("n", 1)))
     if n < 1 or n > spec.max_n:
         raise BadRequest(
             f"n must be between 1 and {spec.max_n} for {spec.id}", "n"
@@ -129,7 +130,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
             aspect_ratio=body.get("aspect_ratio"),
             megapixels=body.get("megapixels"),
         )
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         raise BadRequest(str(e), "size") from e
 
     response_format = body.get("response_format") or "b64_json"
@@ -153,7 +154,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
     if quality not in (None, "auto", "standard", "high", "hd", "medium", "low"):
         raise BadRequest("unsupported quality", "quality")
 
-    steps = _int_field(body, "steps", spec.defaults["steps"])
+    steps = _int_field(body, "steps", spec.defaults.get("steps", 25))
     if steps <= 0:
         raise BadRequest("steps must be a positive integer", "steps")
 
@@ -162,7 +163,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
         "n": n,
         "width": width,
         "height": height,
-        "seed": _int_field(body, "seed", 0),
+        "seed": _int_field(body, "seed", int(spec.defaults.get("seed", 0))),
         "steps": steps,
         "cfg": _float_field(body, "cfg", spec.defaults.get("cfg", 1.0)),
         "sampler": body.get("sampler") or spec.defaults.get("sampler", "euler"),
@@ -512,7 +513,10 @@ async def get_image_content(request: web.Request) -> web.Response:
         return _error(404, "Image index out of range", "index")
     return web.FileResponse(
         task.output_paths[index],
-        headers={"Content-Disposition": "inline"},
+        headers={
+            "Content-Disposition": "inline",
+            "Content-Type": task.output_mime or "image/png",
+        },
     )
 
 

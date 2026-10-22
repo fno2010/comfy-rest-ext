@@ -42,6 +42,8 @@ class GenerationTask:
     model_id: str = "minimax-h3"
     modality: str = "video"
     params: Dict[str, Any] = field(default_factory=dict)
+    assets: Dict[str, str] = field(default_factory=dict)
+    variant: Optional[str] = None
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
     speed: Optional[Any] = None  # legacy str or AccelConfig dict
@@ -390,6 +392,19 @@ def _maybe_unload_family(family: str) -> None:
     _last_family = family
 
 
+def apply_model_spec(task: GenerationTask, spec) -> None:
+    """Copy catalog-owned model settings onto a task before building.
+
+    Config is the source of truth for assets/variant/defaults; per-request
+    task.params win over model defaults.
+    """
+    task.assets = dict(spec.assets)
+    task.variant = spec.variant
+    params = dict(spec.defaults)
+    params.update(task.params or {})
+    task.params = params
+
+
 async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
     """Build, validate, submit, and track one generation task."""
     from server import PromptServer
@@ -405,6 +420,7 @@ async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
 
     try:
         spec = get_model(task.model_id)
+        apply_model_spec(task, spec)
         built = spec.build(task)
     except Exception as e:
         task.status = "failed"
@@ -422,7 +438,7 @@ async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
         task.done.set()
         return task
 
-    task.output_mime = built.output_mime
+    task.output_mime = spec.output_mime or built.output_mime
 
     async with _family_gate:
         try:

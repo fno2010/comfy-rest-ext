@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from .base import BuildResult, require_asset
+from .base import BuildResult, is_turbo_variant, require_asset, resolve_asset
 
 QWEN_PHASE_WEIGHTS = {
     "cond": 0.10,
@@ -156,20 +156,24 @@ def _add_sampler(
 
 def build_qwen_image_task(task: Any) -> BuildResult:
     """Build a Qwen-Image 2.1 T2I or edit workflow."""
-    turbo = task.model_id == "qwen-image-2.1-turbo"
+    turbo = is_turbo_variant(task, {"qwen-image-2.1-turbo"})
     params: Dict[str, Any] = task.params or {}
     is_edit = task.task_type == "edit"
 
-    unet = os.environ.get(
+    unet = resolve_asset(
+        task,
+        "turbo_unet" if turbo else "unet",
         "QWEN_IMAGE_21_TURBO_UNET" if turbo else "QWEN_IMAGE_21_UNET",
         "qwen_image_2.1_turbo_int8_convrot.safetensors"
         if turbo else "qwen_image_2.1_int8_convrot.safetensors",
     )
-    text_encoder = os.environ.get(
-        "QWEN_IMAGE_21_TE", "qwen3vl_8b_int8_convrot.safetensors"
+    text_encoder = resolve_asset(
+        task, "text_encoder", "QWEN_IMAGE_21_TE",
+        "qwen3vl_8b_int8_convrot.safetensors",
     )
-    vae = os.environ.get(
-        "QWEN_IMAGE_21_VAE", "qwen_image_2.1_vae_bf16.safetensors"
+    vae = resolve_asset(
+        task, "vae", "QWEN_IMAGE_21_VAE",
+        "qwen_image_2.1_vae_bf16.safetensors",
     )
 
     require_asset("diffusion_models", unet)

@@ -906,6 +906,8 @@ GET /v2/extension/image/{id}/content?index=N
 
 ### GET `/v1/models` — 列出可用模型
 
+模型列表来自 `api/catalog.py` 注册表，可在扩展加载时通过 `models.json` 覆盖或新增（见 README 的「模型配置」章节）。修改配置后需要重启 ComfyUI。
+
 ```json
 {
   "object": "list",

@@ -10,7 +10,7 @@ from ..accel import (
     check_config_available,
     parse_accel_config,
 )
-from .base import BuildResult, require_asset
+from .base import BuildResult, require_asset, resolve_asset
 
 H3_PHASE_WEIGHTS = {
     "cond": 0.05,
@@ -34,7 +34,7 @@ def frames_for_seconds(seconds: float) -> int:
     return min(frames, 362)
 
 
-def _apply_accel_layers(workflow, add, model_ref: list, accel) -> list:
+def _apply_accel_layers(workflow, add, model_ref: list, accel, turbo_lora: str) -> list:
     """Apply acceleration layers in pipeline order (cross-layer stacking)."""
     model_out = list(model_ref)
     seq = iter("bcdefghij")
@@ -43,7 +43,7 @@ def _apply_accel_layers(workflow, add, model_ref: list, accel) -> list:
         nid = "1" + next(seq)
         add(nid, "MiniMaxH3TurboLoRA", {
             "model": model_out,
-            "lora_name": "minimax_h3_turbo_v4_step600_ema.safetensors",
+            "lora_name": turbo_lora,
             "strength": 1.0,
             "low_vram": False,
         })
@@ -156,6 +156,7 @@ def build_h3_workflow(
     sol_stack: bool = False,
     accel: Optional[AccelConfig] = None,
     ref_image_size: str = "match",
+    turbo_lora: str = "minimax_h3_turbo_v4_step600_ema.safetensors",
     filename_prefix: str = "video/comfy-rest-ext",
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V."""
@@ -186,7 +187,7 @@ def build_h3_workflow(
     add("3", "VAELoader", {"vae_name": video_vae})
     add("4", "VAELoader", {"vae_name": audio_vae})
 
-    model_out = _apply_accel_layers(workflow, add, ["1", 0], accel)
+    model_out = _apply_accel_layers(workflow, add, ["1", 0], accel, turbo_lora)
 
     add("5", "MiniMaxH3SigmaShift", {
         "model": model_out,
@@ -280,23 +281,43 @@ def build_h3_task(task: Any) -> BuildResult:
         raise ValueError(missing_node)
 
     params = task.params or {}
-    steps = (
-        accel_cfg.steps
-        if task.speed is not None
-        else int(os.environ.get("H3_STEPS", "20"))
-    )
+    explicit_steps = isinstance(task.speed, dict) and "steps" in task.speed
+    if explicit_steps:
+        steps = accel_cfg.steps
+    else:
+        steps = int(os.environ.get("H3_STEPS") or params.get("steps", 20))
 
     is_r2v = bool(task.ref_images)
-    require_asset(
-        "diffusion_models",
-        os.environ.get("H3_REF2VA_MODEL", "minimax_h3_ref2va_pruned_nvfp4.safetensors")
+    unet = resolve_asset(
+        task,
+        "ref2va" if is_r2v else "unet",
+        "H3_REF2VA_MODEL" if is_r2v else "H3_UNET",
+        "minimax_h3_ref2va_pruned_nvfp4.safetensors"
         if is_r2v else "minimax_h3_fl2va_pruned_nvfp4.safetensors",
     )
-    require_asset(
-        "text_encoders", "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    text_encoder = resolve_asset(
+        task, "text_encoder", "H3_TEXT_ENCODER",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
     )
-    require_asset("vae", "minimax_h3_video_vae_fp16.safetensors")
-    require_asset("vae", "minimax_h3_audio_vae_fp32.safetensors")
+    video_vae = resolve_asset(
+        task, "video_vae", "H3_VIDEO_VAE",
+        "minimax_h3_video_vae_fp16.safetensors",
+    )
+    audio_vae = resolve_asset(
+        task, "audio_vae", "H3_AUDIO_VAE",
+        "minimax_h3_audio_vae_fp32.safetensors",
+    )
+    turbo_lora = resolve_asset(
+        task, "turbo_lora", "H3_TURBO_LORA",
+        "minimax_h3_turbo_v4_step600_ema.safetensors",
+    )
+
+    require_asset("diffusion_models", unet)
+    require_asset("text_encoders", text_encoder)
+    require_asset("vae", video_vae)
+    require_asset("vae", audio_vae)
+    if accel_cfg.turbo != "none":
+        require_asset("loras", turbo_lora)
 
     prefix = f"video/comfy-rest-ext_{(task.task_id or 'task')[:8]}"
     workflow = build_h3_workflow(
@@ -307,14 +328,21 @@ def build_h3_task(task: Any) -> BuildResult:
         seed=task.seed,
         first_frame_path=task.first_frame,
         ref_images=task.ref_images,
-        sampler_name=params.get("sampler") or os.environ.get("H3_SAMPLER", "euler"),
-        scheduler=params.get("scheduler") or os.environ.get("H3_SCHEDULER", "simple"),
+        diffusion_model=unet,
+        text_encoder=text_encoder,
+        video_vae=video_vae,
+        audio_vae=audio_vae,
+        ref2va_model=unet,
+        sampler_name=os.environ.get("H3_SAMPLER") or params.get("sampler") or "euler",
+        scheduler=os.environ.get("H3_SCHEDULER") or params.get("scheduler") or "simple",
         steps=steps,
         accel=accel_cfg,
-        ref_image_size=os.environ.get("H3_REF_SIZE", "match"),
-        ref2va_model=os.environ.get(
-            "H3_REF2VA_MODEL", "minimax_h3_ref2va_pruned_nvfp4.safetensors"
+        ref_image_size=(
+            os.environ.get("H3_REF_SIZE")
+            or params.get("ref_image_size")
+            or "match"
         ),
+        turbo_lora=turbo_lora,
         filename_prefix=prefix,
     )
 

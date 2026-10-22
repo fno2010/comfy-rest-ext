@@ -39,7 +39,6 @@ routes = PromptServer.instance.routes
 
 CANONICAL_MODEL_ID = "minimax-h3"
 MODEL_IDS = list(all_model_ids())
-SUPPORTED_TASKS = get_model(CANONICAL_MODEL_ID).tasks
 
 
 def _model_card(model_id: str, created: int) -> dict:
@@ -56,6 +55,7 @@ def _model_card(model_id: str, created: int) -> dict:
         "task_type": task_type or "auto",
         "capabilities": sorted(spec.capabilities),
         "defaults": dict(spec.defaults),
+        "description": spec.description,
     }
 
 
@@ -194,7 +194,7 @@ async def create_video(request: web.Request) -> web.Response:
         task_type = model_task_type
     else:
         task_type = _infer_task_type(fields)
-    if task_type not in SUPPORTED_TASKS:
+    if task_type not in spec.tasks:
         return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
     speed = fields.get("speed", "auto")
@@ -207,10 +207,10 @@ async def create_video(request: web.Request) -> web.Response:
     if missing_node:
         return web.json_response({"error": f"invalid speed: {missing_node}"}, status=400)
 
-    width = _parse_int(fields.get("width"), 1344)
-    height = _parse_int(fields.get("height"), 768)
-    seconds = _parse_float(fields.get("seconds"), 5.0)
-    seed = _parse_int(fields.get("seed"), 0)
+    width = _parse_int(fields.get("width"), int(spec.defaults.get("width", 1344)))
+    height = _parse_int(fields.get("height"), int(spec.defaults.get("height", 768)))
+    seconds = _parse_float(fields.get("seconds"), float(spec.defaults.get("seconds", 5.0)))
+    seed = _parse_int(fields.get("seed"), int(spec.defaults.get("seed", 0)))
 
     first_frame = None
     ref_images = None

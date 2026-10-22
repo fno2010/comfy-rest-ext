@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict
 
-from .base import BuildResult, require_asset
+from .base import BuildResult, is_turbo_variant, require_asset, resolve_asset
 
 ANIMA_PHASE_WEIGHTS = {
     "cond": 0.08,
@@ -22,16 +21,22 @@ DEFAULT_NEGATIVE = (
 
 def build_anima_task(task: Any) -> BuildResult:
     """Build an Anima T2I workflow from a generic GenerationTask."""
-    turbo = task.model_id == "anima-turbo"
+    turbo = is_turbo_variant(task, {"anima-turbo"})
     params: Dict[str, Any] = task.params or {}
 
-    unet = os.environ.get(
+    unet = resolve_asset(
+        task,
+        "turbo_unet" if turbo else "unet",
         "ANIMA_TURBO_UNET" if turbo else "ANIMA_UNET",
         "anima-turbo-v1.0.safetensors" if turbo else "anima-base-v1.0.safetensors",
     )
-    text_encoder = os.environ.get("ANIMA_TE", "qwen_3_06b_base.safetensors")
-    vae = os.environ.get("ANIMA_VAE", "qwen_image_vae.safetensors")
-    lora = os.environ.get("ANIMA_TURBO_LORA", "").strip() if turbo else ""
+    text_encoder = resolve_asset(
+        task, "text_encoder", "ANIMA_TE", "qwen_3_06b_base.safetensors"
+    )
+    vae = resolve_asset(task, "vae", "ANIMA_VAE", "qwen_image_vae.safetensors")
+    lora = resolve_asset(
+        task, "turbo_lora", "ANIMA_TURBO_LORA", ""
+    ).strip() if turbo else ""
 
     require_asset("diffusion_models", unet)
     require_asset("text_encoders", text_encoder)

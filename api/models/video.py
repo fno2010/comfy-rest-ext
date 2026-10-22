@@ -16,6 +16,7 @@ from typing import Optional
 from aiohttp import web
 from server import PromptServer
 
+from ..catalog import get_model
 from ..schemas.requests import VideoGenerateRequest
 from ..tasks.video_task import (
     VideoTask,
@@ -63,8 +64,30 @@ async def create_video_task(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 
+    if not isinstance(body, dict):
+        return web.json_response({"error": "JSON body must be an object"}, status=400)
+
+    # Legacy route is H3-only; ignore any `model` field from old clients.
     try:
-        req = VideoGenerateRequest(**body)
+        spec = get_model("minimax-h3")
+    except KeyError:
+        spec = None
+    defaults = spec.defaults if spec else {}
+
+    # Apply models.json defaults before Pydantic validation so numeric
+    # strings are coerced exactly like explicit request fields.
+    request_body = dict(body)
+    request_body.pop("model", None)
+    for field, default_key in (
+        ("width", "width"),
+        ("height", "height"),
+        ("duration", "seconds"),
+        ("seed", "seed"),
+    ):
+        if field not in request_body and default_key in defaults:
+            request_body[field] = defaults[default_key]
+    try:
+        req = VideoGenerateRequest(**request_body)
     except Exception as e:
         return web.json_response({"error": f"Invalid request: {e}"}, status=400)
 
@@ -88,7 +111,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         height=req.height,
         length=length,
         seed=req.seed,
-        model_id="minimax-h3",
+        model_id=spec.id if spec else "minimax-h3",
         modality="video",
         params={"duration": req.duration},
         first_frame=first_frame,

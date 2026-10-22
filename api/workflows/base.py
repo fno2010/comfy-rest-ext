@@ -2,8 +2,36 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict
+
+
+def resolve_asset(task: Any, key: str, env_key: str, default: str) -> str:
+    """Resolve a model asset name.
+
+    Precedence: environment variable > model config `assets` > built-in
+    default. This keeps existing env-based deployments working while
+    letting models.json point a model at different checkpoint files.
+    """
+    env_value = os.environ.get(env_key)
+    if env_value:
+        return env_value
+    assets = getattr(task, "assets", None) or {}
+    return assets.get(key) or default
+
+
+def is_turbo_variant(task: Any, builtin_turbo_ids: set) -> bool:
+    """Return whether a task should use its turbo assets.
+
+    An explicit task.variant (set from the model spec at submit time) is
+    authoritative. Direct builder calls without a variant fall back to the
+    exact built-in turbo model ids, never to a name suffix.
+    """
+    variant = getattr(task, "variant", None)
+    if variant is not None:
+        return variant == "turbo"
+    return getattr(task, "model_id", "") in builtin_turbo_ids
 
 
 def require_asset(folder: str, name: str) -> None:
