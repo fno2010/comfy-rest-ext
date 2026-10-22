@@ -382,11 +382,11 @@ BUILDER_DEFAULTS_KEYS = {
     }),
     "anima": frozenset({
         "steps", "cfg", "sampler", "scheduler", "negative_prompt",
-        "lora_strength", "n",
+        "lora_strength", "n", "seed",
     }),
     "qwen_image_21": frozenset({
         "steps", "cfg", "sampler", "scheduler", "negative_prompt",
-        "resolution", "n",
+        "resolution", "n", "seed",
     }),
 }
 
@@ -585,13 +585,20 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     defaults_value = entry.get("defaults", {})
     if not isinstance(defaults_value, dict):
         raise ModelConfigError(f"{model_id}.defaults must be an object")
-    defaults.update(defaults_value)
-    unknown_defaults = set(defaults) - BUILDER_DEFAULTS_KEYS[builder]
+    unknown_defaults = set(defaults_value) - BUILDER_DEFAULTS_KEYS[builder]
     if unknown_defaults:
         raise ModelConfigError(
             f"{model_id}.defaults has unknown keys for builder {builder!r}: "
             f"{sorted(unknown_defaults)}"
         )
+    defaults.update(defaults_value)
+    if existing is not None and builder != existing.family:
+        # Inherited defaults belong to the old builder; drop keys the new
+        # builder does not understand instead of failing the override.
+        defaults = {
+            key: value for key, value in defaults.items()
+            if key in BUILDER_DEFAULTS_KEYS[builder]
+        }
     for key in ("sampler", "scheduler", "negative_prompt", "ref_image_size"):
         if key in defaults and not isinstance(defaults[key], str):
             raise ModelConfigError(f"{model_id}.defaults.{key} must be a string")
@@ -653,6 +660,10 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     if variant not in ("base", "turbo"):
         raise ModelConfigError(
             f"{model_id}.variant must be 'base' or 'turbo'; got {variant!r}"
+        )
+    if builder == "h3" and variant != "base":
+        raise ModelConfigError(
+            f"{model_id}.variant {variant!r} is not supported by builder 'h3'"
         )
 
     if "size" in entry:

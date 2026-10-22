@@ -114,7 +114,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
     if not edit and "t2i" not in spec.tasks and "edit" not in spec.tasks:
         raise BadRequest(f"model {spec.id!r} does not support image generation", "model")
 
-    n = _int_field(body, "n", 1)
+    n = _int_field(body, "n", int(spec.defaults.get("n", 1)))
     if n < 1 or n > spec.max_n:
         raise BadRequest(
             f"n must be between 1 and {spec.max_n} for {spec.id}", "n"
@@ -163,7 +163,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
         "n": n,
         "width": width,
         "height": height,
-        "seed": _int_field(body, "seed", 0),
+        "seed": _int_field(body, "seed", int(spec.defaults.get("seed", 0))),
         "steps": steps,
         "cfg": _float_field(body, "cfg", spec.defaults.get("cfg", 1.0)),
         "sampler": body.get("sampler") or spec.defaults.get("sampler", "euler"),

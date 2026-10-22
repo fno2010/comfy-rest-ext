@@ -16,6 +16,7 @@ from typing import Optional
 from aiohttp import web
 from server import PromptServer
 
+from ..catalog import get_model
 from ..schemas.requests import VideoGenerateRequest
 from ..tasks.video_task import (
     VideoTask,
@@ -64,12 +65,23 @@ async def create_video_task(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 
     try:
+        spec = get_model(body.get("model") or "minimax-h3")
+    except KeyError:
+        spec = None
+    defaults = spec.defaults if spec else {}
+    try:
         req = VideoGenerateRequest(**body)
     except Exception as e:
         return web.json_response({"error": f"Invalid request: {e}"}, status=400)
 
+    # models.json defaults apply here too; explicit body fields win.
+    width = body.get("width", defaults.get("width", req.width))
+    height = body.get("height", defaults.get("height", req.height))
+    duration = body.get("duration", defaults.get("seconds", req.duration))
+    seed = body.get("seed", defaults.get("seed", req.seed))
+
     task_id = str(uuid.uuid4())
-    length = frames_for_seconds(req.duration)
+    length = frames_for_seconds(duration)
 
     first_frame = None
     if req.first_frame:
@@ -84,13 +96,13 @@ async def create_video_task(request: web.Request) -> web.Response:
         status="queued",
         prompt=req.prompt,
         task_type=req.task,
-        width=req.width,
-        height=req.height,
+        width=width,
+        height=height,
         length=length,
-        seed=req.seed,
-        model_id="minimax-h3",
+        seed=seed,
+        model_id=spec.id if spec else "minimax-h3",
         modality="video",
-        params={"duration": req.duration},
+        params={"duration": duration},
         first_frame=first_frame,
         ref_images=req.ref_images,
         speed=req.speed,
@@ -110,9 +122,9 @@ async def create_video_task(request: web.Request) -> web.Response:
         "status": "queued",
         "task": req.task,
         "prompt": req.prompt,
-        "width": req.width,
-        "height": req.height,
-        "duration": req.duration,
+        "width": width,
+        "height": height,
+        "duration": duration,
         "length": length,
         "first_frame": first_frame,
         "ref_images": req.ref_images,

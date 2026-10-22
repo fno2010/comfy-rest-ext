@@ -432,3 +432,84 @@ async def test_video_route_uses_spec_defaults(tmp_path, monkeypatch):
     body = json.loads(response.text)
     assert body["size"] == "512x512"
     assert body["seconds"] == str(56 / 24)
+
+
+def test_cross_builder_override_drops_inherited_defaults(tmp_path):
+    path = _write(tmp_path, {
+        "qwen-image-2.1": {"builder": "anima", "tasks": ["t2i"]},
+    })
+    catalog.load_model_config(path)
+    spec = catalog.get_model("qwen-image-2.1")
+    assert spec.family == "anima"
+    assert "resolution" not in spec.defaults
+    assert spec.defaults["steps"] > 0
+
+
+def test_h3_rejects_turbo_variant(tmp_path):
+    with pytest.raises(catalog.ModelConfigError):
+        catalog.load_model_config(_write(tmp_path, {
+            "h3-turbo": {
+                "builder": "h3",
+                "modality": "video",
+                "tasks": ["t2va"],
+                "variant": "turbo",
+            },
+        }))
+
+
+def test_image_defaults_apply_n_and_seed(tmp_path):
+    from api.openai.images import _normalize
+
+    path = _write(tmp_path, {
+        "my-anima": _new_image("my-anima", max_n=2, defaults={"steps": 1, "n": 2, "seed": 7}),
+    })
+    catalog.load_model_config(path)
+    out = _normalize(catalog.get_model("my-anima"), {"prompt": "x"}, edit=False)
+    assert out["n"] == 2
+    assert out["seed"] == 7
+
+
+@pytest.mark.asyncio
+async def test_legacy_video_route_uses_spec_defaults(tmp_path, monkeypatch):
+    from api.models import video
+    from api.tasks.video_task import frames_for_seconds
+
+    path = _write(tmp_path, {
+        "minimax-h3": {
+            "defaults": {"width": 512, "height": 512, "seconds": 2.0, "seed": 7},
+        },
+    })
+    catalog.load_model_config(path)
+
+    captured = {}
+
+    class Manager:
+        def create(self, task):
+            captured["task"] = task
+
+    monkeypatch.setattr(video, "get_video_manager", lambda: Manager())
+
+    async def noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(video, "_run_video_task", noop)
+    monkeypatch.setattr(video, "_emit_websocket_event", noop)
+
+    class Request:
+        def __init__(self, body):
+            self._body = body
+
+        async def json(self):
+            return self._body
+
+    response = await video.create_video_task(Request({"prompt": "a cat"}))
+    assert response.status == 200
+    body = json.loads(response.text)
+    assert (body["width"], body["height"]) == (512, 512)
+    task = captured["task"]
+    assert task.seed == 7
+    assert task.length == frames_for_seconds(2.0)
+
+    captured.clear()
+    await video.create_video_task(Request({"prompt": "a cat", "width": 768}))
+    assert captured["task"].width == 768
