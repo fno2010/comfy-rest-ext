@@ -63,7 +63,8 @@ class FakeClient:
         self.calls.append(("image-content", image_id, index))
         return b"image-bytes"
 
-    def list_downloads(self):
+    def list_downloads(self, status="all"):
+        self.calls.append(("downloads-list", status))
         return [{"task_id": "dl_1", "status": "completed", "progress": 1,
                  "url": "https://example.invalid/m"}]
 
@@ -181,6 +182,7 @@ def test_client_query_encoding(monkeypatch):
     client.clear_pr_cache()
     client.get_image_content("img 1", index=2)
     client.check_node_deps("KSampler")
+    client.list_downloads()
 
     assert calls == [
         ("GET", "/v2/extension/models/info?path=dir%2Fa+b.safetensors"),
@@ -188,6 +190,7 @@ def test_client_query_encoding(monkeypatch):
         ("DELETE", "/v2/extension/frontend/pr-cache?confirm=true"),
         ("GET", "/v2/extension/image/img%201/content?index=2"),
         ("GET", "/v2/extension/dependencies/check?node=KSampler"),
+        ("GET", "/v2/extension/model/download?status=all"),
     ]
 
 
@@ -526,3 +529,121 @@ def test_cmd_generate_multipart_rejects_composable_speed(tmp_path, capsys):
     assert commands.cmd_generate(client, args) == 1
     assert "multipart" in capsys.readouterr().err
     assert not client.calls
+
+
+def test_deps_install_sync_polls_to_completion(monkeypatch, capsys):
+    client = FakeClient()
+    calls = []
+    original_install = client.install_workflow_deps
+    original_status = client.get_deps_status
+
+    def install(workflow, async_install=True):
+        calls.append(("install", async_install))
+        return {"task_id": "deps_1", "status": "queued"}
+
+    def status(task_id):
+        calls.append(("status", task_id))
+        return {"task_id": task_id, "status": "completed", "progress": 1.0}
+
+    monkeypatch.setattr(client, "install_workflow_deps", install)
+    monkeypatch.setattr(client, "get_deps_status", status)
+    monkeypatch.setattr(commands, "POLL_INTERVAL", 0)
+
+    assert commands.cmd_deps_install(
+        client, Args(json=True, workflow="unused", sync=True)
+    ) == 1  # missing workflow file fails before calling the client
+    assert calls == []
+
+    with __import__("tempfile").NamedTemporaryFile("w", suffix=".json") as f:
+        f.write('{"1": {"class_type": "KSampler"}}')
+        f.flush()
+        assert commands.cmd_deps_install(
+            client, Args(json=True, workflow=f.name, sync=True)
+        ) == 0
+    assert ("install", False) in calls
+    assert ("status", "deps_1") in calls
+
+
+def test_deps_install_reports_failed_status(monkeypatch, capsys):
+    client = FakeClient()
+
+    def install(workflow, async_install=True):
+        return {"task_id": "deps_1", "status": "queued"}
+
+    def status(task_id):
+        return {"task_id": task_id, "status": "failed", "failed": ["numpy"]}
+
+    monkeypatch.setattr(client, "install_workflow_deps", install)
+    monkeypatch.setattr(client, "get_deps_status", status)
+    monkeypatch.setattr(commands, "POLL_INTERVAL", 0)
+    with __import__("tempfile").NamedTemporaryFile("w", suffix=".json") as f:
+        f.write('{"1": {"class_type": "KSampler"}}')
+        f.flush()
+        assert commands.cmd_deps_install(
+            client, Args(json=False, workflow=f.name, sync=True)
+        ) == 1
+    assert "failed" in capsys.readouterr().out
+
+
+def test_deps_restore_sync_response_exit_code(capsys):
+    client = FakeClient()
+
+    def restore(nodes, async_mode=True):
+        return {"returncode": 1, "stdout": "partial", "stderr": "boom"}
+
+    client.restore_node_deps = restore
+    assert commands.cmd_deps_restore(
+        client, Args(json=False, node=["a"], sync=True)
+    ) == 1
+    captured = capsys.readouterr()
+    assert "partial" in captured.out
+    assert "boom" in captured.err
+
+
+def test_nodes_validate_json_invalid_exit_code(capsys):
+    client = FakeClient()
+
+    def validate(node_name):
+        return {"node_name": node_name, "valid": False, "errors": ["bad"],
+                "warnings": [], "files_checked": 1}
+
+    client.validate_node = validate
+    assert commands.cmd_nodes_validate(
+        client, Args(json=True, node_name="node-a")
+    ) == 1
+    assert json.loads(capsys.readouterr().out)["valid"] is False
+
+
+def test_pr_cache_clear_partial_errors_exit_code(capsys):
+    client = FakeClient()
+
+    def clear(confirm=True):
+        return {"cleared": True, "entries_removed": 1,
+                "errors": [{"item": "x", "error": "denied"}]}
+
+    client.clear_pr_cache = clear
+    assert commands.cmd_pr_cache_clear(
+        client, Args(json=False, confirm=True)
+    ) == 1
+    captured = capsys.readouterr()
+    assert "denied" in captured.err
+    assert "cleared" in captured.out
+
+
+def test_models_all_prints_hash_and_metadata(monkeypatch, capsys):
+    client = FakeClient()
+
+    def all_models(include_hash=False, include_metadata=False, folder=None):
+        return {"models": [{"folder": "diffusion_models", "path": "a",
+                            "size": 1, "hash": "abc",
+                            "metadata": {"format": "pt"}}],
+                "total": 1, "folders": ["diffusion_models"]}
+
+    monkeypatch.setattr(client, "list_all_models", all_models)
+    assert commands.cmd_models_all(
+        client, Args(json=False, include_hash=True,
+                     include_metadata=True, folder=None)
+    ) == 0
+    out = capsys.readouterr().out
+    assert "hash: abc" in out
+    assert '"format": "pt"' in out

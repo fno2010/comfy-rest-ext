@@ -406,6 +406,10 @@ def cmd_models_all(client: ComfyRestClient, args: Any) -> int:
     for item in models:
         print(f"{item.get('folder', ''):<16} {item.get('path', ''):<60} "
               f"{item.get('size', 0)}")
+        if args.include_hash and item.get("hash"):
+            print(f"  hash: {item['hash']}")
+        if args.include_metadata and item.get("metadata") is not None:
+            print(f"  metadata: {json.dumps(item['metadata'], ensure_ascii=False)}")
     return 0
 
 
@@ -498,7 +502,7 @@ def cmd_image_content(client: ComfyRestClient, args: Any) -> int:
 
 def cmd_downloads_list(client: ComfyRestClient, args: Any) -> int:
     try:
-        tasks = client.list_downloads()
+        tasks = client.list_downloads(status=getattr(args, "status", "all"))
     except ApiError as e:
         return _emit_error(str(e))
     if args.json:
@@ -564,18 +568,26 @@ def cmd_deps_install(client: ComfyRestClient, args: Any) -> int:
         result = client.install_workflow_deps(
             workflow, async_install=not args.sync
         )
+        if args.sync and result.get("task_id"):
+            while result.get("status") not in ("completed", "failed", "cancelled"):
+                time.sleep(POLL_INTERVAL)
+                result = client.get_deps_status(result["task_id"])
     except (OSError, ValueError, json.JSONDecodeError) as e:
         return _emit_error(f"workflow error: {e}")
     except ApiError as e:
         return _emit_error(str(e))
+    exit_code = 0 if result.get("status") != "failed" else 1
     if args.json:
-        return _emit(result, True)
+        _emit(result, True)
+        return exit_code
     print(f"task:      {result.get('task_id') or '-'}")
     print(f"status:    {result.get('status', '')}")
     packages = result.get("packages_to_install") or []
     if packages:
         print(f"packages:  {', '.join(packages)}")
-    return 0
+    if result.get("failed"):
+        print(f"failed:    {', '.join(result['failed'])}")
+    return exit_code
 
 
 def cmd_deps_status(client: ComfyRestClient, args: Any) -> int:
@@ -631,6 +643,15 @@ def cmd_deps_restore(client: ComfyRestClient, args: Any) -> int:
         )
     except ApiError as e:
         return _emit_error(str(e))
+    if "returncode" in result:
+        if args.json:
+            _emit(result, True)
+            return 0 if result["returncode"] == 0 else 1
+        if result.get("stdout"):
+            print(result["stdout"].rstrip())
+        if result.get("stderr"):
+            print(result["stderr"].rstrip(), file=sys.stderr)
+        return 0 if result["returncode"] == 0 else 1
     if args.json:
         return _emit(result, True)
     print(f"task:      {result.get('task_id') or '-'}")
@@ -743,7 +764,8 @@ def cmd_nodes_validate(client: ComfyRestClient, args: Any) -> int:
     except ApiError as e:
         return _emit_error(str(e))
     if args.json:
-        return _emit(result, True)
+        _emit(result, True)
+        return 0 if result.get("valid") else 1
     print(f"valid:     {result.get('valid')}")
     print(f"checked:   {result.get('files_checked', 0)}")
     for key in ("errors", "warnings"):
@@ -814,8 +836,13 @@ def cmd_pr_cache_clear(client: ComfyRestClient, args: Any) -> int:
         result = client.clear_pr_cache(confirm=True)
     except ApiError as e:
         return _emit_error(str(e))
+    errors = result.get("errors") or []
     if args.json:
-        return _emit(result, True)
+        _emit(result, True)
+        return 1 if errors else 0
+    for err in errors:
+        print(f"error:     {err.get('item', '')}: {err.get('error', '')}",
+              file=sys.stderr)
     print(f"cleared:   {result.get('cleared')}")
     print(f"removed:   {result.get('entries_removed', 0)}")
-    return 0
+    return 1 if errors else 0

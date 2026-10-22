@@ -117,7 +117,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = models_sub.add_parser("all", help="recursively list model files")
     sp.add_argument("--folder", help="limit to one model folder")
     sp.add_argument("--hash", dest="include_hash", action="store_true",
-                    help="compute SHA256 hashes (slow)")
+                    help="compute file hashes (slow)")
     sp.add_argument("--metadata", dest="include_metadata", action="store_true",
                     help="include model metadata (large)")
     sp.set_defaults(func=commands.cmd_models_all)
@@ -184,6 +184,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("task_id")
     sp.set_defaults(func=commands.cmd_download_status)
     sp = downloads_sub.add_parser("list", help="list download tasks")
+    sp.add_argument("--status", default="all",
+                    help="status filter: all, or comma-separated "
+                         "queued/downloading/completed/failed/cancelled")
     sp.set_defaults(func=commands.cmd_downloads_list)
     sp = downloads_sub.add_parser("cancel", help="cancel a download task")
     sp.add_argument("task_id")

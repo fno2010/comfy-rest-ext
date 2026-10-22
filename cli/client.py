@@ -233,9 +233,11 @@ class ComfyRestClient:
             "GET", f"/v2/extension/model/download/{urllib.parse.quote(task_id)}"
         )
 
-    def list_downloads(self) -> list:
-        data = self._request("GET", "/v2/extension/model/download")
-        return data.get("data", []) if isinstance(data, dict) else []
+    def list_downloads(self, status: Optional[str] = "all") -> list:
+        data = self._get(
+            "/v2/extension/model/download", {"status": status}
+        )
+        return data.get("tasks", []) if isinstance(data, dict) else []
 
     def cancel_download(self, task_id: str) -> Dict[str, Any]:
         return self._request(
