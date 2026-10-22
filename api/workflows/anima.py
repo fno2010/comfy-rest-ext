@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .base import BuildResult, require_asset, resolve_asset
+from .base import BuildResult, is_turbo_variant, require_asset, resolve_asset
 
 ANIMA_PHASE_WEIGHTS = {
     "cond": 0.08,
@@ -21,7 +21,7 @@ DEFAULT_NEGATIVE = (
 
 def build_anima_task(task: Any) -> BuildResult:
     """Build an Anima T2I workflow from a generic GenerationTask."""
-    turbo = getattr(task, "variant", "base") == "turbo" or task.model_id.endswith("-turbo")
+    turbo = is_turbo_variant(task, {"anima-turbo"})
     params: Dict[str, Any] = task.params or {}
 
     unet = resolve_asset(

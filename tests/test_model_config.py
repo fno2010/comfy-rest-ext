@@ -275,34 +275,104 @@ def test_new_image_model_requires_steps(tmp_path):
         catalog.load_model_config(path)
 
 
+TURBO_ASSETS = {
+    "unet": "base.safetensors",
+    "turbo_unet": "turbo.safetensors",
+    "text_encoder": "te.safetensors",
+    "vae": "vae.safetensors",
+    "turbo_lora": "turbo-lora.safetensors",
+}
+
+
+def _unet_name(built):
+    nodes = built.workflow
+    unet_id = next(nid for nid, n in nodes.items() if n["class_type"] == "UNETLoader")
+    return nodes[unet_id]["inputs"]["unet_name"]
+
+
 def test_turbo_variant_uses_turbo_assets(tmp_path):
+    """Explicit variant drives turbo assets even without a -turbo id."""
     path = _write(tmp_path, {
-        "my-anima-turbo": _new_image(
-            "my-anima-turbo",
+        "my-anima-fast": _new_image(
+            "my-anima-fast",
             variant="turbo",
             defaults={"steps": 8},
-            assets={
-                "unet": "base.safetensors",
-                "turbo_unet": "turbo.safetensors",
-                "text_encoder": "te.safetensors",
-                "vae": "vae.safetensors",
-                "turbo_lora": "turbo-lora.safetensors",
-            },
+            assets=TURBO_ASSETS,
         ),
     })
     catalog.load_model_config(path)
-    spec = catalog.get_model("my-anima-turbo")
+    spec = catalog.get_model("my-anima-fast")
     built = build_anima_task(_task(
-        model_id="my-anima-turbo",
+        model_id="my-anima-fast",
         variant=spec.variant,
         assets=spec.assets,
         params=spec.defaults,
     ))
-    nodes = built.workflow
-    unet_id = next(nid for nid, n in nodes.items() if n["class_type"] == "UNETLoader")
-    assert nodes[unet_id]["inputs"]["unet_name"] == "turbo.safetensors"
-    lora = [n for n in nodes.values() if n["class_type"] == "LoraLoaderModelOnly"]
+    assert _unet_name(built) == "turbo.safetensors"
+    lora = [n for n in built.workflow.values() if n["class_type"] == "LoraLoaderModelOnly"]
     assert lora and lora[0]["inputs"]["lora_name"] == "turbo-lora.safetensors"
+
+
+def test_builtin_turbo_id_falls_back_without_variant():
+    """Direct builder calls without a variant still know the built-in turbo ids."""
+    built = build_anima_task(_task(model_id="anima-turbo", assets=TURBO_ASSETS))
+    assert _unet_name(built) == "turbo.safetensors"
+
+
+def test_explicit_base_variant_beats_builtin_turbo_id():
+    built = build_anima_task(_task(
+        model_id="anima-turbo", variant="base", assets=TURBO_ASSETS,
+    ))
+    assert _unet_name(built) == "base.safetensors"
+    assert not [n for n in built.workflow.values() if n["class_type"] == "LoraLoaderModelOnly"]
+
+
+def test_apply_model_spec_merges_defaults_and_variant():
+    from api.tasks.video_task import apply_model_spec
+
+    spec = catalog.get_model("anima-turbo")
+    task = _task(model_id="anima-turbo", params={"cfg": 9.0}, assets={}, variant=None)
+    apply_model_spec(task, spec)
+    assert task.variant == "turbo"
+    assert task.assets == dict(spec.assets)
+    assert task.params["cfg"] == 9.0
+    assert task.params["steps"] == spec.defaults["steps"]
+
+
+def test_size_step_optional_uses_default(tmp_path):
+    entry = _new_image("no-step")
+    entry["size"].pop("step")
+    path = _write(tmp_path, {"no-step": entry})
+    catalog.load_model_config(path)
+    assert catalog.get_model("no-step").size.step == 8
+
+
+def test_unknown_nested_keys_and_types_rejected(tmp_path):
+    with pytest.raises(catalog.ModelConfigError):
+        catalog.load_model_config(_write(tmp_path, {
+            "bad-defaults": _new_image("bad-defaults", defaults={"steps": 1, "step": 4}),
+        }))
+    with pytest.raises(catalog.ModelConfigError):
+        catalog.load_model_config(_write(tmp_path, {
+            "bad-sampler": _new_image("bad-sampler", defaults={"steps": 1, "sampler": 5}),
+        }))
+    with pytest.raises(catalog.ModelConfigError):
+        catalog.load_model_config(_write(tmp_path, {
+            "bad-assets": _new_image("bad-assets", assets={"unet": "x.safetensors", "foo": "y.safetensors"}),
+        }))
+
+
+def test_model_card_and_image_summary_expose_config_fields(tmp_path):
+    from api.openai.images import _image_task_summary
+    from api.openai.v1 import _model_card
+
+    path = _write(tmp_path, {
+        "my-anima": _new_image("my-anima", description="hello", output_mime="image/webp"),
+    })
+    catalog.load_model_config(path)
+    spec = catalog.get_model("my-anima")
+    assert _model_card(spec.id, 0)["description"] == "hello"
+    assert _image_task_summary(_task(output_mime="image/webp"))["media_type"] == "image/webp"
 
 
 def test_h3_defaults_flow_into_sampler(monkeypatch):

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from .base import BuildResult, require_asset, resolve_asset
+from .base import BuildResult, is_turbo_variant, require_asset, resolve_asset
 
 QWEN_PHASE_WEIGHTS = {
     "cond": 0.10,
@@ -156,7 +156,7 @@ def _add_sampler(
 
 def build_qwen_image_task(task: Any) -> BuildResult:
     """Build a Qwen-Image 2.1 T2I or edit workflow."""
-    turbo = getattr(task, "variant", "base") == "turbo" or task.model_id.endswith("-turbo")
+    turbo = is_turbo_variant(task, {"qwen-image-2.1-turbo"})
     params: Dict[str, Any] = task.params or {}
     is_edit = task.task_type == "edit"
 

@@ -85,6 +85,7 @@ def _image_task_summary(task: GenerationTask) -> dict:
         "progress": int(task.progress * 100),
         "size": _size_of(task),
         "n": int((task.params or {}).get("n", 1)),
+        "media_type": task.output_mime or "image/png",
         "current_node": task.current_node,
         "node_progress": int(task.node_progress * 100),
         "eta": round(task.eta, 1) if task.eta is not None else None,
@@ -512,7 +513,10 @@ async def get_image_content(request: web.Request) -> web.Response:
         return _error(404, "Image index out of range", "index")
     return web.FileResponse(
         task.output_paths[index],
-        headers={"Content-Disposition": "inline"},
+        headers={
+            "Content-Disposition": "inline",
+            "Content-Type": task.output_mime or "image/png",
+        },
     )
 
 

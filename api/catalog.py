@@ -375,6 +375,34 @@ BUILDER_TASKS = {
     "qwen_image_21": frozenset({"t2i", "edit"}),
 }
 
+BUILDER_DEFAULTS_KEYS = {
+    "h3": frozenset({
+        "width", "height", "seconds", "steps", "sampler", "scheduler",
+        "seed", "ref_image_size",
+    }),
+    "anima": frozenset({
+        "steps", "cfg", "sampler", "scheduler", "negative_prompt",
+        "lora_strength", "n",
+    }),
+    "qwen_image_21": frozenset({
+        "steps", "cfg", "sampler", "scheduler", "negative_prompt",
+        "resolution", "n",
+    }),
+}
+
+BUILDER_ASSET_KEYS = {
+    "h3": frozenset({
+        "unet", "ref2va", "text_encoder", "video_vae", "audio_vae",
+        "turbo_lora",
+    }),
+    "anima": frozenset({
+        "unet", "turbo_unet", "text_encoder", "vae", "turbo_lora",
+    }),
+    "qwen_image_21": frozenset({
+        "unet", "turbo_unet", "text_encoder", "vae",
+    }),
+}
+
 _MODEL_KEYS = {
     "builder", "modality", "tasks", "aliases", "alias_tasks",
     "defaults", "capabilities", "size", "variant", "assets",
@@ -465,7 +493,7 @@ def _size_policy(
             raise ModelConfigError(
                 f"{model_id}.size.default_megapixels must be positive"
             )
-    if data["step"] <= 0:
+    if data.get("step", 8) <= 0:
         raise ModelConfigError(f"{model_id}.size.step must be positive")
     if data.get("max_pixels", 0) < 0:
         raise ModelConfigError(f"{model_id}.size.max_pixels must be >= 0")
@@ -558,6 +586,20 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     if not isinstance(defaults_value, dict):
         raise ModelConfigError(f"{model_id}.defaults must be an object")
     defaults.update(defaults_value)
+    unknown_defaults = set(defaults) - BUILDER_DEFAULTS_KEYS[builder]
+    if unknown_defaults:
+        raise ModelConfigError(
+            f"{model_id}.defaults has unknown keys for builder {builder!r}: "
+            f"{sorted(unknown_defaults)}"
+        )
+    for key in ("sampler", "scheduler", "negative_prompt", "ref_image_size"):
+        if key in defaults and not isinstance(defaults[key], str):
+            raise ModelConfigError(f"{model_id}.defaults.{key} must be a string")
+    if "lora_strength" in defaults and (
+        not isinstance(defaults["lora_strength"], (int, float))
+        or isinstance(defaults["lora_strength"], bool)
+    ):
+        raise ModelConfigError(f"{model_id}.defaults.lora_strength must be a number")
     if "steps" in defaults and (
         not isinstance(defaults["steps"], int)
         or isinstance(defaults["steps"], bool)
@@ -592,6 +634,12 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     ):
         raise ModelConfigError(f"{model_id}.assets must be a string map")
     assets.update(assets_value)
+    unknown_assets = set(assets) - BUILDER_ASSET_KEYS[builder]
+    if unknown_assets:
+        raise ModelConfigError(
+            f"{model_id}.assets has unknown keys for builder {builder!r}: "
+            f"{sorted(unknown_assets)}"
+        )
 
     capabilities_value = entry.get(
         "capabilities", existing.capabilities if existing else []
