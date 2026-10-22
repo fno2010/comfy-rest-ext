@@ -33,6 +33,8 @@ def _task_summary(task: VideoTask) -> dict:
         "task_id": task.task_id,
         "status": task.status,
         "task": task.task_type,
+        "model": task.model_id,
+        "modality": task.modality,
         "progress": task.progress,
         "created_at": task.created_at,
         "completed_at": task.completed_at,
@@ -83,6 +85,9 @@ async def create_video_task(request: web.Request) -> web.Response:
         height=req.height,
         length=length,
         seed=req.seed,
+        model_id="minimax-h3",
+        modality="video",
+        params={"duration": req.duration},
         first_frame=first_frame,
         ref_images=req.ref_images,
         speed=req.speed,
@@ -159,14 +164,18 @@ async def get_video_task_status(request: web.Request) -> web.Response:
         task = _record_to_task(record)
         get_video_manager().restore(task)
 
+    if task.modality != "video":
+        return web.json_response({"error": "Task not found"}, status=404)
+
     return web.json_response({
         "task_id": task.task_id,
         "status": task.status,
         "task": task.task_type,
+        "model": task.model_id,
         "progress": task.progress,
         "prompt_id": task.prompt_id,
         "output_path": task.output_path,
-        "view_url": _comfyui_view_url(task.output_path),
+        "view_url": comfyui_view_url(task.output_path),
         "error": task.error,
         "created_at": task.created_at,
         "completed_at": task.completed_at,
@@ -180,10 +189,14 @@ async def list_video_tasks(request: web.Request) -> web.Response:
     seen = set()
     tasks = []
     for t in manager.list_all().values():
+        if t.modality != "video":
+            continue
         seen.add(t.task_id)
         tasks.append(_task_summary(t))
     for record in get_video_persistence().list_active().values():
         if record.get("task_id") in seen:
+            continue
+        if record.get("modality", "video") != "video":
             continue
         task = _record_to_task(record)
         manager.restore(task)
