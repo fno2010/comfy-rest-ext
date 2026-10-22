@@ -1,0 +1,528 @@
+"""Tests for the multi-level CLI coverage added in #14."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from cli import commands
+from cli.__main__ import _build_parser
+from cli.client import ComfyRestClient
+
+
+class Args:
+    def __init__(self, **kwargs) -> None:
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class FakeClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def create_video(self, payload):
+        self.calls.append(("video-json", payload))
+        return {"id": "video_new", "status": "queued", **payload}
+
+    def create_video_multipart(self, payload, files):
+        self.calls.append(("video-multipart", payload, files))
+        return {"id": "video_new", "status": "queued", **payload}
+
+    def get_model(self, model_id):
+        return {
+            "id": model_id,
+            "object": "model",
+            "modality": "image",
+            "tasks": ["t2i"],
+            "capabilities": ["seed"],
+            "description": "test model",
+        }
+
+    def list_all_models(self, include_hash=False, include_metadata=False, folder=None):
+        self.calls.append(("all", include_hash, include_metadata, folder))
+        return {"models": [{"folder": "diffusion_models", "path": "a.safetensors",
+                            "size": 10}], "total": 1, "folders": ["diffusion_models"]}
+
+    def get_model_info(self, path):
+        self.calls.append(("info", path))
+        return {"name": "a.safetensors", "path": path, "size": 10}
+
+    def delete_model(self, path, force=False):
+        self.calls.append(("delete", path, force))
+        return {"deleted": True, "path": path}
+
+    def get_video_content(self, video_id):
+        return b"video-bytes"
+
+    def delete_video(self, video_id):
+        self.calls.append(("video-delete", video_id))
+        return {"deleted": True}
+
+    def get_image_content(self, image_id, index=0):
+        self.calls.append(("image-content", image_id, index))
+        return b"image-bytes"
+
+    def list_downloads(self):
+        return [{"task_id": "dl_1", "status": "completed", "progress": 1,
+                 "url": "https://example.invalid/m"}]
+
+    def cancel_download(self, task_id):
+        self.calls.append(("download-cancel", task_id))
+        return {"task_id": task_id, "status": "cancelled"}
+
+    def health(self):
+        return {"status": "ok", "extension": "comfy-rest-ext"}
+
+    def install_workflow_deps(self, workflow, async_install=True):
+        self.calls.append(("deps-install", workflow, async_install))
+        return {"task_id": "deps_1", "status": "queued",
+                "packages_to_install": ["numpy"]}
+
+    def get_deps_status(self, task_id):
+        return {"task_id": task_id, "status": "completed", "progress": 1.0,
+                "installed": ["numpy"], "failed": [], "restart_required": False}
+
+    def check_workflow_deps(self, workflow):
+        self.calls.append(("deps-check", workflow))
+        return {"missing": ["numpy"], "already_satisfied": ["torch"],
+                "can_run": False, "gpu_type": "cuda"}
+
+    def check_node_deps(self, node):
+        self.calls.append(("deps-node", node))
+        return {"node": node, "required_packages": ["numpy>=1"]}
+
+    def restore_node_deps(self, nodes, async_mode=True):
+        self.calls.append(("deps-restore", nodes, async_mode))
+        return {"task_id": "deps_2", "status": "queued"}
+
+    def export_snapshot(self, snapshot_id, format="tarball", include_models=False):
+        self.calls.append(("snapshot-export", snapshot_id, format, include_models))
+        return {"success": True, "snapshot_id": snapshot_id, "path": "/tmp/snap"}
+
+    def import_snapshot(self, path, restore_models=True, restore_nodes=True):
+        self.calls.append(("snapshot-import", path, restore_models, restore_nodes))
+        return {"success": True, "stdout": "imported\n"}
+
+    def diff_snapshots(self, snapshot_a, snapshot_b):
+        self.calls.append(("snapshot-diff", snapshot_a, snapshot_b))
+        return {"custom_nodes": {"added": ["a"], "removed": [], "common": []},
+                "pip_packages": {"added": [], "removed": ["b"], "common": []}}
+
+    def list_snapshots(self):
+        return {"snapshots": [{"name": "s.tar.gz", "size": 10, "path": "/tmp/s"}]}
+
+    def list_nodes(self):
+        return {"nodes": [{"name": "node-a", "path": "/tmp/node-a",
+                           "is_git": True, "has_init": True}], "count": 1}
+
+    def pack_node(self, node_name, respect_comfyignore=True):
+        self.calls.append(("node-pack", node_name, respect_comfyignore))
+        return {"success": True, "path": "/tmp/node-a.zip", "size": 10,
+                "files_included": 3}
+
+    def validate_node(self, node_name):
+        self.calls.append(("node-validate", node_name))
+        return {"node_name": node_name, "valid": True, "errors": [],
+                "warnings": [], "files_checked": 2}
+
+    def init_node(self, path):
+        self.calls.append(("node-init", path))
+        return {"success": True, "path": path, "node_name": "node-a",
+                "files_created": ["__init__.py"]}
+
+    def list_pr_cache(self):
+        return {"cache": [{"name": "u-1-main", "size": 10}], "count": 1,
+                "total_size": 10}
+
+    def get_pr_cache_size(self):
+        return {"count": 1, "total_size": 10}
+
+    def delete_pr_cache_item(self, pr):
+        self.calls.append(("pr-delete", pr))
+        return {"deleted": True, "name": pr}
+
+    def clear_pr_cache(self, confirm=True):
+        self.calls.append(("pr-clear", confirm))
+        return {"cleared": True, "entries_removed": 1}
+
+
+def test_parser_groups_and_aliases():
+    parser = _build_parser()
+    args = parser.parse_args(["models", "info", "a.safetensors"])
+    assert args.func is commands.cmd_model_info
+    assert args.path == "a.safetensors"
+
+    args = parser.parse_args(["videos", "content", "v1", "--out", "x.mp4"])
+    assert args.func is commands.cmd_video_content
+    assert (args.video_id, args.out) == ("v1", "x.mp4")
+
+    args = parser.parse_args(["--timeout", "5", "health"])
+    assert args.http_timeout == 5.0
+
+    args = parser.parse_args(["wait", "v1", "--timeout", "3"])
+    assert args.timeout == 3.0
+
+    assert parser.parse_args(["models"]).func is commands.cmd_models
+    assert parser.parse_args(["images"]).func is commands.cmd_images
+
+
+def test_client_query_encoding(monkeypatch):
+    client = ComfyRestClient(base_url="http://127.0.0.1:1")
+    calls = []
+
+    def fake_request(method, path, body=None, headers=None):
+        calls.append((method, path))
+        return {}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    client.get_model_info("dir/a b.safetensors")
+    client.delete_model("dir/a.safetensors", force=True)
+    client.clear_pr_cache()
+    client.get_image_content("img 1", index=2)
+    client.check_node_deps("KSampler")
+
+    assert calls == [
+        ("GET", "/v2/extension/models/info?path=dir%2Fa+b.safetensors"),
+        ("DELETE", "/v2/extension/models/dir/a.safetensors?force=true"),
+        ("DELETE", "/v2/extension/frontend/pr-cache?confirm=true"),
+        ("GET", "/v2/extension/image/img%201/content?index=2"),
+        ("GET", "/v2/extension/dependencies/check?node=KSampler"),
+    ]
+
+
+def test_model_commands(capsys):
+    client = FakeClient()
+    assert commands.cmd_model_get(client, Args(json=True, model_id="m")) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "m"
+
+    assert commands.cmd_models_all(
+        client, Args(json=False, include_hash=True,
+                     include_metadata=False, folder="diffusion_models")
+    ) == 0
+    assert "diffusion_models" in capsys.readouterr().out
+
+    assert commands.cmd_model_info(client, Args(json=True, path="a")) == 0
+    assert json.loads(capsys.readouterr().out)["path"] == "a"
+
+    assert commands.cmd_model_delete(
+        client, Args(json=False, path="a", force=True)
+    ) == 0
+    assert "deleted" in capsys.readouterr().out
+    assert client.calls[-1] == ("delete", "a", True)
+
+
+def test_content_commands(tmp_path, capsys):
+    client = FakeClient()
+    video = tmp_path / "v.mp4"
+    assert commands.cmd_video_content(
+        client, Args(json=False, video_id="v1", out=str(video))
+    ) == 0
+    assert video.read_bytes() == b"video-bytes"
+
+    image = tmp_path / "i.png"
+    assert commands.cmd_image_content(
+        client, Args(json=False, image_id="i1", index=3, out=str(image))
+    ) == 0
+    assert image.read_bytes() == b"image-bytes"
+    assert client.calls[-1] == ("image-content", "i1", 3)
+
+    capsys.readouterr()
+    assert commands.cmd_video_delete(
+        client, Args(json=True, video_id="v1")
+    ) == 0
+    assert json.loads(capsys.readouterr().out)["deleted"] is True
+
+
+def test_download_health_commands(capsys):
+    client = FakeClient()
+    assert commands.cmd_downloads_list(client, Args(json=True)) == 0
+    assert json.loads(capsys.readouterr().out)[0]["task_id"] == "dl_1"
+    assert commands.cmd_download_cancel(
+        client, Args(json=False, task_id="dl_1")
+    ) == 0
+    assert "cancelled" in capsys.readouterr().out
+    assert commands.cmd_health(client, Args(json=False)) == 0
+    assert "comfy-rest-ext" in capsys.readouterr().out
+
+
+def _workflow(tmp_path):
+    path = tmp_path / "workflow.json"
+    path.write_text(json.dumps({"1": {"class_type": "KSampler", "inputs": {}}}))
+    return path
+
+
+def test_deps_commands(tmp_path, capsys):
+    client = FakeClient()
+    wf = _workflow(tmp_path)
+
+    assert commands.cmd_deps_install(
+        client, Args(json=True, workflow=str(wf), sync=False)
+    ) == 0
+    assert json.loads(capsys.readouterr().out)["task_id"] == "deps_1"
+    assert client.calls[-1][2] is True
+
+    assert commands.cmd_deps_check_workflow(
+        client, Args(json=False, workflow=str(wf))
+    ) == 0
+    assert "can_run" in capsys.readouterr().out
+
+    assert commands.cmd_deps_status(
+        client, Args(json=False, task_id="deps_1")
+    ) == 0
+    assert "completed" in capsys.readouterr().out
+
+    assert commands.cmd_deps_check_node(
+        client, Args(json=True, node="KSampler")
+    ) == 0
+    assert json.loads(capsys.readouterr().out)["node"] == "KSampler"
+
+    assert commands.cmd_deps_restore(
+        client, Args(json=False, node=["a", "b"], sync=True)
+    ) == 0
+    assert client.calls[-1] == ("deps-restore", ["a", "b"], False)
+
+
+def test_snapshot_commands(tmp_path, capsys):
+    client = FakeClient()
+    assert commands.cmd_snapshot_export(
+        client, Args(json=True, snapshot_id="s", format="tarball",
+                     include_models=True)
+    ) == 0
+    assert json.loads(capsys.readouterr().out)["success"] is True
+
+    assert commands.cmd_snapshot_import(
+        client, Args(json=False, path="/tmp/s", no_restore_models=True,
+                     no_restore_nodes=False)
+    ) == 0
+    assert "imported" in capsys.readouterr().out
+    assert client.calls[-1] == ("snapshot-import", "/tmp/s", False, True)
+
+    assert commands.cmd_snapshot_diff(
+        client, Args(json=False, snapshot_a="a", snapshot_b="b")
+    ) == 0
+    assert "custom_nodes" in capsys.readouterr().out
+
+    assert commands.cmd_snapshot_list(client, Args(json=False)) == 0
+    assert "s.tar.gz" in capsys.readouterr().out
+
+
+def test_node_commands(capsys):
+    client = FakeClient()
+    assert commands.cmd_nodes_list(client, Args(json=True)) == 0
+    assert json.loads(capsys.readouterr().out)["count"] == 1
+
+    assert commands.cmd_nodes_pack(
+        client, Args(json=False, node_name="node-a", no_comfyignore=True)
+    ) == 0
+    assert "files" in capsys.readouterr().out
+    assert client.calls[-1] == ("node-pack", "node-a", False)
+
+    assert commands.cmd_nodes_validate(
+        client, Args(json=False, node_name="node-a")
+    ) == 0
+    assert "valid" in capsys.readouterr().out
+
+    assert commands.cmd_nodes_init(
+        client, Args(json=True, path="/tmp/node-a")
+    ) == 0
+    assert json.loads(capsys.readouterr().out)["success"] is True
+
+
+def test_pr_cache_commands(capsys):
+    client = FakeClient()
+    assert commands.cmd_pr_cache_list(client, Args(json=False)) == 0
+    assert "u-1-main" in capsys.readouterr().out
+
+    assert commands.cmd_pr_cache_size(client, Args(json=True)) == 0
+    assert json.loads(capsys.readouterr().out)["total_size"] == 10
+
+    assert commands.cmd_pr_cache_delete(
+        client, Args(json=False, pr="u-1-main")
+    ) == 0
+    assert "deleted" in capsys.readouterr().out
+
+    assert commands.cmd_pr_cache_clear(
+        client, Args(json=False, confirm=False)
+    ) == 1
+    assert "confirm" in capsys.readouterr().err
+
+    assert commands.cmd_pr_cache_clear(
+        client, Args(json=False, confirm=True)
+    ) == 0
+    assert "cleared" in capsys.readouterr().out
+
+
+def test_request_returns_binary_payload(monkeypatch):
+    import cli.client as client_mod
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"\x89PNG\r\n\x1a\nbinary"
+
+    monkeypatch.setattr(client_mod.urllib.request, "urlopen",
+                        lambda *a, **k: Response())
+    client = ComfyRestClient(base_url="http://127.0.0.1:1")
+    assert client.get_image_content("img_1") == b"\x89PNG\r\n\x1a\nbinary"
+
+
+def test_parser_accepts_all_groups():
+    parser = _build_parser()
+    argv_list = [
+        ["models", "list"],
+        ["models", "get", "m"],
+        ["models", "all"],
+        ["models", "info", "a"],
+        ["models", "delete", "a"],
+        ["videos", "generate", "p"],
+        ["videos", "status", "v"],
+        ["videos", "list"],
+        ["videos", "wait", "v"],
+        ["videos", "content", "v"],
+        ["videos", "delete", "v"],
+        ["images", "generate", "p"],
+        ["images", "edit", "p"],
+        ["images", "list"],
+        ["images", "status", "i"],
+        ["images", "content", "i"],
+        ["downloads", "create", "https://example.invalid/m"],
+        ["downloads", "status", "d"],
+        ["downloads", "list"],
+        ["downloads", "cancel", "d"],
+        ["deps", "install", "--workflow", "w.json"],
+        ["deps", "status", "d"],
+        ["deps", "check-workflow", "--workflow", "w.json"],
+        ["deps", "check-node", "--node", "KSampler"],
+        ["deps", "restore", "--node", "KSampler"],
+        ["snapshot", "export", "s"],
+        ["snapshot", "import", "--path", "/tmp/s"],
+        ["snapshot", "diff", "a", "b"],
+        ["snapshot", "list"],
+        ["nodes", "list"],
+        ["nodes", "pack", "n"],
+        ["nodes", "validate", "n"],
+        ["nodes", "init", "/tmp/n"],
+        ["pr-cache", "list"],
+        ["pr-cache", "size"],
+        ["pr-cache", "delete", "p"],
+        ["pr-cache", "clear", "--confirm"],
+        ["health"],
+    ]
+    for argv in argv_list:
+        args = parser.parse_args(argv)
+        assert callable(args.func), argv
+
+
+COVERED_ROUTES = {
+    ("GET", "/v1/models"),
+    ("GET", "/v1/models/{model_id}"),
+    ("POST", "/v1/videos"),
+    ("GET", "/v1/videos"),
+    ("GET", "/v1/videos/{video_id}"),
+    ("DELETE", "/v1/videos/{video_id}"),
+    ("GET", "/v1/videos/{video_id}/content"),
+    ("POST", "/v1/images/generations"),
+    ("POST", "/v1/images/edits"),
+    ("GET", "/v2/extension/image"),
+    ("GET", "/v2/extension/image/{task_id}"),
+    ("GET", "/v2/extension/image/{task_id}/content"),
+    ("POST", "/v2/extension/workflow/dependencies"),
+    ("GET", "/v2/extension/workflow/dependencies/{task_id}"),
+    ("POST", "/v2/extension/workflow/dependencies/check"),
+    ("GET", "/v2/extension/dependencies/check"),
+    ("POST", "/v2/extension/dependencies/restore"),
+    ("GET", "/v2/extension/snapshot/diff"),
+    ("POST", "/v2/extension/snapshot/export"),
+    ("POST", "/v2/extension/snapshot/import"),
+    ("GET", "/v2/extension/snapshot/list"),
+    ("GET", "/v2/extension/nodes/list"),
+    ("POST", "/v2/extension/nodes/pack"),
+    ("POST", "/v2/extension/nodes/validate"),
+    ("POST", "/v2/extension/nodes/init"),
+    ("GET", "/v2/extension/frontend/pr-cache"),
+    ("DELETE", "/v2/extension/frontend/pr-cache"),
+    ("GET", "/v2/extension/frontend/pr-cache/size"),
+    ("DELETE", "/v2/extension/frontend/pr-cache/{pr}"),
+    ("GET", "/v2/extension/health"),
+    ("GET", "/v2/extension/model/download"),
+    ("POST", "/v2/extension/model/download"),
+    ("GET", "/v2/extension/model/download/{task_id}"),
+    ("DELETE", "/v2/extension/model/download/{task_id}"),
+    ("GET", "/v2/extension/models/all"),
+    ("GET", "/v2/extension/models/info"),
+    ("DELETE", "/v2/extension/models/{path:.*}"),
+}
+
+EXCLUDED_ROUTES = {
+    ("GET", "/ui"),
+    ("GET", "/v2/extension/ui"),
+    ("GET", "/v2/extension/video"),
+    ("POST", "/v2/extension/video/generate"),
+    ("GET", "/v2/extension/video/{task_id}"),
+    ("POST", "/v2/extension/image/generate"),
+}
+
+
+def test_every_registered_route_is_covered_or_excluded():
+    import ast
+    from pathlib import Path
+
+    routes = set()
+    for path in Path("api").rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                if not (
+                    isinstance(dec, ast.Call)
+                    and isinstance(dec.func, ast.Attribute)
+                    and isinstance(dec.func.value, ast.Name)
+                    and dec.func.value.id == "routes"
+                    and dec.args
+                    and isinstance(dec.args[0], ast.Constant)
+                ):
+                    continue
+                routes.add((dec.func.attr.upper(), dec.args[0].value))
+
+    assert routes == COVERED_ROUTES | EXCLUDED_ROUTES
+    assert not (COVERED_ROUTES & EXCLUDED_ROUTES)
+
+
+def test_cmd_generate_multipart(tmp_path, capsys):
+    client = FakeClient()
+    image = tmp_path / "ref.png"
+    image.write_bytes(b"PNGDATA")
+    args = Args(
+        json=True, prompt="p", image=[str(image)], model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+        steps=None, turbo=None, block_cache=None, step_cache=None,
+        attention=None, vae_decode=None, multipart=True,
+    )
+    assert commands.cmd_generate(client, args) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "video_new"
+    kind, payload, files = client.calls[-1]
+    assert kind == "video-multipart"
+    assert files == [("input_reference", "ref.png", b"PNGDATA")]
+    assert payload["prompt"] == "p"
+
+
+def test_cmd_generate_multipart_rejects_composable_speed(tmp_path, capsys):
+    client = FakeClient()
+    image = tmp_path / "ref.png"
+    image.write_bytes(b"PNGDATA")
+    args = Args(
+        json=False, prompt="p", image=[str(image)], model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+        steps=8, turbo=None, block_cache=None, step_cache=None,
+        attention=None, vae_decode=None, multipart=True,
+    )
+    assert commands.cmd_generate(client, args) == 1
+    assert "multipart" in capsys.readouterr().err
+    assert not client.calls
