@@ -139,11 +139,11 @@ GET /v2/extension/image/{id}/content?index=N
 - `anima`: `unet`, `turbo_unet`, `text_encoder`, `vae`, `turbo_lora`
 - `qwen_image_21`: `unet`, `turbo_unet`, `text_encoder`, `vae`
 
-优先级：**环境变量 > models.json `assets` > 内置默认值**；已有部署的 `H3_*` / `ANIMA_*` / `QWEN_IMAGE_21_*` 环境变量保持不变。`turbo_unet` / `turbo_lora` 只有在模型 `variant: "turbo"`（或内置 turbo id）时才会被使用。视频 `defaults` 同时作用于 `/v1/videos` 与旧版 `/v2/extension/video/generate`，请求中显式给出的字段优先。配置错误会回滚到内置注册表并在日志中报告，不会留下半应用的模型列表。
+优先级：**环境变量 > models.json `assets` > 内置默认值**；已有部署的 `H3_*` / `ANIMA_*` / `QWEN_IMAGE_21_*` 环境变量保持不变。`turbo_unet` / `turbo_lora` 只有在模型 `variant: "turbo"`（或内置 turbo id）时才会被使用。视频 `defaults` 同时作用于 `/v1/videos` 与扩展自定义端点 `/v2/extension/video/generate`，请求中显式给出的字段优先。配置错误会回滚到内置注册表并在日志中报告，不会留下半应用的模型列表。
 
 ## CLI 工具
 
-`comfy-rest-ext-cli` 是面向 OpenAI 兼容视频 API 的命令行客户端。
+`comfy-rest-ext-cli` 同时覆盖 OpenAI 兼容 API 和扩展自定义 API。
 
 **零外部依赖**——仅使用 Python 标准库（`urllib.request`），任何 Python 3.10+ 环境无需安装任何第三方包即可运行：
 
@@ -152,64 +152,75 @@ GET /v2/extension/image/{id}/content?index=N
 python3 -m cli --help
 ```
 
-### 用法
+### 命令结构
+
+| Group | Commands |
+|---|---|
+| `models` | `list` / `get` / `all` / `info` / `delete` |
+| `videos` | `generate` / `status` / `list` / `wait` / `content` / `delete` |
+| `images` | `generate` / `edit` / `list` / `status` / `content` |
+| `downloads` | `create` / `status` / `list` / `cancel` |
+| `deps` | `install` / `status` / `check-workflow` / `check-node` / `restore` |
+| `snapshot` | `export` / `import` / `diff` / `list` |
+| `nodes` | `list` / `pack` / `validate` / `init` |
+| `pr-cache` | `list` / `size` / `delete` / `clear --confirm` |
+| `health` | 无子命令 |
+
+旧的扁平命令（`generate` / `status` / `list` / `wait` / `image` / `image-edit` / `images` / `image-status` / `download` / `download-status`）保留为别名。`models` 和 `images` 不带子命令时仍然执行列表。
+
+### 示例
 
 ```bash
-# 列出可用模型
+# 健康检查 / 模型
+comfy-rest-ext-cli health
 comfy-rest-ext-cli models
+comfy-rest-ext-cli models get anima-base
+comfy-rest-ext-cli models all --folder diffusion_models
+comfy-rest-ext-cli models info anima-base-v1.0.safetensors
 
-# 生成视频（T2V）
-comfy-rest-ext-cli generate "a cat walking on the moon"
-
-# 生成视频（I2V，指定参考图）
-comfy-rest-ext-cli generate "make it cinematic" --image ref.png
-
-# 生成视频（R2V，多张参考图，prompt 用 <Picture N> 引用）
-# 不传 --model 时自动推断：多图→R2V、单图→I2V、无图→T2V
-comfy-rest-ext-cli generate "Use <Picture 1> as style reference" \
+# 视频（canonical 路径）
+comfy-rest-ext-cli videos generate "a cat walking on the moon"
+comfy-rest-ext-cli videos generate "make it cinematic" --image ref.png
+comfy-rest-ext-cli videos generate "Use <Picture 1> as style" \
   --image ref1.png --image ref2.png
+comfy-rest-ext-cli videos status video_xxxx
+comfy-rest-ext-cli videos list
+comfy-rest-ext-cli videos wait video_xxxx --timeout 300
+comfy-rest-ext-cli videos content video_xxxx --out out.mp4
+comfy-rest-ext-cli videos delete video_xxxx
 
-# JSON content[] 格式（对齐 OpenAI Responses / MiniMax V2 规范）
-curl -X POST http://host:8188/v1/videos \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "minimax-h3",
-    "input": [
-      {"type": "input_text", "text": "Use <Picture 1> as character, <Picture 2> as style"},
-      {"type": "input_image", "image_url": "https://.../ref1.png", "role": "reference_image"},
-      {"type": "input_image", "image_url": "https://.../ref2.png", "role": "reference_image"}
-    ],
-    "seconds": 5
-  }'
+# 图片
+comfy-rest-ext-cli images generate "a red fox" --model anima-turbo --size 1024x1024
+comfy-rest-ext-cli images edit "replace <image1> background with snow" \
+  --image input.png --model qwen-image-2.1
+comfy-rest-ext-cli images list
+comfy-rest-ext-cli images status image_xxxx
+comfy-rest-ext-cli images content image_xxxx --index 0 --out out.png
 
-# 模型 id（可省略，默认 minimax-h3 自动推断任务类型）
-# 别名 minimax-h3-t2v / minimax-h3-i2v / minimax-h3-r2v 仍兼容
-comfy-rest-ext-cli generate "t2v" --model minimax-h3
+# 模型下载
+comfy-rest-ext-cli downloads create https://civitai.com/models/123
+comfy-rest-ext-cli downloads list --status all
+comfy-rest-ext-cli downloads cancel dl_xxxx
 
-# 加速模式（可选，默认 auto 跟随服务器配置）
-#   none      关闭加速（最稳）
-#   te-speed  块级缓存，实测 ~1.6×（TE-Speed-MiniMaxH3 节点）
-#   sol-stack Sol-Attn + FirstBlockCache，实测 ~1.35×
-comfy-rest-ext-cli generate "fast" --seconds 3 --speed te-speed
+# 依赖 / 快照 / 节点 / PR 缓存
+comfy-rest-ext-cli deps check-workflow --workflow workflow.json
+comfy-rest-ext-cli deps install --workflow workflow.json
+comfy-rest-ext-cli deps check-node --node KSampler
+comfy-rest-ext-cli snapshot export my-snapshot --include-models
+comfy-rest-ext-cli snapshot list
+comfy-rest-ext-cli nodes list
+comfy-rest-ext-cli nodes validate comfy-rest-ext
+comfy-rest-ext-cli pr-cache size
 
-# 查询任务状态
-comfy-rest-ext-cli status video_xxxx
-
-# 列出历史任务
-comfy-rest-ext-cli list
-
-# 等待任务完成（轮询，返回 view_url）
-comfy-rest-ext-cli wait video_xxxx --timeout 300
-
-# 队列模型下载（CivitAI / HuggingFace / 直链）
-comfy-rest-ext-cli download https://civitai.com/models/123
-
-# 所有命令支持 --json 输出（机器可读）
-comfy-rest-ext-cli --json list
+# 所有命令支持 --json；全局 --timeout 控制单次 HTTP 请求超时
+comfy-rest-ext-cli --json videos list
+comfy-rest-ext-cli --timeout 120 models all
 
 # 指向非默认 ComfyUI 地址
 comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
 ```
+
+`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy `--speed` 字符串，不支持 composable `--steps/--turbo/...` 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
 
 环境变量：`COMFY_REST_EXT_BASE_URL`（默认 `http://127.0.0.1:8188`）、`COMFY_REST_EXT_TIMEOUT`（默认 `60`）。
 

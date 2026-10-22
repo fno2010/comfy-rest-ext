@@ -84,7 +84,7 @@ class ComfyRestClient:
             return None
         try:
             return json.loads(data)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return data
 
     def _json_request(self, method: str, path: str, payload: Dict[str, Any]) -> Any:
@@ -92,6 +92,25 @@ class ComfyRestClient:
         return self._request(
             method, path, body=body, headers={"Content-Type": "application/json"}
         )
+
+    @staticmethod
+    def _query(params: Optional[Dict[str, Any]]) -> str:
+        if not params:
+            return ""
+        clean: Dict[str, Any] = {}
+        for key, value in params.items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            clean[key] = value
+        return "?" + urllib.parse.urlencode(clean, doseq=True) if clean else ""
+
+    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        return self._request("GET", f"{path}{self._query(params)}")
+
+    def _delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        return self._request("DELETE", f"{path}{self._query(params)}")
 
     def list_models(self) -> list:
         data = self._request("GET", "/v1/models")
@@ -214,12 +233,177 @@ class ComfyRestClient:
             "GET", f"/v2/extension/model/download/{urllib.parse.quote(task_id)}"
         )
 
-    def list_downloads(self) -> list:
-        data = self._request("GET", "/v2/extension/model/download")
-        return data.get("data", []) if isinstance(data, dict) else []
+    def list_downloads(self, status: Optional[str] = "all") -> list:
+        data = self._get(
+            "/v2/extension/model/download", {"status": status}
+        )
+        return data.get("tasks", []) if isinstance(data, dict) else []
 
     def cancel_download(self, task_id: str) -> Dict[str, Any]:
         return self._request(
             "DELETE",
             f"/v2/extension/model/download/{urllib.parse.quote(task_id)}",
         )
+
+    # -- models ---------------------------------------------------------
+    def get_model(self, model_id: str) -> Dict[str, Any]:
+        return self._request(
+            "GET", f"/v1/models/{urllib.parse.quote(model_id, safe='')}"
+        )
+
+    def list_all_models(
+        self,
+        include_hash: bool = False,
+        include_metadata: bool = False,
+        folder: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._get("/v2/extension/models/all", {
+            "include_hash": include_hash,
+            "include_metadata": include_metadata,
+            "folder": folder,
+        })
+
+    def get_model_info(self, path: str) -> Dict[str, Any]:
+        return self._get("/v2/extension/models/info", {"path": path})
+
+    def delete_model(self, path: str, force: bool = False) -> Dict[str, Any]:
+        encoded = urllib.parse.quote(path, safe="/")
+        return self._delete(f"/v2/extension/models/{encoded}", {"force": force})
+
+    # -- media content ---------------------------------------------------
+    def get_video_content(self, video_id: str) -> bytes:
+        return self._request(
+            "GET", f"/v1/videos/{urllib.parse.quote(video_id)}/content"
+        )
+
+    def get_image_content(self, image_id: str, index: int = 0) -> bytes:
+        return self._get(
+            f"/v2/extension/image/{urllib.parse.quote(image_id)}/content",
+            {"index": index},
+        )
+
+    # -- workflow dependencies ------------------------------------------
+    def install_workflow_deps(
+        self, workflow: Dict[str, Any], async_install: bool = True,
+    ) -> Dict[str, Any]:
+        return self._json_request(
+            "POST",
+            "/v2/extension/workflow/dependencies",
+            {"workflow": workflow, "async_install": async_install},
+        )
+
+    def get_deps_status(self, task_id: str) -> Dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/v2/extension/workflow/dependencies/{urllib.parse.quote(task_id)}",
+        )
+
+    def check_workflow_deps(self, workflow: Dict[str, Any]) -> Dict[str, Any]:
+        return self._json_request(
+            "POST",
+            "/v2/extension/workflow/dependencies/check",
+            {"workflow": workflow},
+        )
+
+    def check_node_deps(self, node: str) -> Dict[str, Any]:
+        return self._get("/v2/extension/dependencies/check", {"node": node})
+
+    def restore_node_deps(
+        self, nodes: list, async_mode: bool = True,
+    ) -> Dict[str, Any]:
+        return self._json_request(
+            "POST",
+            "/v2/extension/dependencies/restore",
+            {"nodes": nodes, "async_mode": async_mode},
+        )
+
+    # -- snapshots -------------------------------------------------------
+    def export_snapshot(
+        self,
+        snapshot_id: str,
+        format: str = "tarball",
+        include_models: bool = False,
+    ) -> Dict[str, Any]:
+        return self._json_request(
+            "POST",
+            "/v2/extension/snapshot/export",
+            {
+                "snapshot_id": snapshot_id,
+                "format": format,
+                "include_models": include_models,
+            },
+        )
+
+    def import_snapshot(
+        self,
+        path: str,
+        restore_models: bool = True,
+        restore_nodes: bool = True,
+    ) -> Dict[str, Any]:
+        return self._json_request(
+            "POST",
+            "/v2/extension/snapshot/import",
+            {
+                "path": path,
+                "restore_models": restore_models,
+                "restore_nodes": restore_nodes,
+            },
+        )
+
+    def diff_snapshots(
+        self, snapshot_a: str, snapshot_b: str,
+    ) -> Dict[str, Any]:
+        return self._get("/v2/extension/snapshot/diff", {
+            "snapshot_a": snapshot_a,
+            "snapshot_b": snapshot_b,
+        })
+
+    def list_snapshots(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/snapshot/list")
+
+    # -- custom nodes ----------------------------------------------------
+    def list_nodes(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/nodes/list")
+
+    def pack_node(
+        self, node_name: str, respect_comfyignore: bool = True,
+    ) -> Dict[str, Any]:
+        return self._json_request(
+            "POST",
+            "/v2/extension/nodes/pack",
+            {
+                "node_name": node_name,
+                "respect_comfyignore": respect_comfyignore,
+            },
+        )
+
+    def validate_node(self, node_name: str) -> Dict[str, Any]:
+        return self._json_request(
+            "POST", "/v2/extension/nodes/validate", {"node_name": node_name}
+        )
+
+    def init_node(self, path: str) -> Dict[str, Any]:
+        return self._json_request(
+            "POST", "/v2/extension/nodes/init", {"path": path}
+        )
+
+    # -- frontend PR cache ----------------------------------------------
+    def list_pr_cache(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/frontend/pr-cache")
+
+    def get_pr_cache_size(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/frontend/pr-cache/size")
+
+    def delete_pr_cache_item(self, pr: str) -> Dict[str, Any]:
+        return self._delete(
+            f"/v2/extension/frontend/pr-cache/{urllib.parse.quote(pr, safe='')}"
+        )
+
+    def clear_pr_cache(self, confirm: bool = True) -> Dict[str, Any]:
+        return self._delete(
+            "/v2/extension/frontend/pr-cache", {"confirm": confirm}
+        )
+
+    # -- health ----------------------------------------------------------
+    def health(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/health")
