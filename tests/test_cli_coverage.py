@@ -647,3 +647,28 @@ def test_models_all_prints_hash_and_metadata(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "hash: abc" in out
     assert '"format": "pt"' in out
+
+
+@pytest.mark.parametrize("result", [
+    {"task_id": "deps_1", "status": "completed", "failed": ["numpy"]},
+    {"task_id": "deps_1", "status": "cancelled", "failed": []},
+])
+def test_deps_install_sync_non_success_exit(monkeypatch, result):
+    client = FakeClient()
+
+    def install(workflow, async_install=True):
+        return {"task_id": "deps_1", "status": "queued"}
+
+    def status(task_id):
+        return result
+
+    monkeypatch.setattr(client, "install_workflow_deps", install)
+    monkeypatch.setattr(client, "get_deps_status", status)
+    monkeypatch.setattr(commands, "POLL_INTERVAL", 0)
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+        f.write('{"1": {"class_type": "KSampler"}}')
+        f.flush()
+        assert commands.cmd_deps_install(
+            client, Args(json=True, workflow=f.name, sync=True)
+        ) == 1

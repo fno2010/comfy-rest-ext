@@ -576,7 +576,12 @@ def cmd_deps_install(client: ComfyRestClient, args: Any) -> int:
         return _emit_error(f"workflow error: {e}")
     except ApiError as e:
         return _emit_error(str(e))
-    exit_code = 0 if result.get("status") != "failed" else 1
+    if args.sync:
+        exit_code = 0 if (
+            result.get("status") == "completed" and not result.get("failed")
+        ) else 1
+    else:
+        exit_code = 0 if result.get("status") != "failed" else 1
     if args.json:
         _emit(result, True)
         return exit_code

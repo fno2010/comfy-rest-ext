@@ -199,7 +199,7 @@ comfy-rest-ext-cli images content image_xxxx --index 0 --out out.png
 
 # 模型下载
 comfy-rest-ext-cli downloads create https://civitai.com/models/123
-comfy-rest-ext-cli downloads list
+comfy-rest-ext-cli downloads list --status all
 comfy-rest-ext-cli downloads cancel dl_xxxx
 
 # 依赖 / 快照 / 节点 / PR 缓存
