@@ -1,0 +1,97 @@
+"""Tests for the self-contained task dashboard and extension media URLs."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from api.tasks.video_task import GenerationTask
+
+
+def _image_task(**kwargs) -> GenerationTask:
+    data = dict(
+        task_id="image_1",
+        status="completed",
+        prompt="a cat",
+        task_type="t2i",
+        width=1024,
+        height=1024,
+        length=1,
+        seed=1,
+        model_id="anima-base",
+        modality="image",
+        created_at=1000.0,
+        completed_at=1010.0,
+        output_paths=["/tmp/out.png"],
+        output_path="/tmp/out.png",
+        output_mime="image/png",
+    )
+    data.update(kwargs)
+    return GenerationTask(**data)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_serves_html():
+    from api.ui import task_dashboard
+    response = await task_dashboard(None)
+    assert response.status == 200
+    assert response.content_type == "text/html"
+    assert "Comfy-REST-Ext" in response.text
+    assert "/v2/extension/image" in response.text
+
+
+def test_image_summary_uses_extension_content_urls():
+    from api.openai.images import _image_task_summary
+    summary = _image_task_summary(_image_task())
+    assert summary["view_urls"] == [
+        "/v2/extension/image/image_1/content?index=0"
+    ]
+
+
+def test_video_response_uses_extension_content_url():
+    from api.openai.v1 import _video_response
+    task = GenerationTask(
+        task_id="video_1",
+        status="completed",
+        prompt="p",
+        task_type="t2va",
+        width=1024,
+        height=768,
+        length=101,
+        seed=1,
+        created_at=1000.0,
+        completed_at=1010.0,
+        output_path="/tmp/out.mp4",
+        output_paths=["/tmp/out.mp4"],
+    )
+    assert _video_response(task)["view_url"] == "/v1/videos/video_1/content"
+
+
+@pytest.mark.asyncio
+async def test_image_content_requires_image_task(monkeypatch):
+    import api.openai.images as images
+
+    monkeypatch.setattr(images, "_get_image_task", lambda _: _image_task())
+
+    class Request:
+        match_info = {"task_id": "image_1"}
+        query = {"index": "0"}
+
+    response = await images.get_image_content(Request())
+    assert response.status == 200
+    assert str(response._path) == "/tmp/out.png"
+
+
+@pytest.mark.asyncio
+async def test_image_content_rejects_bad_index(monkeypatch):
+    import api.openai.images as images
+
+    monkeypatch.setattr(images, "_get_image_task", lambda _: _image_task())
+
+    class Request:
+        match_info = {"task_id": "image_1"}
+        query = {"index": "3"}
+
+    response = await images.get_image_content(Request())
+    assert response.status == 404

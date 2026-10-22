@@ -30,6 +30,18 @@ class FakeClient:
             }
         }
         self.created = []
+        self.images = {
+            "image_1": {
+                "id": "image_1",
+                "status": "completed",
+                "model": "anima-base",
+                "prompt": "a cat",
+                "progress": 100,
+                "size": "1024x1024",
+                "n": 1,
+                "view_urls": ["/view?filename=x.png&type=output"],
+            }
+        }
 
     def list_models(self):
         return self.models
@@ -49,6 +61,14 @@ class FakeClient:
 
     def list_videos(self):
         return list(self.videos.values())
+
+    def list_images(self):
+        return list(self.images.values())
+
+    def get_image(self, image_id):
+        if image_id not in self.images:
+            raise commands.ApiError(404, "Task not found")
+        return self.images[image_id]
 
     def create_download(self, url, folder=None, filename=None):
         return {"task_id": "dl_1", "status": "queued", "url": url}
@@ -187,6 +207,31 @@ def test_cmd_list_json(capsys):
     assert commands.cmd_list(client, args) == 0
     tasks = json.loads(capsys.readouterr().out)
     assert len(tasks) == 1
+
+
+def test_cmd_images_json(capsys):
+    client = FakeClient()
+    assert commands.cmd_images(client, Args(json=True)) == 0
+    tasks = json.loads(capsys.readouterr().out)
+    assert tasks[0]["model"] == "anima-base"
+    assert tasks[0]["id"] == "image_1"
+
+
+def test_cmd_image_status_json(capsys):
+    client = FakeClient()
+    assert commands.cmd_image_status(
+        client, Args(json=True, image_id="image_1")
+    ) == 0
+    task = json.loads(capsys.readouterr().out)
+    assert task["status"] == "completed"
+    assert task["size"] == "1024x1024"
+
+
+def test_cmd_image_status_missing(capsys):
+    client = FakeClient()
+    assert commands.cmd_image_status(
+        client, Args(json=True, image_id="image_missing")
+    ) == 1
 
 
 def test_cmd_wait_completed(monkeypatch, capsys):

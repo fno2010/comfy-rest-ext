@@ -1,9 +1,8 @@
-"""
-Video generation task implementation for MiniMax-H3.
+"""Generic generation task lifecycle for video and image models.
 
-Submits an API-format ComfyUI workflow (T2V/I2V) to the in-process
-PromptQueue, polls history until completion, and resolves the output
-video file path for downstream serving.
+The task runner is model-agnostic: it asks the catalog for a ModelSpec,
+lets the spec build an API-format ComfyUI workflow, submits it to the
+in-process PromptQueue, tracks progress, and resolves output files.
 """
 
 from __future__ import annotations
@@ -14,34 +13,38 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Literal, Optional
 
 from .video_persistence import get_video_persistence
-from ..accel import (
-    AccelConfig,
-    AccelConfigError,
-    check_config_available,
-    parse_accel_config,
+from ..catalog import get_model
+from ..workflows.h3 import (
+    H3_PHASE_WEIGHTS,
+    build_h3_workflow,
+    frames_for_seconds,
 )
 
 logger = logging.getLogger("comfy-rest-ext.video")
 
 
 @dataclass
-class VideoTask:
-    """Video generation task state."""
+class GenerationTask:
+    """State shared by video and image generation jobs."""
+
     task_id: str
     status: Literal["queued", "running", "completed", "failed", "cancelled"]
     prompt: str
-    task_type: str  # t2va | fl2va | r2v
+    task_type: str  # t2va | fl2va | r2v | t2i | edit
     width: int
     height: int
     length: int
     seed: int
+    model_id: str = "minimax-h3"
+    modality: str = "video"
+    params: Dict[str, Any] = field(default_factory=dict)
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
-    speed: Optional[Any] = None  # legacy str (auto|none|te-speed|sol-stack) or AccelConfig dict
+    speed: Optional[Any] = None  # legacy str or AccelConfig dict
     prompt_id: Optional[str] = None
     progress: float = 0.0
     current_node: Optional[str] = None
@@ -49,316 +52,45 @@ class VideoTask:
     elapsed: float = 0.0
     eta: Optional[float] = None
     output_path: Optional[str] = None
+    output_paths: List[str] = field(default_factory=list)
+    output_mime: Optional[str] = None
     error: Optional[str] = None
     created_at: float = 0.0
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
     node_errors: Optional[Dict[str, Any]] = None
+    done: asyncio.Event = field(
+        default_factory=asyncio.Event, repr=False, compare=False
+    )
 
 
-def frames_for_seconds(seconds: float) -> int:
-    """Convert seconds to H3 frame count on the 17k+5 grid at 24 fps.
-
-    H3 snapshots durations to the model's 17-frame-per-block grid:
-    frame_count = 17 * k + 5. 124 frames ≈ 5s (trained range ~124-362).
-    """
-    fps = 24.0
-    target = int(round(seconds * fps))
-    # Snap UP to nearest 17k+5 >= target, clamped to trained range
-    target = max(target, 5)
-    k = max(0, (target - 5 + 16) // 17)
-    frames = 17 * k + 5
-    return min(frames, 362)
+# Backward-compatible name: existing callers/tests import VideoTask.
+VideoTask = GenerationTask
 
 
-def _apply_accel_layers(workflow, add, model_ref: list, accel) -> list:
-    """Apply acceleration layers in pipeline order (cross-layer stacking).
-
-    Layer order: turbo (L1) -> attention (L4) -> block_cache (L2) ->
-    step_cache (L3). In-layer exclusivity is enforced by schema
-    validation in api/accel.py, not by if/elif here.
-    """
-    model_out = list(model_ref)
-    # Sequential node ids within the 1x namespace, so a lone layer (e.g.
-    # only block_cache) still lands on "1b" like the legacy builder did.
-    seq = iter("bcdefghij")
-
-    if accel.turbo != "none":
-        nid = "1" + next(seq)
-        add(nid, "MiniMaxH3TurboLoRA", {
-            "model": model_out,
-            "lora_name": "minimax_h3_turbo_v4_step600_ema.safetensors",
-            "strength": 1.0,
-            "low_vram": False,
-        })
-        model_out = [nid, 0]
-
-    if accel.attention == "sol":
-        nid = "1" + next(seq)
-        add(nid, "SolAttnMiniMaxH3Patcher", {
-            "model": model_out,
-            "enabled": True,
-            "tau": 1.0,
-            "thresh_type": "diag",
-        })
-        model_out = [nid, 0]
-    elif accel.attention == "sage":
-        nid = "1" + next(seq)
-        add(nid, "PathchSageAttentionKJ", {
-            "model": model_out,
-            "sage_attention": "auto",
-        })
-        model_out = [nid, 0]
-    elif accel.attention == "flash":
-        nid = "1" + next(seq)
-        add(nid, "PatchFlashAttentionKJ", {
-            "model": model_out,
-        })
-        model_out = [nid, 0]
-
-    if accel.block_cache == "te-speed":
-        nid = "1" + next(seq)
-        add(nid, "TESpeedMiniMaxH3", {
-            "model": model_out,
-            "processing_control_value": 0.12,
-            "processing_percent_1": 0.1,
-            "processing_percent_2": 0.9,
-            "mcs": 2,
-            "device": "auto",
-            "cache_depth": 0.75,
-        })
-        model_out = [nid, 0]
-    elif accel.block_cache == "fbc":
-        nid = "1" + next(seq)
-        add(nid, "H3FirstBlockCache", {
-            "model": model_out,
-            "threshold": 0.08,
-            "start_step": 2,
-            "end_dense_steps": 2,
-            "max_consecutive_skips": 2,
-        })
-        model_out = [nid, 0]
-
-    if accel.step_cache == "easycache":
-        nid = "1" + next(seq)
-        add(nid, "EasyCache", {
-            "model": model_out,
-            "reuse_threshold": 0.2,
-            "start_percent": 0.15,
-            "end_percent": 1.0,
-            "verbose": False,
-        })
-        model_out = [nid, 0]
-    elif accel.step_cache == "lazycache":
-        nid = "1" + next(seq)
-        add(nid, "LazyCache", {
-            "model": model_out,
-            "reuse_threshold": 0.2,
-            "start_percent": 0.15,
-            "end_percent": 1.0,
-            "verbose": False,
-        })
-        model_out = [nid, 0]
-    elif accel.step_cache == "spectrum":
-        nid = "1" + next(seq)
-        add(nid, "SpectrumApplyMiniMaxH3", {
-            "model": model_out,
-            "enabled": True,
-            "blend_weight": 0.50,
-            "degree": 1,
-            "ridge_lambda": 0.10,
-            "window_size": 2.0,
-            "flex_window": 0.75,
-            "warmup_steps": 1,
-            "tail_actual_steps": 1,
-            "max_history": 4,
-            "debug": False,
-        })
-        model_out = [nid, 0]
-
-    return model_out
-
-
-def build_h3_workflow(
-    *,
-    prompt: str,
-    width: int,
-    height: int,
-    length: int,
-    seed: int,
-    first_frame_path: Optional[str] = None,
-    ref_images: Optional[list] = None,
-    diffusion_model: str = "minimax_h3_fl2va_pruned_nvfp4.safetensors",
-    text_encoder: str = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
-    video_vae: str = "minimax_h3_video_vae_fp16.safetensors",
-    audio_vae: str = "minimax_h3_audio_vae_fp32.safetensors",
-    ref2va_model: str = "minimax_h3_ref2va_pruned_nvfp4.safetensors",
-    sampler_name: str = "euler",
-    scheduler: str = "simple",
-    steps: int = 20,
-    te_speed: bool = False,
-    sol_stack: bool = False,
-    accel: Optional["AccelConfig"] = None,
-    ref_image_size: str = "match",
-) -> Dict[str, Any]:
-    """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V.
-
-    Node graph:
-      UNETLoader -> MiniMaxH3SigmaShift -> KSampler -> SaveVideo
-      CLIPLoader -> conditioning node (cond+latent) -> KSampler
-      VAELoader (video) -> VAE decode
-      VAELoader (audio) -> audio decode (inside pipeline latent)
-
-    R2V (ref_images given) uses the ref2va checkpoint and the
-    MiniMaxH3ReferenceToVideo node; the prompt references images via
-    <Picture N> tags in insertion order.
-
-    Acceleration: legacy `te_speed`/`sol_stack` booleans map to an
-    AccelConfig; or pass a full `accel` config for composable layers.
-    """
-    from ..accel import AccelConfig
-
-    if accel is None:
-        accel = AccelConfig(steps=steps)
-        if te_speed:
-            accel.block_cache = "te-speed"
-        if sol_stack:
-            accel.block_cache = "fbc"
-            accel.attention = "sol"
-
-    workflow: Dict[str, Any] = {}
-
-    def add(nid: str, class_type: str, inputs: Dict[str, Any]) -> str:
-        workflow[nid] = {"class_type": class_type, "inputs": inputs}
-        return nid
-
-    is_r2v = bool(ref_images)
-    unet = ref2va_model if is_r2v else diffusion_model
-    add("1", "UNETLoader", {
-        "unet_name": unet,
-        "weight_dtype": "default",
-    })
-    add("2", "CLIPLoader", {
-        "clip_name": text_encoder,
-        "type": "minimax",
-    })
-    add("3", "VAELoader", {"vae_name": video_vae})
-    add("4", "VAELoader", {"vae_name": audio_vae})
-
-    model_out = _apply_accel_layers(workflow, add, ["1", 0], accel)
-
-    add("5", "MiniMaxH3SigmaShift", {
-        "model": model_out,
-        "shift_video": 12.0,
-        "shift_audio": 3.0,
-    })
-
-    nid = 6
-    if is_r2v:
-        cond_inputs: Dict[str, Any] = {
-            "clip": ["2", 0],
-            "vae": ["3", 0],
-            "audio_vae": ["4", 0],
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-            "length": length,
-            "ref_image_size": ref_image_size,
-        }
-        ref_slots: Dict[str, Any] = {}
-        for i, ref in enumerate(ref_images or []):
-            add(str(nid), "LoadImage", {"image": ref})
-            ref_slots[f"ref_images.ref_image_{i}"] = [str(nid), 0]
-            nid += 1
-        cond_inputs.update(ref_slots)
-        cond_node = str(nid)
-        add(cond_node, "MiniMaxH3ReferenceToVideo", cond_inputs)
-    else:
-        cond_inputs = {
-            "clip": ["2", 0],
-            "vae": ["3", 0],
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-            "length": length,
-        }
-        if first_frame_path:
-            cond_inputs["first_frame"] = [str(nid), 0]
-            add(str(nid), "LoadImage", {"image": first_frame_path})
-            nid += 1
-        cond_node = str(nid)
-        add(cond_node, "MiniMaxH3ImageToVideo", cond_inputs)
-
-    nid += 1
-    sampler_id = str(nid)
-    add(sampler_id, "KSampler", {
-        "model": ["5", 0],
-        "seed": seed,
-        "steps": steps,
-        "cfg": 1.0,
-        "sampler_name": sampler_name,
-        "scheduler": scheduler,
-        "positive": [cond_node, 0],
-        "negative": [cond_node, 0],
-        "latent_image": [cond_node, 1],
-        "denoise": 1.0,
-    })
-
-    nid += 1
-    vae_decode_id = str(nid)
-    add(vae_decode_id, "VAEDecode", {"samples": [sampler_id, 0], "vae": ["3", 0]})
-    nid += 1
-    vae_decode_audio_id = str(nid)
-    add(vae_decode_audio_id, "VAEDecodeAudio", {"samples": [sampler_id, 0], "vae": ["4", 0]})
-
-    nid += 1
-    create_video_id = str(nid)
-    add(create_video_id, "CreateVideo", {
-        "images": [vae_decode_id, 0],
-        "fps": 24,
-        "audio": [vae_decode_audio_id, 0],
-        "bit_depth": 8,
-    })
-
-    nid += 1
-    add(str(nid), "SaveVideo", {
-        "video": [create_video_id, 0],
-        "filename_prefix": "video/comfy-rest-ext",
-        "format": "auto",
-        "codec": "auto",
-    })
-
-    return workflow
-
-
-class VideoTaskManager:
-    """Manages video generation tasks with persistence.
-
-    In-memory dict is a write-through cache: every create/update
-    mutates the persisted record via VideoPersistence so tasks survive
-    ComfyUI restarts.
-    """
+class GenerationTaskManager:
+    """Write-through in-memory task cache backed by video persistence."""
 
     def __init__(self, persistence=None):
-        self._tasks: Dict[str, VideoTask] = {}
+        self._tasks: Dict[str, GenerationTask] = {}
         self._lock = threading.RLock()
         self._persistence = persistence
 
-    def _persist(self, task: VideoTask) -> None:
+    def _persist(self, task: GenerationTask) -> None:
         if self._persistence is None:
             return
         record = _task_to_record(task)
         record.pop("task_id", None)
         self._persistence.update(task.task_id, **record)
 
-    def create(self, task: VideoTask) -> VideoTask:
+    def create(self, task: GenerationTask) -> GenerationTask:
         with self._lock:
             self._tasks[task.task_id] = task
             if self._persistence is not None:
                 self._persistence.create(_task_to_record(task))
         return task
 
-    def get(self, task_id: str) -> Optional[VideoTask]:
+    def get(self, task_id: str) -> Optional[GenerationTask]:
         with self._lock:
             return self._tasks.get(task_id)
 
@@ -373,25 +105,28 @@ class VideoTaskManager:
             self._persist(task)
             return True
 
-    def list_active(self) -> Dict[str, VideoTask]:
+    def list_active(self) -> Dict[str, GenerationTask]:
         with self._lock:
             return {
                 tid: t for tid, t in self._tasks.items()
                 if t.status in ("queued", "running")
             }
 
-    def list_all(self) -> Dict[str, VideoTask]:
+    def list_all(self) -> Dict[str, GenerationTask]:
         with self._lock:
             return dict(self._tasks)
 
-    def restore(self, task: VideoTask) -> None:
-        """Load a task back into memory from persisted state."""
+    def restore(self, task: GenerationTask) -> None:
         with self._lock:
             self._tasks[task.task_id] = task
 
 
-def _task_to_record(task: VideoTask) -> dict:
-    """Serialize a VideoTask to a persistence-friendly dict."""
+# Backward-compatible alias.
+VideoTaskManager = GenerationTaskManager
+
+
+def _task_to_record(task: GenerationTask) -> dict:
+    """Serialize a GenerationTask to a persistence-friendly dict."""
     return {
         "task_id": task.task_id,
         "status": task.status,
@@ -401,6 +136,9 @@ def _task_to_record(task: VideoTask) -> dict:
         "height": task.height,
         "length": task.length,
         "seed": task.seed,
+        "model_id": task.model_id,
+        "modality": task.modality,
+        "params": dict(task.params or {}),
         "first_frame": task.first_frame,
         "ref_images": task.ref_images,
         "speed": task.speed,
@@ -411,6 +149,8 @@ def _task_to_record(task: VideoTask) -> dict:
         "elapsed": task.elapsed,
         "eta": task.eta,
         "output_path": task.output_path,
+        "output_paths": list(task.output_paths or []),
+        "output_mime": task.output_mime,
         "error": task.error,
         "created_at": task.created_at,
         "started_at": task.started_at,
@@ -418,9 +158,13 @@ def _task_to_record(task: VideoTask) -> dict:
     }
 
 
-def _record_to_task(record: dict) -> VideoTask:
-    """Deserialize a persisted dict back into a VideoTask."""
-    return VideoTask(
+def _record_to_task(record: dict) -> GenerationTask:
+    """Deserialize a persisted dict back into a GenerationTask."""
+    output_path = record.get("output_path")
+    output_paths = list(record.get("output_paths") or [])
+    if output_path and output_path not in output_paths:
+        output_paths.insert(0, output_path)
+    return GenerationTask(
         task_id=record.get("task_id", ""),
         status=record.get("status", "failed"),
         prompt=record.get("prompt", ""),
@@ -429,6 +173,9 @@ def _record_to_task(record: dict) -> VideoTask:
         height=record.get("height", 768),
         length=record.get("length", 101),
         seed=record.get("seed", 0),
+        model_id=record.get("model_id", "minimax-h3"),
+        modality=record.get("modality", "video"),
+        params=dict(record.get("params") or {}),
         first_frame=record.get("first_frame"),
         ref_images=record.get("ref_images"),
         speed=record.get("speed"),
@@ -438,7 +185,9 @@ def _record_to_task(record: dict) -> VideoTask:
         node_progress=record.get("node_progress", 0.0),
         elapsed=record.get("elapsed", 0.0),
         eta=record.get("eta"),
-        output_path=record.get("output_path"),
+        output_path=output_path or (output_paths[0] if output_paths else None),
+        output_paths=output_paths,
+        output_mime=record.get("output_mime"),
         error=record.get("error"),
         created_at=record.get("created_at", 0.0),
         started_at=record.get("started_at"),
@@ -447,14 +196,7 @@ def _record_to_task(record: dict) -> VideoTask:
 
 
 async def restore_video_tasks_from_disk() -> int:
-    """Load persisted tasks into the manager.
-
-    Completed/failed tasks from history are restored as-is. Tasks that
-    were queued/running when ComfyUI stopped are marked failed because
-    their in-flight prompt is gone (PromptQueue history is memory-only).
-
-    Returns the number of tasks restored.
-    """
+    """Load persisted tasks into the manager, marking interrupted ones failed."""
     persistence = get_video_persistence()
     manager = get_video_manager()
     count = 0
@@ -476,14 +218,24 @@ async def restore_video_tasks_from_disk() -> int:
     return count
 
 
-_video_manager: Optional[VideoTaskManager] = None
+# Generic name for the same migration path.
+restore_generation_tasks_from_disk = restore_video_tasks_from_disk
 
 
-def get_video_manager() -> VideoTaskManager:
-    global _video_manager
-    if _video_manager is None:
-        _video_manager = VideoTaskManager(persistence=get_video_persistence())
-    return _video_manager
+_generation_manager: Optional[GenerationTaskManager] = None
+
+
+def get_video_manager() -> GenerationTaskManager:
+    global _generation_manager
+    if _generation_manager is None:
+        _generation_manager = GenerationTaskManager(
+            persistence=get_video_persistence()
+        )
+    return _generation_manager
+
+
+def get_generation_manager() -> GenerationTaskManager:
+    return get_video_manager()
 
 
 def _get_prompt_queue():
@@ -494,7 +246,6 @@ def _get_prompt_queue():
 
 def _resolve_output_path(value: dict) -> str:
     """Resolve a history output entry to an absolute path."""
-    import os
     import folder_paths
     subfolder = value.get("subfolder", "")
     filename = value.get("filename", "")
@@ -502,43 +253,33 @@ def _resolve_output_path(value: dict) -> str:
     return os.path.join(output_dir, subfolder, filename)
 
 
-def comfyui_view_url(output_path: Optional[str]) -> Optional[str]:
-    """Build a ComfyUI /view URL for a completed output file."""
-    if not output_path:
-        return None
-    import os
-    from urllib.parse import urlencode
-    import folder_paths
-    output_dir = folder_paths.get_output_directory()
-    rel = os.path.relpath(output_path, output_dir)
-    parts = rel.split(os.sep)
-    filename = parts[-1]
-    subfolder = os.sep.join(parts[:-1]) if len(parts) > 1 else ""
-    params = urlencode({"filename": filename, "type": "output", "subfolder": subfolder})
-    return f"/view?{params}"
+def _collect_output_paths(outputs: dict) -> List[str]:
+    """Collect output files from a ComfyUI history outputs mapping."""
+    paths: List[str] = []
+    for node_output in outputs.values():
+        for value in node_output.get("images", []):
+            if not isinstance(value, dict) or value.get("type") != "output":
+                continue
+            path = _resolve_output_path(value)
+            if path not in paths:
+                paths.append(path)
+    return paths
 
 
-# Weighted total-progress model for the H3 video chain.
-#
-# The chain is: conditioning nodes (fast, no step progress) -> KSampler
-# (dominant cost, per-step progress) -> VAEDecode + VAEDecodeAudio
-# (heavy, no step progress) -> CreateVideo + SaveVideo (no progress).
-# Only KSampler feeds the ProgressRegistry at step granularity, so the
-# total is modeled with fixed phase weights and KSampler scaled by
-# current_step/total_steps.
-COND_PHASE_WEIGHT = 0.05
-KSAMPLER_PHASE_WEIGHT = 0.80
-DECODE_PHASE_WEIGHT = 0.08
-SAVE_PHASE_WEIGHT = 0.07
+# Weighted total-progress model. Only the sampler reports step-level
+# progress; conditioning/decode/save phases are modeled with fixed weights.
+COND_PHASE_WEIGHT = H3_PHASE_WEIGHTS["cond"]
+KSAMPLER_PHASE_WEIGHT = H3_PHASE_WEIGHTS["step"]
+DECODE_PHASE_WEIGHT = H3_PHASE_WEIGHTS["decode"]
+SAVE_PHASE_WEIGHT = H3_PHASE_WEIGHTS["save"]
 DECODE_SAVE_TAIL_ESTIMATE = 60.0  # seconds, empirical for H3 video
+IMAGE_DECODE_SAVE_TAIL_ESTIMATE = 10.0
 
-# Node class types in build_h3_workflow that have no step progress.
 _DECODE_CLASSES = {"VAEDecode", "VAEDecodeAudio"}
-_SAVE_CLASSES = {"CreateVideo", "SaveVideo"}
+_SAVE_CLASSES = {"CreateVideo", "SaveVideo", "SaveImage"}
 
 
 def _class_type_of(workflow: Dict[str, Any], node_id: str) -> Optional[str]:
-    """Map an execution node id back to its workflow class_type."""
     node = workflow.get(node_id)
     if node:
         return node.get("class_type")
@@ -546,19 +287,12 @@ def _class_type_of(workflow: Dict[str, Any], node_id: str) -> Optional[str]:
 
 
 def _read_progress(
-    task: VideoTask,
+    task: GenerationTask,
     workflow: Dict[str, Any],
+    phase_weights: Optional[Dict[str, float]] = None,
+    step_class: str = "KSampler",
 ) -> Optional[Dict[str, Any]]:
-    """Read real progress from ComfyUI's in-process ProgressRegistry.
-
-    ComfyUI 0.30+ keeps a module-level global registry of per-node
-    progress (state/value/max) that is cross-thread readable. The plugin
-    runs in-process, so the polling loop can read it directly without
-    hooks or websocket subscriptions.
-
-    Returns None when the registry is unavailable (e.g. another prompt
-    is currently executing, or running outside ComfyUI / in tests).
-    """
+    """Read real progress from ComfyUI's in-process ProgressRegistry."""
     try:
         from comfy_execution.progress import get_progress_state
     except ImportError:
@@ -575,7 +309,6 @@ def _read_progress(
     if not nodes:
         return None
 
-    # Find the currently running node (state == "running").
     running = [
         nid for nid, st in nodes.items()
         if getattr(st.get("state"), "value", st.get("state")) == "running"
@@ -589,49 +322,76 @@ def _read_progress(
     node_progress = (value / max_value) if max_value else 0.0
     class_type = _class_type_of(workflow, node_id) or node_id
 
-    # Weighted total progress across the chain phases.
-    if class_type == "KSampler":
-        total = COND_PHASE_WEIGHT + KSAMPLER_PHASE_WEIGHT * node_progress
+    weights = phase_weights or H3_PHASE_WEIGHTS
+    cond = weights.get("cond", 0.0)
+    step = weights.get("step", 0.0)
+    decode = weights.get("decode", 0.0)
+    save = weights.get("save", 0.0)
+
+    if class_type == step_class:
+        total = cond + step * node_progress
     elif class_type in _DECODE_CLASSES:
-        total = COND_PHASE_WEIGHT + KSAMPLER_PHASE_WEIGHT + DECODE_PHASE_WEIGHT * node_progress
+        total = cond + step + decode * node_progress
     elif class_type in _SAVE_CLASSES:
-        total = (
-            COND_PHASE_WEIGHT + KSAMPLER_PHASE_WEIGHT
-            + DECODE_PHASE_WEIGHT + SAVE_PHASE_WEIGHT * node_progress
-        )
+        total = cond + step + decode + save * node_progress
     else:
-        # Conditioning / loader phase — early, mostly static.
-        total = COND_PHASE_WEIGHT * node_progress
+        total = cond * node_progress
 
     return {
         "current_node": class_type,
         "node_progress": node_progress,
         "progress": min(total, 1.0),
-        "steps": (value, max_value) if class_type == "KSampler" else None,
+        "steps": (value, max_value) if class_type == step_class else None,
     }
 
 
-def _estimate_eta(task: VideoTask, progress: Dict[str, Any]) -> Optional[float]:
-    """Estimate remaining seconds via step-level linear extrapolation.
-
-    When KSampler is running: extrapolate from average step time plus a
-    fixed tail for VAE decode + video encode. Otherwise fall back to a
-    simple linear extrapolation from the weighted total.
-    """
+def _estimate_eta(task: GenerationTask, progress: Dict[str, Any]) -> Optional[float]:
+    """Estimate remaining seconds via step-level linear extrapolation."""
     elapsed = time.time() - (task.started_at or task.created_at)
     if elapsed <= 0 or progress["progress"] <= 0:
         return None
     steps = progress.get("steps")
+    tail = (
+        IMAGE_DECODE_SAVE_TAIL_ESTIMATE
+        if task.modality == "image"
+        else DECODE_SAVE_TAIL_ESTIMATE
+    )
     if steps and steps[1] > 0 and steps[0] > 0:
         step_avg = elapsed / steps[0]
-        remaining = step_avg * (steps[1] - steps[0]) + DECODE_SAVE_TAIL_ESTIMATE
+        remaining = step_avg * (steps[1] - steps[0]) + tail
         return round(remaining, 1)
     remaining = elapsed / progress["progress"] * (1 - progress["progress"])
     return round(remaining, 1)
 
 
-async def submit_video_task(task: VideoTask) -> VideoTask:
-    """Submit the task to ComfyUI's in-process queue and track until done."""
+# One generation at a time. ComfyUI executes prompts serially anyway;
+# holding this gate lets us unload the previous model family before the
+# next prompt is enqueued instead of letting two families thrash VRAM.
+_family_gate = asyncio.Lock()
+_last_family: Optional[str] = None
+
+
+def _maybe_unload_family(family: str) -> None:
+    global _last_family
+    if os.environ.get("COMFY_REST_UNLOAD_ON_FAMILY_SWITCH", "1") == "0":
+        _last_family = family
+        return
+    if _last_family and _last_family != family:
+        try:
+            import comfy.model_management as model_management
+            model_management.unload_all_models()
+            model_management.soft_empty_cache()
+            logger.info(
+                "Unloaded models for family switch: %s -> %s",
+                _last_family, family,
+            )
+        except Exception as e:  # pragma: no cover - only inside ComfyUI
+            logger.debug("Family unload skipped: %s", e)
+    _last_family = family
+
+
+async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
+    """Build, validate, submit, and track one generation task."""
     from server import PromptServer
 
     prompt_queue = _get_prompt_queue()
@@ -644,106 +404,124 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         manager.update(task.task_id, **record)
 
     try:
-        accel_cfg = parse_accel_config(task.speed)
-    except AccelConfigError as e:
+        spec = get_model(task.model_id)
+        built = spec.build(task)
+    except Exception as e:
         task.status = "failed"
         task.error = str(e)
         sync_status()
+        task.done.set()
         return task
 
-    missing_node = check_config_available(accel_cfg)
-    if missing_node:
+    if task.modality != spec.modality:
         task.status = "failed"
-        task.error = missing_node
+        task.error = (
+            f"model {spec.id!r} is {spec.modality}, not {task.modality}"
+        )
         sync_status()
+        task.done.set()
         return task
 
-    workflow = build_h3_workflow(
-        prompt=task.prompt,
-        width=task.width,
-        height=task.height,
-        length=task.length,
-        seed=task.seed,
-        first_frame_path=task.first_frame,
-        ref_images=task.ref_images,
-        sampler_name=os.environ.get("H3_SAMPLER", "euler"),
-        scheduler=os.environ.get("H3_SCHEDULER", "simple"),
-        steps=accel_cfg.steps if task.speed is not None else int(os.environ.get("H3_STEPS", "20")),
-        accel=accel_cfg,
-        ref_image_size=os.environ.get("H3_REF_SIZE", "match"),
-        ref2va_model=os.environ.get(
-            "H3_REF2VA_MODEL", "minimax_h3_ref2va_pruned_nvfp4.safetensors"
-        ),
-    )
+    task.output_mime = built.output_mime
 
-    prompt_id = str(uuid.uuid4())
-    task.prompt_id = prompt_id
-    sync_status()
+    async with _family_gate:
+        try:
+            _maybe_unload_family(spec.family)
 
-    try:
-        from execution import validate_prompt
-        valid = await validate_prompt(prompt_id, workflow, None)
-        if not valid[0]:
-            task.status = "failed"
-            task.error = valid[1]
-            task.node_errors = valid[3]
+            prompt_id = str(uuid.uuid4())
+            task.prompt_id = prompt_id
             sync_status()
-            return task
-    except Exception as e:
-        task.status = "failed"
-        task.error = f"validate_prompt failed: {e}"
-        sync_status()
-        return task
 
-    task.status = "running"
-    number = getattr(server, "number", 0)
-    outputs_to_execute = valid[2] if valid[2] is not None else []
-    prompt_queue.put((number, prompt_id, workflow, {}, outputs_to_execute, {}))
-    task.started_at = time.time()
-    sync_status()
-
-    deadline = time.time() + 3600
-    while time.time() < deadline:
-        await asyncio.sleep(1.0)
-        if task.status == "running":
-            progress = _read_progress(task, workflow)
-            if progress is not None:
-                task.progress = progress["progress"]
-                task.current_node = progress["current_node"]
-                task.node_progress = progress["node_progress"]
-                task.elapsed = time.time() - task.started_at
-                task.eta = _estimate_eta(task, progress)
+            from execution import validate_prompt
+            valid = await validate_prompt(prompt_id, built.workflow, None)
+            if not valid[0]:
+                task.status = "failed"
+                task.error = valid[1]
+                task.node_errors = valid[3]
                 sync_status()
-        history = prompt_queue.get_history()
-        if prompt_id not in history:
-            continue
-        entry = history[prompt_id]
-        status = entry.get("status", {})
-        status_str = status.get("status_str", "success")
-        outputs = entry.get("outputs", {})
-        if status_str == "error":
+                return task
+        except Exception as e:
             task.status = "failed"
-            task.error = str(status.get("messages", []))
+            task.error = f"validate_prompt failed: {e}"
             sync_status()
             return task
-        for node_id, out in outputs.items():
-            for value in out.get("images", []):
-                if value.get("type") == "output":
-                    task.output_path = _resolve_output_path(value)
-                    task.status = "completed"
-                    task.completed_at = time.time()
-                    task.progress = 1.0
-                    task.eta = None
+
+        task.status = "running"
+        number = getattr(server, "number", 0)
+        outputs_to_execute = valid[2] if valid[2] is not None else []
+        prompt_queue.put((
+            number, prompt_id, built.workflow, {},
+            outputs_to_execute, {},
+        ))
+        task.started_at = time.time()
+        sync_status()
+
+        deadline = time.time() + spec.timeout_s
+        while time.time() < deadline:
+            await asyncio.sleep(1.0)
+            if task.status == "running":
+                progress = _read_progress(
+                    task, built.workflow, built.phase_weights, built.step_class
+                )
+                if progress is not None:
+                    task.progress = progress["progress"]
+                    task.current_node = progress["current_node"]
+                    task.node_progress = progress["node_progress"]
+                    task.elapsed = time.time() - task.started_at
+                    task.eta = _estimate_eta(task, progress)
                     sync_status()
-                    return task
-        task.status = "completed"
-        task.completed_at = time.time()
-        task.progress = 1.0
-        task.eta = None
+
+            history = prompt_queue.get_history()
+            if prompt_id not in history:
+                continue
+            entry = history[prompt_id]
+            status = entry.get("status", {})
+            status_str = status.get("status_str", "success")
+            outputs = entry.get("outputs", {})
+            if status_str == "error":
+                task.status = "failed"
+                task.error = str(status.get("messages", []))
+                sync_status()
+                return task
+
+            paths = _collect_output_paths(outputs)
+            if paths:
+                task.output_paths = paths
+                task.output_path = paths[0]
+                task.status = "completed"
+                task.completed_at = time.time()
+                task.progress = 1.0
+                task.eta = None
+                sync_status()
+                return task
+
+            if task.modality == "image":
+                task.status = "failed"
+                task.error = "generation completed without an image output"
+                sync_status()
+                return task
+
+            task.status = "completed"
+            task.completed_at = time.time()
+            task.progress = 1.0
+            task.eta = None
+            sync_status()
+            return task
+
+        task.status = "failed"
+        task.error = "Timeout waiting for generation"
         sync_status()
         return task
 
-    task.status = "failed"
-    task.error = "Timeout waiting for video generation"
-    sync_status()
-    return task
+
+async def submit_generation_task(task: GenerationTask) -> GenerationTask:
+    """Run one generation task and always signal completion."""
+    try:
+        return await _submit_generation_task_inner(task)
+    finally:
+        task.done.set()
+
+
+async def submit_video_task(task: GenerationTask) -> GenerationTask:
+    """Backward-compatible wrapper for the generic submit path."""
+    return await submit_generation_task(task)

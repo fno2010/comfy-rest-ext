@@ -47,7 +47,85 @@ def cmd_models(client: ComfyRestClient, args: Any) -> int:
     if args.json:
         return _emit(models, True)
     for m in models:
-        print(f"{m['id']:<24} {m.get('owned_by', '')}")
+        print(f"{m['id']:<26} {m.get('modality', 'video'):<6} {m.get('owned_by', '')}")
+    return 0
+
+
+def _build_image_payload(args: Any) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "model": args.model,
+        "prompt": args.prompt,
+    }
+    optional = {
+        "size": getattr(args, "size", None),
+        "width": getattr(args, "width", None),
+        "height": getattr(args, "height", None),
+        "aspect_ratio": getattr(args, "aspect_ratio", None),
+        "megapixels": getattr(args, "megapixels", None),
+        "n": getattr(args, "n", None),
+        "negative_prompt": getattr(args, "negative", None),
+        "steps": getattr(args, "steps", None),
+        "cfg": getattr(args, "cfg", None),
+        "sampler": getattr(args, "sampler", None),
+        "scheduler": getattr(args, "scheduler", None),
+        "seed": getattr(args, "seed", None),
+        "response_format": getattr(args, "response_format", None),
+        "quality": getattr(args, "quality", None),
+        "style": getattr(args, "style", None),
+    }
+    for key, value in optional.items():
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+def _write_image_response(response: Dict[str, Any], out: str) -> None:
+    data = response.get("data") or []
+    if not data:
+        raise ApiError(0, "response contained no image data")
+    root, ext = os.path.splitext(out)
+    ext = ext or ".png"
+    for index, item in enumerate(data):
+        if item.get("b64_json"):
+            dest = out if index == 0 else f"{root}_{index + 1}{ext}"
+            with open(dest, "wb") as f:
+                f.write(base64.b64decode(item["b64_json"]))
+            print(f"saved:     {dest}")
+        elif item.get("url"):
+            print(f"url:       {item['url']}")
+        else:
+            raise ApiError(0, "response item has neither b64_json nor url")
+
+
+def cmd_image(client: ComfyRestClient, args: Any) -> int:
+    try:
+        response = client.create_image(_build_image_payload(args))
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(response, True)
+    _write_image_response(response, args.out)
+    return 0
+
+
+def cmd_image_edit(client: ComfyRestClient, args: Any) -> int:
+    payload = _build_image_payload(args)
+    files = []
+    try:
+        for path in args.image:
+            with open(path, "rb") as f:
+                files.append(("image", os.path.basename(path), f.read()))
+    except OSError as e:
+        return _emit_error(f"image file error: {e}")
+    if not files:
+        return _emit_error("at least one --image is required")
+    try:
+        response = client.create_image_edit(payload, files)
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(response, True)
+    _write_image_response(response, args.out)
     return 0
 
 
@@ -179,6 +257,41 @@ def cmd_list(client: ComfyRestClient, args: Any) -> int:
         status = t["status"]
         print(f"{t['id']:<36} {status:<12} {t.get('model', ''):<16} "
               f"{t.get('size', ''):<10} {t.get('view_url') or ''}")
+    return 0
+
+
+def cmd_images(client: ComfyRestClient, args: Any) -> int:
+    try:
+        tasks = client.list_images()
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(tasks, True)
+    for t in tasks:
+        urls = t.get("view_urls") or []
+        print(f"{t['id']:<40} {t['status']:<12} {t.get('model', ''):<22} "
+              f"{t.get('size', ''):<10} {urls[0] if urls else ''}")
+    return 0
+
+
+def cmd_image_status(client: ComfyRestClient, args: Any) -> int:
+    try:
+        task = client.get_image(args.image_id)
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(task, True)
+    print(f"id:        {task['id']}")
+    print(f"status:    {task['status']}")
+    print(f"model:     {task.get('model', '')}")
+    print(f"progress:  {task.get('progress', 0)}%")
+    print(f"size:      {task.get('size', '')}")
+    print(f"n:         {task.get('n', 1)}")
+    if task.get("error"):
+        err = task["error"]
+        print(f"error:     {err.get('message', err)}")
+    for url in task.get("view_urls") or []:
+        print(f"view_url:  {url}")
     return 0
 
 

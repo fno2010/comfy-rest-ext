@@ -10,7 +10,7 @@ from typing import override
 
 from .tasks.persistence import init_persistence, stop_persistence
 from .tasks.video_persistence import init_video_persistence, stop_video_persistence
-from .tasks.video_task import restore_video_tasks_from_disk
+from .tasks.video_task import restore_generation_tasks_from_disk
 
 logger = logging.getLogger("comfy-rest-ext")
 
@@ -35,8 +35,11 @@ class ComfyRestExtExtension(ComfyExtension):
         logger.info("[Comfy-REST-Ext] Initializing task persistence...")
         await init_persistence()
         await init_video_persistence()
-        restored = await restore_video_tasks_from_disk()
-        logger.info("[Comfy-REST-Ext] Task persistence initialized (%d video tasks restored).", restored)
+        restored = await restore_generation_tasks_from_disk()
+        logger.info(
+            "[Comfy-REST-Ext] Task persistence initialized (%d generation tasks restored).",
+            restored,
+        )
 
     @override
     async def on_unload(self) -> None:

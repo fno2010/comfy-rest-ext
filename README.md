@@ -5,6 +5,8 @@ ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 R
 ## 功能
 
 - **OpenAI 兼容视频生成 API** — T2V / I2V / R2V 生成、任务持久化、历史查询（MiniMax-H3）
+- **OpenAI 兼容图片生成 API** — 同步 `/v1/images/generations`、Qwen-Image 2.1 编辑、Anima/Qwen-Image 2.1 模型目录
+- **任务面板** — 单页 Web UI，显示视频/图片任务列表、进度、错误和生成结果；只依赖扩展 API 与 OpenAI 兼容端点
 - **模型下载** — 从 CivitAI、HuggingFace、直链下载模型到本地
 - **模型管理** — 递归列出模型、获取元数据、删除模型
 - **工作流依赖安装** — 从 workflow JSON 解析依赖并自动安装
@@ -31,6 +33,33 @@ ln -s /path/to/comfy-rest-ext $COMFYUI/custom_nodes/comfy-rest-ext
 curl http://127.0.0.1:8188/v2/extension/health
 # {"status": "ok", "extension": "comfy-rest-ext"}
 ```
+
+## 任务面板
+
+启动 ComfyUI 后打开：
+
+```text
+http://<host>:8188/v2/extension/ui
+```
+
+`/ui` 会 302 到同一页面。面板按需刷新（有活跃任务时 2s，否则 5s；页面隐藏时暂停），展示：
+
+- 视频任务（`GET /v1/videos`）和图片任务（`GET /v2/extension/image`）
+- 状态、进度条、当前节点、ETA、耗时、错误
+- 视频播放和图片缩略图/大图预览
+- 分页、每页数量、按状态/类型/模型筛选、搜索、排序
+- Models 弹窗直接读取 `/v1/models`，以卡片展示并支持一键筛选，不跳转 JSON
+
+面板只请求扩展自身和 OpenAI 兼容端点：
+
+```text
+GET /v1/videos
+GET /v1/videos/{id}/content
+GET /v2/extension/image
+GET /v2/extension/image/{id}/content?index=N
+```
+
+不调用 ComfyUI 的 `/view`、`/prompt`、`/object_info`，也不依赖 ComfyUI 前端 SDK。
 
 ## CLI 工具
 
@@ -103,6 +132,83 @@ comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
 ```
 
 环境变量：`COMFY_REST_EXT_BASE_URL`（默认 `http://127.0.0.1:8188`）、`COMFY_REST_EXT_TIMEOUT`（默认 `60`）。
+
+## 图片生成（OpenAI Images API）
+
+服务端按模型 id 路由到对应的 ComfyUI workflow builder。图片模型：
+
+| model id | 后端 | 任务 | 默认 |
+|---|---|---|---|
+| `anima-base` | Anima Base v1.0 (2B) | `t2i` | 1024², 30 steps, cfg 4 |
+| `anima-turbo` | Anima Turbo v1.0 (2B) | `t2i` | 1024², 8 steps, cfg 1 |
+| `qwen-image-2.1` | Qwen-Image 2.1 (7B) | `t2i`, `edit` | 1024², 25 steps, cfg 1 |
+| `qwen-image-2.1-turbo` | Qwen-Image 2.1 Turbo | `t2i`, `edit` | 1024², 8-step ManualSigmas |
+
+`qwen-image-2.1` 需要 ComfyUI >= 0.37.0；Anima 在当前 0.30.0 已有架构支持，但仍建议统一升级后验证。
+
+### 同步生成
+
+```bash
+curl -X POST http://host:8188/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anima-base",
+    "prompt": "masterpiece, best quality, 1girl, ...",
+    "size": "1024x1024",
+    "response_format": "b64_json"
+  }'
+```
+
+响应：
+
+```json
+{"created": 1792590000, "model": "anima-base", "size": "1024x1024",
+ "data": [{"b64_json": "...", "revised_prompt": "..."}]}
+```
+
+扩展字段：`negative_prompt`、`seed`、`steps`、`cfg`、`sampler`、`scheduler`、`aspect_ratio`、`megapixels`、`resolution`（edit）、`n`。`size` 支持 `WIDTHxHEIGHT` 或 `auto`；`response_format` 支持 `b64_json`（默认）和 `url`。
+
+### 编辑（Qwen-Image 2.1）
+
+```bash
+curl -X POST http://host:8188/v1/images/edits \
+  -F model=qwen-image-2.1 \
+  -F prompt='Keep <image1> unchanged, put the shirt from <image2> on the character' \
+  -F image=@portrait.png \
+  -F image=@shirt.png
+```
+
+`mask` 暂不支持：Qwen-Image 2.1 的编辑通过 prompt + 参考图（`<image1>`…`<imageN>`）完成，和 OpenAI mask 语义不同。
+
+### 异步任务
+
+长任务（2K、`n>1`、编辑）可走异步端点：
+
+```bash
+curl -X POST http://host:8188/v2/extension/image/generate \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen-image-2.1","prompt":"...","size":"2048x2048"}'
+# {"id":"image_...","status":"queued",...}
+
+curl http://host:8188/v2/extension/image/image_...
+```
+
+### CLI
+
+```bash
+python3 -m cli image "masterpiece, 1girl, ..." --model anima-base \
+  --size 1024x1024 --out cat.png
+
+python3 -m cli image-edit "put <image2> on <image1>" \
+  --image portrait.png --image shirt.png --out edited.png
+
+python3 -m cli images                 # list image tasks
+python3 -m cli image-status image_... # show one image task
+```
+
+`comfy-rest-ext-cli list` 只列出视频任务；图片任务用 `images` / `image-status` 查询（对应 `/v2/extension/image`）。
+
+---
 
 ## API 文档
 
