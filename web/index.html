@@ -231,6 +231,19 @@
   }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
   .toast.error { background: #3d1418; border-color: #6e2329; color: #ffb3ad; }
+  .hint { color: var(--muted); font-size: 11px; line-height: 1.35; }
+  .ref-list { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .ref-thumb {
+    position: relative; width: 58px; height: 58px;
+    border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+    background: #000;
+  }
+  .ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ref-thumb button {
+    position: absolute; top: 2px; right: 2px; width: 18px; height: 18px;
+    padding: 0; line-height: 1; border-radius: 50%;
+    background: rgba(0,0,0,.75); border-color: #000; color: #fff; font-size: 13px;
+  }
   @media (max-width: 720px) {
     .bar { padding: 10px 12px; }
     main { padding: 12px; }
@@ -338,6 +351,12 @@
     <label class="form-row" id="gen-negative-row">Negative prompt
       <textarea id="gen-negative" rows="2" placeholder="Optional"></textarea>
     </label>
+    <label class="form-row" id="gen-ref-row" hidden>
+      Reference images
+      <input id="gen-ref-images" type="file" accept="image/*" multiple>
+      <span class="hint" id="gen-ref-hint">Qwen-Image 2.1 edit: reference them as &lt;image1&gt;… in the prompt.</span>
+      <div id="gen-ref-preview" class="ref-list"></div>
+    </label>
     <div id="image-fields" class="form-grid">
       <label>Size
         <input id="gen-size" list="size-presets" placeholder="1024x1024">
@@ -369,6 +388,13 @@
       </label>
     </div>
     <div id="video-fields" class="form-grid" hidden>
+      <label>Mode
+        <select id="gen-video-mode">
+          <option value="t2va">Text only</option>
+          <option value="fl2va">First frame (I2V)</option>
+          <option value="r2v">Reference images (R2V)</option>
+        </select>
+      </label>
       <label>Width
         <input id="gen-width" type="number" min="256" step="8" value="1344">
       </label>
@@ -387,6 +413,12 @@
         </select>
       </label>
     </div>
+    <label class="form-row" id="gen-video-ref-row" hidden>
+      <span id="gen-video-ref-label">Reference image(s)</span>
+      <input id="gen-video-files" type="file" accept="image/*">
+      <span class="hint" id="gen-video-ref-hint"></span>
+      <div id="gen-video-ref-preview" class="ref-list"></div>
+    </label>
     <div class="form-grid">
       <label>Seed
         <input id="gen-seed" type="number" min="0" value="0">
@@ -436,6 +468,8 @@
     fetchedAt: null,
     modelOptionsSig: "",
     generateMode: "image",
+    imageRefs: [],
+    videoRefs: [],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -448,6 +482,116 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  const previewUrls = new WeakMap();
+
+  function previewUrl(file) {
+    let url = previewUrls.get(file);
+    if (!url) {
+      url = URL.createObjectURL(file);
+      previewUrls.set(file, url);
+    }
+    return url;
+  }
+
+  function releaseRefs(files) {
+    for (const file of files || []) {
+      const url = previewUrls.get(file);
+      if (url) {
+        URL.revokeObjectURL(url);
+        previewUrls.delete(file);
+      }
+    }
+  }
+
+  function renderRefList(containerId, files, onRemove) {
+    const container = $(containerId);
+    container.replaceChildren();
+    files.forEach((file, index) => {
+      const thumb = document.createElement("div");
+      thumb.className = "ref-thumb";
+      const img = document.createElement("img");
+      img.src = previewUrl(file);
+      img.alt = file.name || "reference";
+      img.title = file.name || "";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.title = "Remove";
+      remove.addEventListener("click", () => onRemove(index));
+      thumb.append(img, remove);
+      container.append(thumb);
+    });
+  }
+
+  function clearImageRefs() {
+    releaseRefs(state.imageRefs);
+    state.imageRefs = [];
+    $("gen-ref-images").value = "";
+    renderRefList("gen-ref-preview", [], () => {});
+  }
+
+  function clearVideoRefs() {
+    releaseRefs(state.videoRefs);
+    state.videoRefs = [];
+    $("gen-video-files").value = "";
+    renderRefList("gen-video-ref-preview", [], () => {});
+  }
+
+  function removeImageRef(index) {
+    const [removed] = state.imageRefs.splice(index, 1);
+    if (removed) releaseRefs([removed]);
+    renderRefList("gen-ref-preview", state.imageRefs, removeImageRef);
+  }
+
+  function removeVideoRef(index) {
+    const [removed] = state.videoRefs.splice(index, 1);
+    if (removed) releaseRefs([removed]);
+    renderRefList("gen-video-ref-preview", state.videoRefs, removeVideoRef);
+  }
+
+  function setImageRefs(files) {
+    releaseRefs(state.imageRefs);
+    state.imageRefs = Array.from(files || []);
+    renderRefList("gen-ref-preview", state.imageRefs, removeImageRef);
+  }
+
+  function setVideoRefs(files) {
+    releaseRefs(state.videoRefs);
+    state.videoRefs = Array.from(files || []);
+    renderRefList("gen-video-ref-preview", state.videoRefs, removeVideoRef);
+  }
+
+  function modelSupportsEdit(modelId) {
+    const model = state.catalog.find((item) => item.id === modelId);
+    return Boolean(model && (model.capabilities || []).includes("edit"));
+  }
+
+  function updateRefControls() {
+    const imageMode = state.generateMode === "image";
+    const edit = imageMode && modelSupportsEdit($("gen-model").value);
+    $("gen-ref-row").hidden = !edit;
+    if (!edit && state.imageRefs.length) clearImageRefs();
+
+    const videoMode = state.generateMode === "video";
+    const mode = $("gen-video-mode").value;
+    const usesRefs = videoMode && mode !== "t2va";
+    $("gen-video-ref-row").hidden = !usesRefs;
+    const input = $("gen-video-files");
+    input.multiple = mode === "r2v";
+    $("gen-video-ref-label").textContent =
+      mode === "fl2va" ? "First frame" : "Reference images";
+    $("gen-video-ref-hint").textContent =
+      mode === "fl2va"
+        ? "One image used as the first frame."
+        : "Images are reference slots; use <Picture 1>… in the prompt.";
+    if (!usesRefs && state.videoRefs.length) clearVideoRefs();
+    if (mode === "fl2va" && state.videoRefs.length > 1) {
+      releaseRefs(state.videoRefs.slice(1));
+      state.videoRefs = state.videoRefs.slice(0, 1);
+      renderRefList("gen-video-ref-preview", state.videoRefs, removeVideoRef);
+    }
   }
 
   function fmtTime(ts) {
@@ -957,10 +1101,13 @@
       $("gen-speed").value = "auto";
     }
     $("gen-seed").value = "0";
+    updateRefControls();
   }
 
   function setGenerateMode(mode) {
     state.generateMode = mode;
+    if (mode !== "image") clearImageRefs();
+    if (mode !== "video") clearVideoRefs();
     document.querySelectorAll("#generate-tabs button").forEach((button) => {
       button.classList.toggle("active", button.dataset.mode === mode);
     });
@@ -974,6 +1121,8 @@
   }
 
   async function openGenerate(mode) {
+    clearImageRefs();
+    clearVideoRefs();
     setGenerateMode(mode);
     $("generate-dialog").showModal();
     try {
@@ -1025,39 +1174,112 @@
       return;
     }
 
-    const payload = {
-      model,
-      prompt,
-      seed: numberValue("gen-seed", 0),
-    };
-    if (mode === "image") {
-      const size = $("gen-size").value.trim();
-      if (size) payload.size = size;
-      payload.n = numberValue("gen-n", 1);
-      payload.steps = numberValue("gen-steps", 25);
-      payload.cfg = numberValue("gen-cfg", 1.0);
-      payload.sampler = $("gen-sampler").value.trim() || "euler";
-      payload.scheduler = $("gen-scheduler").value.trim() || "simple";
-      const negative = $("gen-negative").value.trim();
-      if (negative) payload.negative_prompt = negative;
-    } else {
-      payload.width = numberValue("gen-width", 1344);
-      payload.height = numberValue("gen-height", 768);
-      payload.seconds = numberValue("gen-seconds", 5);
-      payload.speed = $("gen-speed").value;
-    }
+    const videoMode = $("gen-video-mode").value;
+    const imageRefs = state.imageRefs.slice();
+    const videoRefs = state.videoRefs.slice();
+    let url;
+    let headers = {};
+    let body;
 
-    const url = mode === "image" ? "/v1/images/generations" : "/v1/videos";
-    const headers = { "Content-Type": "application/json" };
-    if (mode === "image") headers.Prefer = "respond-async";
+    if (mode === "image") {
+      if (imageRefs.length) {
+        if (!modelSupportsEdit(model)) {
+          showGenerateError("this model does not support reference images");
+          return;
+        }
+        const form = new FormData();
+        form.append("model", model);
+        form.append("prompt", prompt);
+        form.append("n", String(numberValue("gen-n", 1)));
+        form.append("steps", String(numberValue("gen-steps", 25)));
+        form.append("cfg", String(numberValue("gen-cfg", 1.0)));
+        form.append("sampler", $("gen-sampler").value.trim() || "euler");
+        form.append("scheduler", $("gen-scheduler").value.trim() || "simple");
+        form.append("seed", String(numberValue("gen-seed", 0)));
+        const negative = $("gen-negative").value.trim();
+        if (negative) form.append("negative_prompt", negative);
+        const size = $("gen-size").value.trim();
+        const match = size.match(/^(\d+)\s*[xX]\s*(\d+)$/);
+        if (match) {
+          const resolution = Math.round(
+            Math.sqrt(Number(match[1]) * Number(match[2])) / 32
+          ) * 32;
+          form.append("resolution", String(Math.max(32, resolution)));
+        }
+        imageRefs.forEach((file, index) => {
+          form.append("image", file, file.name || `ref_${index + 1}.png`);
+        });
+        url = "/v1/images/edits";
+        headers.Prefer = "respond-async";
+        body = form;
+      } else {
+        const payload = {
+          model,
+          prompt,
+          seed: numberValue("gen-seed", 0),
+          n: numberValue("gen-n", 1),
+          steps: numberValue("gen-steps", 25),
+          cfg: numberValue("gen-cfg", 1.0),
+          sampler: $("gen-sampler").value.trim() || "euler",
+          scheduler: $("gen-scheduler").value.trim() || "simple",
+        };
+        const size = $("gen-size").value.trim();
+        if (size) payload.size = size;
+        const negative = $("gen-negative").value.trim();
+        if (negative) payload.negative_prompt = negative;
+        url = "/v1/images/generations";
+        headers = { "Content-Type": "application/json", Prefer: "respond-async" };
+        body = JSON.stringify(payload);
+      }
+    } else {
+      if (videoMode !== "t2va" && !videoRefs.length) {
+        showGenerateError(
+          videoMode === "fl2va"
+            ? "first frame image is required"
+            : "at least one reference image is required"
+        );
+        return;
+      }
+      const fields = {
+        model,
+        prompt,
+        width: String(numberValue("gen-width", 1344)),
+        height: String(numberValue("gen-height", 768)),
+        seconds: String(numberValue("gen-seconds", 5)),
+        seed: String(numberValue("gen-seed", 0)),
+        speed: $("gen-speed").value,
+        task: videoMode,
+      };
+      if (videoMode !== "t2va") {
+        const form = new FormData();
+        for (const [key, value] of Object.entries(fields)) {
+          form.append(key, value);
+        }
+        videoRefs.forEach((file, index) => {
+          form.append("image", file, file.name || `ref_${index + 1}.png`);
+        });
+        url = "/v1/videos";
+        body = form;
+      } else {
+        const payload = {
+          model,
+          prompt,
+          width: numberValue("gen-width", 1344),
+          height: numberValue("gen-height", 768),
+          seconds: numberValue("gen-seconds", 5),
+          seed: numberValue("gen-seed", 0),
+          speed: $("gen-speed").value,
+          task: videoMode,
+        };
+        url = "/v1/videos";
+        headers = { "Content-Type": "application/json" };
+        body = JSON.stringify(payload);
+      }
+    }
 
     setGenerateBusy(true);
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(url, { method: "POST", headers, body });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         const message = data.error && (data.error.message || data.error);
@@ -1067,6 +1289,8 @@
       $("generate-dialog").close();
       $("gen-prompt").value = "";
       $("gen-negative").value = "";
+      clearImageRefs();
+      clearVideoRefs();
       toast("Queued " + (id || "task"));
       state.page = 1;
       load();
@@ -1143,6 +1367,13 @@
     if (button) setGenerateMode(button.dataset.mode);
   });
   $("gen-model").addEventListener("change", applyGenerateDefaults);
+  $("gen-ref-images").addEventListener("change", (event) => {
+    setImageRefs(event.target.files);
+  });
+  $("gen-video-files").addEventListener("change", (event) => {
+    setVideoRefs(event.target.files);
+  });
+  $("gen-video-mode").addEventListener("change", updateRefControls);
   $("generate-form").addEventListener("submit", submitGenerate);
   $("generate-close").addEventListener("click", () => $("generate-dialog").close());
   $("generate-cancel").addEventListener("click", () => $("generate-dialog").close());

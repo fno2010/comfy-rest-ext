@@ -50,6 +50,7 @@ http://<host>:8188/v2/extension/ui
 - 分页、每页数量、按状态/类型/模型筛选、搜索、排序
 - Models 弹窗直接读取 `/v1/models`，以卡片展示并支持一键筛选，不跳转 JSON
 - `+ Image` / `+ Video` 弹窗直接提交生成任务：图片走 `POST /v1/images/generations` + `Prefer: respond-async`，视频走 `POST /v1/videos`；提交后任务立即进入列表并可跟踪进度
+- 参考图：Qwen-Image 2.1 的 image edit 支持 1–16 张参考图；视频支持 `First frame (I2V)` 单图和 `Reference images (R2V)` 多图。参考视频暂不支持（见 #23）
 
 面板只请求扩展自身和 OpenAI 兼容端点：
 
