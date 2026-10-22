@@ -896,6 +896,8 @@ GET /v2/extension/image/{id}/content?index=N
 
 `+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。
 
+参考图：选择 Qwen-Image 2.1 时图片表单显示参考图上传（走 `/v1/images/edits`，prompt 用 `<image1>`…）；视频表单提供 `Text only` / `First frame (I2V)` / `Reference images (R2V)`，后两者走 `/v1/videos` multipart，R2V prompt 用 `<Picture N>`。参考视频不在本版本范围内（#23）。
+
 ---
 
 ## OpenAI 兼容 API
