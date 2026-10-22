@@ -153,3 +153,33 @@ def test_image_task_persistence_roundtrip():
     assert restored.params["n"] == 2
     assert restored.output_paths == ["/out/a.png", "/out/b.png"]
     assert restored.output_path == "/out/a.png"
+
+
+def test_output_prefixes_are_per_task():
+    from api.workflows.h3 import build_h3_task
+
+    first = build_anima_task(_task(task_id="image_aaaa1111"))
+    second = build_anima_task(_task(task_id="image_bbbb2222"))
+    assert first.output_prefix != second.output_prefix
+    assert "image_aa" in first.output_prefix
+
+    qwen_first = build_qwen_image_task(_task(
+        task_id="image_cccc3333", model_id="qwen-image-2.1"
+    ))
+    qwen_second = build_qwen_image_task(_task(
+        task_id="image_dddd4444", model_id="qwen-image-2.1"
+    ))
+    assert qwen_first.output_prefix != qwen_second.output_prefix
+
+    def video_task(task_id):
+        return GenerationTask(
+            task_id=task_id, status="queued", prompt="p", task_type="t2va",
+            width=1024, height=768, length=39, seed=1,
+            model_id="minimax-h3", modality="video", params={},
+        )
+
+    h3_first = build_h3_task(video_task("video_aaaa1111"))
+    h3_second = build_h3_task(video_task("video_bbbb2222"))
+    assert h3_first.output_prefix != h3_second.output_prefix
+    save_id = _find(h3_first.workflow, "SaveVideo")
+    assert h3_first.workflow[save_id]["inputs"]["filename_prefix"] == h3_first.output_prefix

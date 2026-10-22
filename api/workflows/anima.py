@@ -97,14 +97,15 @@ def build_anima_task(task: Any) -> BuildResult:
         "denoise": 1.0,
     })
     add("9", "VAEDecode", {"samples": ["8", 0], "vae": ["3", 0]})
+    prefix = f"image/comfy-rest-ext/{task.model_id}_{(task.task_id or 'task')[:8]}"
     add("10", "SaveImage", {
         "images": ["9", 0],
-        "filename_prefix": f"image/comfy-rest-ext/{task.model_id}",
+        "filename_prefix": prefix,
     })
 
     return BuildResult(
         workflow=workflow,
-        output_prefix=f"image/comfy-rest-ext/{task.model_id}",
+        output_prefix=prefix,
         phase_weights=dict(ANIMA_PHASE_WEIGHTS),
         step_class="KSampler",
         output_mime="image/png",

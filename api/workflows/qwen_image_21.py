@@ -244,7 +244,7 @@ def build_qwen_image_task(task: Any) -> BuildResult:
         "vae": ["3", 0],
     })
     save_id = _next_id(state)
-    prefix = f"image/comfy-rest-ext/{task.model_id}"
+    prefix = f"image/comfy-rest-ext/{task.model_id}_{(task.task_id or 'task')[:8]}"
     if is_edit:
         prefix += "_edit"
     _add(workflow, save_id, "SaveImage", {

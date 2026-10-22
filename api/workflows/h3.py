@@ -156,6 +156,7 @@ def build_h3_workflow(
     sol_stack: bool = False,
     accel: Optional[AccelConfig] = None,
     ref_image_size: str = "match",
+    filename_prefix: str = "video/comfy-rest-ext",
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V."""
     if accel is None:
@@ -263,7 +264,7 @@ def build_h3_workflow(
     nid += 1
     add(str(nid), "SaveVideo", {
         "video": [create_video_id, 0],
-        "filename_prefix": "video/comfy-rest-ext",
+        "filename_prefix": filename_prefix,
         "format": "auto",
         "codec": "auto",
     })
@@ -297,6 +298,7 @@ def build_h3_task(task: Any) -> BuildResult:
     require_asset("vae", "minimax_h3_video_vae_fp16.safetensors")
     require_asset("vae", "minimax_h3_audio_vae_fp32.safetensors")
 
+    prefix = f"video/comfy-rest-ext_{(task.task_id or 'task')[:8]}"
     workflow = build_h3_workflow(
         prompt=task.prompt,
         width=task.width,
@@ -313,11 +315,12 @@ def build_h3_task(task: Any) -> BuildResult:
         ref2va_model=os.environ.get(
             "H3_REF2VA_MODEL", "minimax_h3_ref2va_pruned_nvfp4.safetensors"
         ),
+        filename_prefix=prefix,
     )
 
     return BuildResult(
         workflow=workflow,
-        output_prefix="video/comfy-rest-ext",
+        output_prefix=prefix,
         phase_weights=dict(H3_PHASE_WEIGHTS),
         step_class="KSampler",
         output_mime="video/mp4",
