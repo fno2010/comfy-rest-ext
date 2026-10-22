@@ -49,6 +49,8 @@
   }
   button:hover, .btn:hover { border-color: var(--accent); }
   button:disabled { opacity: .45; cursor: default; }
+  .primary { background: #1f6feb; border-color: #1f6feb; color: #fff; font-weight: 600; }
+  .primary:hover { border-color: #58a6ff; }
   input[type=search], select {
     background: var(--panel); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px;
@@ -197,6 +199,37 @@
   .model-card code { font-size: 12px; word-break: break-all; }
   .model-card .badge { margin-left: auto; }
   .model-card .line { color: var(--muted); font-size: 12px; }
+  .generate-form {
+    display: flex; flex-direction: column; gap: 10px;
+    min-width: min(620px, 88vw);
+  }
+  .form-row, .form-grid label {
+    display: flex; flex-direction: column; gap: 4px;
+    color: var(--muted); font-size: 12px;
+  }
+  .form-row input, .form-row textarea, .form-row select,
+  .form-grid input, .form-grid select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 9px; font: inherit; width: 100%;
+  }
+  .form-row textarea { resize: vertical; min-height: 64px; }
+  .form-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+  }
+  .dialog-actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;
+  }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px);
+    background: #173d24; border: 1px solid #2ea043; color: #b7f7c1;
+    padding: 9px 14px; border-radius: 8px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+    z-index: 50; max-width: 90vw;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.error { background: #3d1418; border-color: #6e2329; color: #ffb3ad; }
   @media (max-width: 720px) {
     .bar { padding: 10px 12px; }
     main { padding: 12px; }
@@ -214,6 +247,8 @@
     <div class="spacer"></div>
     <input id="search" type="search" placeholder="Search model, prompt, or id">
     <label class="toggle small"><input id="auto" type="checkbox" checked> auto</label>
+    <button id="new-image-btn" class="primary" type="button">+ Image</button>
+    <button id="new-video-btn" class="primary" type="button">+ Video</button>
     <button id="refresh" type="button"><span id="refresh-icon"></span>Refresh</button>
     <button id="models-btn" type="button">Models</button>
   </div>
@@ -282,6 +317,90 @@
   </div>
 </main>
 
+<dialog id="generate-dialog">
+  <div class="dialog-head">
+    <h2 id="generate-title">Generate image</h2>
+    <div class="spacer"></div>
+    <button id="generate-close" type="button">Close</button>
+  </div>
+  <form id="generate-form" class="generate-form">
+    <div id="generate-tabs" class="segmented">
+      <button type="button" data-mode="image" class="active">Image</button>
+      <button type="button" data-mode="video">Video</button>
+    </div>
+    <label class="form-row">Model
+      <select id="gen-model" required></select>
+    </label>
+    <label class="form-row">Prompt
+      <textarea id="gen-prompt" rows="4" required placeholder="Describe the image or video..."></textarea>
+    </label>
+    <label class="form-row" id="gen-negative-row">Negative prompt
+      <textarea id="gen-negative" rows="2" placeholder="Optional"></textarea>
+    </label>
+    <div id="image-fields" class="form-grid">
+      <label>Size
+        <input id="gen-size" list="size-presets" placeholder="1024x1024">
+      </label>
+      <datalist id="size-presets">
+        <option value="512x512"></option>
+        <option value="768x768"></option>
+        <option value="1024x1024"></option>
+        <option value="1328x1328"></option>
+        <option value="1536x1536"></option>
+        <option value="1664x928"></option>
+        <option value="928x1664"></option>
+        <option value="2048x2048"></option>
+      </datalist>
+      <label>Images (n)
+        <input id="gen-n" type="number" min="1" max="8" value="1">
+      </label>
+      <label>Steps
+        <input id="gen-steps" type="number" min="1" value="30">
+      </label>
+      <label>CFG
+        <input id="gen-cfg" type="number" step="0.1" value="4.0">
+      </label>
+      <label>Sampler
+        <input id="gen-sampler" placeholder="euler">
+      </label>
+      <label>Scheduler
+        <input id="gen-scheduler" placeholder="simple">
+      </label>
+    </div>
+    <div id="video-fields" class="form-grid" hidden>
+      <label>Width
+        <input id="gen-width" type="number" min="256" step="8" value="1344">
+      </label>
+      <label>Height
+        <input id="gen-height" type="number" min="256" step="8" value="768">
+      </label>
+      <label>Seconds
+        <input id="gen-seconds" type="number" min="1" step="0.5" value="5">
+      </label>
+      <label>Speed
+        <select id="gen-speed">
+          <option value="auto">auto</option>
+          <option value="none">none</option>
+          <option value="te-speed">te-speed</option>
+          <option value="sol-stack">sol-stack</option>
+        </select>
+      </label>
+    </div>
+    <div class="form-grid">
+      <label>Seed
+        <input id="gen-seed" type="number" min="0" value="0">
+      </label>
+    </div>
+    <div id="generate-error" class="error" hidden></div>
+    <div class="dialog-actions">
+      <button type="button" id="generate-cancel">Cancel</button>
+      <button type="submit" id="generate-submit" class="primary">Generate</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast"></div>
+
 <dialog id="models-dialog">
   <div class="dialog-head">
     <h2>Models</h2>
@@ -315,11 +434,13 @@
     timer: null,
     fetchedAt: null,
     modelOptionsSig: "",
+    generateMode: "image",
   };
 
   const $ = (id) => document.getElementById(id);
   const grid = $("task-grid");
   const cardCache = new Map();
+  let catalogPromise = null;
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -749,20 +870,31 @@
     renderList();
   }
 
+  async function ensureCatalog() {
+    if (state.catalog.length) return state.catalog;
+    if (!catalogPromise) {
+      catalogPromise = fetchJson("/v1/models").then((data) => {
+        state.catalog = data.data || [];
+        renderModelOptions();
+        return state.catalog;
+      }).finally(() => { catalogPromise = null; });
+    }
+    return catalogPromise;
+  }
+
   async function openModels() {
     const dialog = $("models-dialog");
     dialog.showModal();
     if (state.catalog.length) {
+      $("models-note").textContent = state.catalog.length + " models";
       renderModels();
       return;
     }
     $("models-note").textContent = "loading…";
     try {
-      const data = await fetchJson("/v1/models");
-      state.catalog = data.data || [];
+      await ensureCatalog();
       $("models-note").textContent = state.catalog.length + " models";
       renderModels();
-      renderModelOptions();
     } catch (error) {
       $("models-note").textContent = "failed: " + error.message;
     }
@@ -792,6 +924,156 @@
         </div>
       </article>`;
     }).join("");
+  }
+
+  function renderGenerateModels() {
+    const select = $("gen-model");
+    const models = state.catalog.filter((model) =>
+      (!model.canonical || model.canonical === model.id) &&
+      model.modality === state.generateMode
+    );
+    select.innerHTML = models.length
+      ? models.map((model) => `<option value="${esc(model.id)}">${esc(model.id)}</option>`).join("")
+      : '<option value="">(no model available)</option>';
+    if (models.length) select.value = models[0].id;
+  }
+
+  function applyGenerateDefaults() {
+    const model = state.catalog.find((item) => item.id === $("gen-model").value);
+    const defaults = (model && model.defaults) || {};
+    if (state.generateMode === "image") {
+      $("gen-size").value = "1024x1024";
+      $("gen-n").value = "1";
+      $("gen-steps").value = defaults.steps || 25;
+      $("gen-cfg").value = defaults.cfg != null ? defaults.cfg : 1.0;
+      $("gen-sampler").value = defaults.sampler || "euler";
+      $("gen-scheduler").value = defaults.scheduler || "simple";
+      $("gen-negative").value = defaults.negative_prompt || "";
+    } else {
+      $("gen-width").value = defaults.width || 1344;
+      $("gen-height").value = defaults.height || 768;
+      $("gen-seconds").value = defaults.seconds || 5;
+      $("gen-speed").value = "auto";
+    }
+    $("gen-seed").value = "0";
+  }
+
+  function setGenerateMode(mode) {
+    state.generateMode = mode;
+    document.querySelectorAll("#generate-tabs button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.mode === mode);
+    });
+    $("generate-title").textContent = mode === "image" ? "Generate image" : "Generate video";
+    $("image-fields").hidden = mode !== "image";
+    $("video-fields").hidden = mode !== "video";
+    $("gen-negative-row").hidden = mode !== "image";
+    $("generate-error").hidden = true;
+    renderGenerateModels();
+    applyGenerateDefaults();
+  }
+
+  async function openGenerate(mode) {
+    setGenerateMode(mode);
+    $("generate-dialog").showModal();
+    try {
+      await ensureCatalog();
+      renderGenerateModels();
+      applyGenerateDefaults();
+    } catch (error) {
+      showGenerateError(error.message);
+    }
+    setTimeout(() => $("gen-prompt").focus(), 30);
+  }
+
+  function showGenerateError(message) {
+    const box = $("generate-error");
+    box.textContent = message || "";
+    box.hidden = !message;
+  }
+
+  function setGenerateBusy(busy) {
+    $("generate-submit").disabled = busy;
+    $("generate-submit").textContent = busy ? "Generating…" : "Generate";
+  }
+
+  function toast(message, isError = false) {
+    const box = $("toast");
+    box.textContent = message;
+    box.className = "toast show" + (isError ? " error" : "");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => box.classList.remove("show"), 3500);
+  }
+
+  function numberValue(id, fallback) {
+    const value = Number($(id).value);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  async function submitGenerate(event) {
+    event.preventDefault();
+    showGenerateError("");
+    const mode = state.generateMode;
+    const prompt = $("gen-prompt").value.trim();
+    if (!prompt) {
+      showGenerateError("prompt is required");
+      return;
+    }
+    const model = $("gen-model").value;
+    if (!model) {
+      showGenerateError("no model available");
+      return;
+    }
+
+    const payload = {
+      model,
+      prompt,
+      seed: numberValue("gen-seed", 0),
+    };
+    if (mode === "image") {
+      const size = $("gen-size").value.trim();
+      if (size) payload.size = size;
+      payload.n = numberValue("gen-n", 1);
+      payload.steps = numberValue("gen-steps", 25);
+      payload.cfg = numberValue("gen-cfg", 1.0);
+      payload.sampler = $("gen-sampler").value.trim() || "euler";
+      payload.scheduler = $("gen-scheduler").value.trim() || "simple";
+      const negative = $("gen-negative").value.trim();
+      if (negative) payload.negative_prompt = negative;
+    } else {
+      payload.width = numberValue("gen-width", 1344);
+      payload.height = numberValue("gen-height", 768);
+      payload.seconds = numberValue("gen-seconds", 5);
+      payload.speed = $("gen-speed").value;
+    }
+
+    const url = mode === "image" ? "/v1/images/generations" : "/v1/videos";
+    const headers = { "Content-Type": "application/json" };
+    if (mode === "image") headers.Prefer = "respond-async";
+
+    setGenerateBusy(true);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = data.error && (data.error.message || data.error);
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+      const id = data.id || data.task_id || "";
+      $("generate-dialog").close();
+      $("gen-prompt").value = "";
+      $("gen-negative").value = "";
+      toast("Queued " + (id || "task"));
+      state.page = 1;
+      load();
+    } catch (error) {
+      showGenerateError(error.message || String(error));
+    } finally {
+      setGenerateBusy(false);
+    }
   }
 
   function filterByModel(model, modality) {
@@ -853,6 +1135,19 @@
     if (button) goPage(Number(button.dataset.page));
   });
   $("models-btn").addEventListener("click", openModels);
+  $("new-image-btn").addEventListener("click", () => openGenerate("image"));
+  $("new-video-btn").addEventListener("click", () => openGenerate("video"));
+  $("generate-tabs").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-mode]");
+    if (button) setGenerateMode(button.dataset.mode);
+  });
+  $("gen-model").addEventListener("change", applyGenerateDefaults);
+  $("generate-form").addEventListener("submit", submitGenerate);
+  $("generate-close").addEventListener("click", () => $("generate-dialog").close());
+  $("generate-cancel").addEventListener("click", () => $("generate-dialog").close());
+  $("generate-dialog").addEventListener("click", (event) => {
+    if (event.target === $("generate-dialog")) $("generate-dialog").close();
+  });
   $("models-close").addEventListener("click", () => $("models-dialog").close());
   $("models-grid").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-model]");
