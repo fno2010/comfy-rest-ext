@@ -21,7 +21,7 @@ DEFAULT_NEGATIVE = (
 
 def build_anima_task(task: Any) -> BuildResult:
     """Build an Anima T2I workflow from a generic GenerationTask."""
-    turbo = task.model_id == "anima-turbo"
+    turbo = getattr(task, "variant", "base") == "turbo" or task.model_id.endswith("-turbo")
     params: Dict[str, Any] = task.params or {}
 
     unet = resolve_asset(

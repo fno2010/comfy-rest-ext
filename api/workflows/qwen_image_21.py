@@ -156,7 +156,7 @@ def _add_sampler(
 
 def build_qwen_image_task(task: Any) -> BuildResult:
     """Build a Qwen-Image 2.1 T2I or edit workflow."""
-    turbo = task.model_id == "qwen-image-2.1-turbo"
+    turbo = getattr(task, "variant", "base") == "turbo" or task.model_id.endswith("-turbo")
     params: Dict[str, Any] = task.params or {}
     is_edit = task.task_type == "edit"
 

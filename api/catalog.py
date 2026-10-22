@@ -132,6 +132,7 @@ class ModelSpec:
     capabilities: frozenset = frozenset()
     size: Optional[SizePolicy] = None
     max_n: int = 1
+    variant: str = "base"
     output_mime: str = "image/png"
     timeout_s: int = 900
     description: str = ""
@@ -162,7 +163,9 @@ def get_model(model_id: Optional[str]) -> ModelSpec:
     """Resolve a model id or alias. Raises KeyError for unknown ids."""
     if not model_id:
         raise KeyError(model_id)
-    canonical = _ALIASES.get(model_id, model_id)
+    canonical = model_id if model_id in _SPECS else _ALIASES.get(model_id)
+    if canonical is None:
+        raise KeyError(model_id)
     try:
         return _SPECS[canonical]
     except KeyError:
@@ -286,6 +289,7 @@ ANIMA_TURBO_SPEC = register(ModelSpec(
         default_megapixels=1.0,
     ),
     max_n=8,
+    variant="turbo",
     output_mime="image/png",
     timeout_s=900,
     description="Anima Turbo v1.0 2B anime text-to-image (8 steps)",
@@ -342,6 +346,7 @@ QWEN_IMAGE_TURBO_SPEC = register(ModelSpec(
     capabilities=frozenset({"negative_prompt", "n", "seed", "alpha", "edit"}),
     size=QWEN_IMAGE_POLICY,
     max_n=4,
+    variant="turbo",
     output_mime="image/png",
     timeout_s=1800,
     description="Qwen-Image 2.1 Turbo 7B (8-step distilled schedule)",
@@ -356,6 +361,24 @@ BUILDERS: Dict[str, Callable[[Any], Any]] = {
     "h3": h3.build_h3_task,
     "anima": anima.build_anima_task,
     "qwen_image_21": qwen_image_21.build_qwen_image_task,
+}
+
+BUILDER_MODALITY = {
+    "h3": "video",
+    "anima": "image",
+    "qwen_image_21": "image",
+}
+
+BUILDER_TASKS = {
+    "h3": frozenset({"t2va", "fl2va", "r2v"}),
+    "anima": frozenset({"t2i"}),
+    "qwen_image_21": frozenset({"t2i", "edit"}),
+}
+
+_MODEL_KEYS = {
+    "builder", "modality", "tasks", "aliases", "alias_tasks",
+    "defaults", "capabilities", "size", "variant", "assets",
+    "max_n", "output_mime", "timeout_s", "description",
 }
 
 CONFIG_ENV = "COMFY_REST_MODEL_CONFIG"
@@ -395,7 +418,19 @@ def _string_list(value: Any, field_name: str) -> Tuple[str, ...]:
     return tuple(value)
 
 
-def _size_policy(value: Any, model_id: str) -> SizePolicy:
+_INT_SIZE_FIELDS = {
+    "default_width", "default_height", "min_width", "min_height",
+    "max_width", "max_height", "step", "max_pixels",
+}
+_REQUIRED_SIZE_FIELDS = {
+    "default_width", "default_height", "min_width", "min_height",
+    "max_width", "max_height",
+}
+
+
+def _size_policy(
+    value: Any, model_id: str, base: Optional[SizePolicy] = None
+) -> SizePolicy:
     if not isinstance(value, dict):
         raise ModelConfigError(f"{model_id}.size must be an object")
     unknown = set(value) - _SIZE_FIELDS
@@ -403,20 +438,60 @@ def _size_policy(value: Any, model_id: str) -> SizePolicy:
         raise ModelConfigError(
             f"{model_id}.size has unknown keys: {sorted(unknown)}"
         )
+    data = {}
+    if base is not None:
+        for key in _SIZE_FIELDS:
+            data[key] = getattr(base, key)
+    data.update(value)
+
+    missing = _REQUIRED_SIZE_FIELDS - set(data)
+    if missing:
+        raise ModelConfigError(
+            f"{model_id}.size is missing keys: {sorted(missing)}"
+        )
+    for key in _INT_SIZE_FIELDS:
+        if key in data and (
+            not isinstance(data[key], int) or isinstance(data[key], bool)
+        ):
+            raise ModelConfigError(f"{model_id}.size.{key} must be an integer")
+    if "default_megapixels" in data and data["default_megapixels"] is not None:
+        if not isinstance(data["default_megapixels"], (int, float)) or isinstance(
+            data["default_megapixels"], bool
+        ):
+            raise ModelConfigError(
+                f"{model_id}.size.default_megapixels must be a number"
+            )
+        if data["default_megapixels"] <= 0:
+            raise ModelConfigError(
+                f"{model_id}.size.default_megapixels must be positive"
+            )
+    if data["step"] <= 0:
+        raise ModelConfigError(f"{model_id}.size.step must be positive")
+    if data.get("max_pixels", 0) < 0:
+        raise ModelConfigError(f"{model_id}.size.max_pixels must be >= 0")
+    if data["min_width"] > data["max_width"] or data["min_height"] > data["max_height"]:
+        raise ModelConfigError(f"{model_id}.size min bounds exceed max bounds")
+    if not (data["min_width"] <= data["default_width"] <= data["max_width"]):
+        raise ModelConfigError(f"{model_id}.size default_width outside bounds")
+    if not (data["min_height"] <= data["default_height"] <= data["max_height"]):
+        raise ModelConfigError(f"{model_id}.size default_height outside bounds")
     try:
-        return SizePolicy(**value)
+        return SizePolicy(**data)
     except TypeError as e:
         raise ModelConfigError(f"{model_id}.size is invalid: {e}") from e
 
 
 def _build_spec(model_id: str, entry: Any) -> ModelSpec:
+    if not isinstance(model_id, str) or not model_id.strip():
+        raise ModelConfigError("model ids must be non-empty strings")
     if not isinstance(entry, dict):
         raise ModelConfigError(f"model {model_id!r} must be an object")
-    existing = _SPECS.get(model_id)
-    if existing is None and model_id in _ALIASES:
+    unknown = set(entry) - _MODEL_KEYS
+    if unknown:
         raise ModelConfigError(
-            f"model id {model_id!r} is already used as an alias"
+            f"{model_id} has unknown keys: {sorted(unknown)}"
         )
+    existing = _SPECS.get(model_id)
 
     builder = entry.get("builder", existing.family if existing else None)
     if builder not in BUILDERS:
@@ -429,20 +504,40 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
         raise ModelConfigError(
             f"{model_id}.modality must be 'video' or 'image'; got {modality!r}"
         )
+    if modality != BUILDER_MODALITY[builder]:
+        raise ModelConfigError(
+            f"{model_id}: builder {builder!r} serves "
+            f"{BUILDER_MODALITY[builder]}, not {modality}"
+        )
 
     tasks_value = entry.get("tasks", existing.tasks if existing else None)
     tasks = _string_list(tasks_value, f"{model_id}.tasks")
     if not tasks:
         raise ModelConfigError(f"{model_id}.tasks must not be empty")
+    unsupported = set(tasks) - BUILDER_TASKS[builder]
+    if unsupported:
+        raise ModelConfigError(
+            f"{model_id}: tasks {sorted(unsupported)} are not supported by "
+            f"builder {builder!r}"
+        )
 
-    aliases_value = entry.get("aliases", existing.aliases if existing else [])
-    aliases = _string_list(aliases_value, f"{model_id}.aliases")
+    aliases_provided = "aliases" in entry
+    aliases = _string_list(
+        entry.get("aliases", existing.aliases if existing else []),
+        f"{model_id}.aliases",
+    )
     if model_id in aliases:
         raise ModelConfigError(f"{model_id}.aliases must not contain the model id")
 
-    alias_tasks_value = entry.get(
-        "alias_tasks", dict(existing.alias_tasks) if existing else {}
-    )
+    alias_tasks_value = entry.get("alias_tasks")
+    if alias_tasks_value is None:
+        inherited = dict(existing.alias_tasks) if existing else {}
+        if aliases_provided:
+            inherited = {
+                alias: task for alias, task in inherited.items()
+                if alias in aliases
+            }
+        alias_tasks_value = inherited
     if not isinstance(alias_tasks_value, dict) or not all(
         isinstance(k, str) and isinstance(v, str)
         for k, v in alias_tasks_value.items()
@@ -463,6 +558,31 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     if not isinstance(defaults_value, dict):
         raise ModelConfigError(f"{model_id}.defaults must be an object")
     defaults.update(defaults_value)
+    if "steps" in defaults and (
+        not isinstance(defaults["steps"], int)
+        or isinstance(defaults["steps"], bool)
+        or defaults["steps"] <= 0
+    ):
+        raise ModelConfigError(f"{model_id}.defaults.steps must be a positive integer")
+    if "cfg" in defaults and (
+        not isinstance(defaults["cfg"], (int, float))
+        or isinstance(defaults["cfg"], bool)
+    ):
+        raise ModelConfigError(f"{model_id}.defaults.cfg must be a number")
+    for key in ("width", "height", "seed", "n", "resolution"):
+        if key in defaults and (
+            not isinstance(defaults[key], int) or isinstance(defaults[key], bool)
+        ):
+            raise ModelConfigError(f"{model_id}.defaults.{key} must be an integer")
+    if "seconds" in defaults and (
+        not isinstance(defaults["seconds"], (int, float))
+        or isinstance(defaults["seconds"], bool)
+    ):
+        raise ModelConfigError(f"{model_id}.defaults.seconds must be a number")
+    if existing is None and modality == "image" and "steps" not in defaults:
+        raise ModelConfigError(
+            f"{model_id}.defaults.steps is required for new image models"
+        )
 
     assets = dict(existing.assets) if existing else {}
     assets_value = entry.get("assets", {})
@@ -481,9 +601,18 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     ):
         raise ModelConfigError(f"{model_id}.capabilities must be a string list")
 
-    size = existing.size if existing else None
+    variant = entry.get("variant", existing.variant if existing else "base")
+    if variant not in ("base", "turbo"):
+        raise ModelConfigError(
+            f"{model_id}.variant must be 'base' or 'turbo'; got {variant!r}"
+        )
+
     if "size" in entry:
-        size = _size_policy(entry["size"], model_id)
+        size = _size_policy(
+            entry["size"], model_id, existing.size if existing else None
+        )
+    else:
+        size = existing.size if existing else None
     if modality == "image" and size is None:
         raise ModelConfigError(f"{model_id}.size is required for new image models")
 
@@ -500,6 +629,20 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     if max_n < 1 or timeout_s < 1:
         raise ModelConfigError(f"{model_id}: max_n and timeout_s must be positive")
 
+    output_mime = entry.get(
+        "output_mime",
+        existing.output_mime if existing else (
+            "video/mp4" if modality == "video" else "image/png"
+        ),
+    )
+    description = entry.get(
+        "description", existing.description if existing else ""
+    )
+    if not isinstance(output_mime, str) or not output_mime:
+        raise ModelConfigError(f"{model_id}.output_mime must be a non-empty string")
+    if not isinstance(description, str):
+        raise ModelConfigError(f"{model_id}.description must be a string")
+
     return ModelSpec(
         id=model_id,
         modality=modality,
@@ -513,73 +656,76 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
         capabilities=frozenset(capabilities_value),
         size=size,
         max_n=max_n,
-        output_mime=entry.get(
-            "output_mime",
-            existing.output_mime if existing else (
-                "video/mp4" if modality == "video" else "image/png"
-            ),
-        ),
+        variant=variant,
+        output_mime=output_mime,
         timeout_s=timeout_s,
-        description=entry.get(
-            "description", existing.description if existing else ""
-        ),
+        description=description,
     )
 
 
-def _apply_spec(spec: ModelSpec) -> None:
-    for alias in spec.aliases:
-        if alias == spec.id or alias in _SPECS:
+def _validate_final_registry(
+    specs: Dict[str, ModelSpec], aliases: Dict[str, str]
+) -> None:
+    overlap = set(specs) & set(aliases)
+    if overlap:
+        raise ModelConfigError(
+            f"model ids are also used as aliases: {sorted(overlap)}"
+        )
+    for spec in specs.values():
+        for alias in spec.aliases:
+            owner = aliases.get(alias)
+            if owner is not None and owner != spec.id:
+                raise ModelConfigError(
+                    f"alias {alias!r} is claimed by both {owner!r} and {spec.id!r}"
+                )
+    for alias, owner in aliases.items():
+        if owner not in specs:
             raise ModelConfigError(
-                f"alias {alias!r} conflicts with an existing model id"
+                f"alias {alias!r} points at unknown model {owner!r}"
             )
-        owner = _ALIASES.get(alias)
-        if owner is not None and owner != spec.id:
-            raise ModelConfigError(
-                f"alias {alias!r} is already used by {owner!r}"
-            )
-    old = _SPECS.pop(spec.id, None)
-    if old is not None:
-        for alias in old.aliases:
-            if _ALIASES.get(alias) == spec.id:
-                _ALIASES.pop(alias, None)
-    _SPECS[spec.id] = spec
-    for alias in spec.aliases:
-        _ALIASES[alias] = spec.id
 
 
 def load_model_config(path: Optional[Path] = None) -> Tuple[str, ...]:
     """Apply an optional models.json, returning the loaded model ids.
 
-    The file is applied atomically: any error restores the previous registry.
-    Existing built-in models can be overridden; new ids are appended.
+    The file is applied atomically: validation runs against copies of the
+    registry and only a fully consistent result is committed. Existing
+    built-in models can be overridden; new ids are appended.
     """
     config_file = Path(path) if path is not None else config_path()
     if not config_file.exists():
         return ()
     try:
         payload = json.loads(config_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
         raise ModelConfigError(f"cannot read {config_file}: {e}") from e
     models = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(models, dict):
         raise ModelConfigError(f"{config_file}: top-level 'models' object is required")
 
     specs = [_build_spec(model_id, entry) for model_id, entry in models.items()]
-    specs_by_id = {spec.id: spec for spec in specs}
-    if len(specs_by_id) != len(specs):
-        raise ModelConfigError("duplicate model ids in config")
 
-    old_specs = dict(_SPECS)
-    old_aliases = dict(_ALIASES)
-    try:
-        for spec in specs:
-            _apply_spec(spec)
-    except Exception:
-        _SPECS.clear()
-        _SPECS.update(old_specs)
-        _ALIASES.clear()
-        _ALIASES.update(old_aliases)
-        raise
+    final_specs = dict(_SPECS)
+    final_specs.update({spec.id: spec for spec in specs})
+    final_aliases: Dict[str, str] = {}
+    for spec in final_specs.values():
+        for alias in spec.aliases:
+            if alias in final_specs:
+                raise ModelConfigError(
+                    f"alias {alias!r} conflicts with an existing model id"
+                )
+            owner = final_aliases.get(alias)
+            if owner is not None and owner != spec.id:
+                raise ModelConfigError(
+                    f"alias {alias!r} is claimed by both {owner!r} and {spec.id!r}"
+                )
+            final_aliases[alias] = spec.id
+    _validate_final_registry(final_specs, final_aliases)
+
+    _SPECS.clear()
+    _SPECS.update(final_specs)
+    _ALIASES.clear()
+    _ALIASES.update(final_aliases)
     logger.info("Loaded %d model override(s) from %s", len(specs), config_file)
     return tuple(spec.id for spec in specs)
 

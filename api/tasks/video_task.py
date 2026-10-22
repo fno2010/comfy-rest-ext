@@ -43,6 +43,7 @@ class GenerationTask:
     modality: str = "video"
     params: Dict[str, Any] = field(default_factory=dict)
     assets: Dict[str, str] = field(default_factory=dict)
+    variant: str = "base"
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
     speed: Optional[Any] = None  # legacy str or AccelConfig dict
@@ -407,6 +408,10 @@ async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
     try:
         spec = get_model(task.model_id)
         task.assets = dict(spec.assets)
+        task.variant = spec.variant
+        spec_defaults = dict(spec.defaults)
+        spec_defaults.update(task.params or {})
+        task.params = spec_defaults
         built = spec.build(task)
     except Exception as e:
         task.status = "failed"
@@ -424,7 +429,7 @@ async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
         task.done.set()
         return task
 
-    task.output_mime = built.output_mime
+    task.output_mime = spec.output_mime or built.output_mime
 
     async with _family_gate:
         try:

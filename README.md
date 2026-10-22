@@ -71,7 +71,7 @@ GET /v2/extension/image/{id}/content?index=N
 <system_user_directory("comfy_rest_ext")>/models.json
 ```
 
-也可用 `COMFY_REST_MODEL_CONFIG=/path/to/models.json` 指定其他路径。配置在扩展加载时读取一次，修改后重启 ComfyUI。
+也可用 `COMFY_REST_MODEL_CONFIG=/path/to/models.json` 指定其他路径。配置在扩展加载时读取一次，修改后重启 ComfyUI。默认路径解析为 ComfyUI 用户目录下的 `__comfy_rest_ext/models.json`（例如 `ComfyUI/user/__comfy_rest_ext/models.json`）。
 
 ```json
 {
@@ -123,12 +123,15 @@ GET /v2/extension/image/{id}/content?index=N
 | `builder` | `h3` / `anima` / `qwen_image_21`；新模型必填，覆盖时可省略 |
 | `modality` | `video` 或 `image` |
 | `tasks` | 如 `["t2va","fl2va","r2v"]` 或 `["t2i","edit"]` |
-| `aliases` / `alias_tasks` | 兼容别名及别名对应 task |
-| `defaults` | 覆盖模型默认参数（steps/cfg/sampler/scheduler/negative_prompt 等） |
+| `aliases` / `alias_tasks` | 兼容别名及别名对应 task；提供 `aliases` 时会替换旧列表，未显式给出的 `alias_tasks` 会按新 aliases 过滤 |
+| `defaults` | 覆盖模型默认参数（图片：steps/cfg/sampler/scheduler/negative_prompt；视频：width/height/seconds/steps/sampler/scheduler） |
 | `assets` | 模型文件名；键随 builder 不同（见下） |
-| `size` | 图片模型必需；字段对应 `SizePolicy` |
+| `size` | 图片模型必需；字段对应 `SizePolicy`，覆盖时与现有策略合并 |
 | `capabilities` | 如 `negative_prompt` / `n` / `seed` / `alpha` / `edit` |
-| `max_n` / `timeout_s` / `output_mime` | 请求上限、任务超时、输出 MIME |
+| `variant` | `base` 或 `turbo`；新建 turbo 变体必须显式设置，否则 `turbo_unet` / `turbo_lora` 不会被使用 |
+| `max_n` / `timeout_s` / `output_mime` / `description` | 请求上限、任务超时、输出 MIME、模型说明 |
+
+校验规则：`builder` 与 `modality` 必须匹配（`h3`→video，`anima`/`qwen_image_21`→image）；`tasks` 必须是该 builder 支持的集合；新图片模型必须提供正数 `defaults.steps` 与 `size`；未知字段、类型错误、别名冲突、空 model id 都会让整份配置被拒绝并回滚。
 
 `assets` 键：
 
@@ -136,7 +139,7 @@ GET /v2/extension/image/{id}/content?index=N
 - `anima`: `unet`, `turbo_unet`, `text_encoder`, `vae`, `turbo_lora`
 - `qwen_image_21`: `unet`, `turbo_unet`, `text_encoder`, `vae`
 
-优先级：**环境变量 > models.json `assets` > 内置默认值**；已有部署的 `H3_*` / `ANIMA_*` / `QWEN_IMAGE_21_*` 环境变量保持不变。配置错误会回滚到内置注册表并在日志中报告，不会留下半应用的模型列表。
+优先级：**环境变量 > models.json `assets` > 内置默认值**；已有部署的 `H3_*` / `ANIMA_*` / `QWEN_IMAGE_21_*` 环境变量保持不变。`turbo_unet` / `turbo_lora` 只有在模型 `variant: "turbo"`（或内置 turbo id）时才会被使用。配置错误会回滚到内置注册表并在日志中报告，不会留下半应用的模型列表。
 
 ## CLI 工具
 

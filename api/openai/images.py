@@ -129,7 +129,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
             aspect_ratio=body.get("aspect_ratio"),
             megapixels=body.get("megapixels"),
         )
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         raise BadRequest(str(e), "size") from e
 
     response_format = body.get("response_format") or "b64_json"
@@ -153,7 +153,7 @@ def _normalize(spec: ModelSpec, body: Dict[str, Any], *, edit: bool) -> dict:
     if quality not in (None, "auto", "standard", "high", "hd", "medium", "low"):
         raise BadRequest("unsupported quality", "quality")
 
-    steps = _int_field(body, "steps", spec.defaults["steps"])
+    steps = _int_field(body, "steps", spec.defaults.get("steps", 25))
     if steps <= 0:
         raise BadRequest("steps must be a positive integer", "steps")
 

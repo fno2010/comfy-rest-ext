@@ -281,11 +281,11 @@ def build_h3_task(task: Any) -> BuildResult:
         raise ValueError(missing_node)
 
     params = task.params or {}
-    steps = (
-        accel_cfg.steps
-        if task.speed is not None
-        else int(os.environ.get("H3_STEPS", "20"))
-    )
+    explicit_steps = isinstance(task.speed, dict) and "steps" in task.speed
+    if explicit_steps:
+        steps = accel_cfg.steps
+    else:
+        steps = int(os.environ.get("H3_STEPS") or params.get("steps", 20))
 
     is_r2v = bool(task.ref_images)
     unet = resolve_asset(
@@ -333,11 +333,15 @@ def build_h3_task(task: Any) -> BuildResult:
         video_vae=video_vae,
         audio_vae=audio_vae,
         ref2va_model=unet,
-        sampler_name=params.get("sampler") or os.environ.get("H3_SAMPLER", "euler"),
-        scheduler=params.get("scheduler") or os.environ.get("H3_SCHEDULER", "simple"),
+        sampler_name=os.environ.get("H3_SAMPLER") or params.get("sampler") or "euler",
+        scheduler=os.environ.get("H3_SCHEDULER") or params.get("scheduler") or "simple",
         steps=steps,
         accel=accel_cfg,
-        ref_image_size=os.environ.get("H3_REF_SIZE", "match"),
+        ref_image_size=(
+            os.environ.get("H3_REF_SIZE")
+            or params.get("ref_image_size")
+            or "match"
+        ),
         turbo_lora=turbo_lora,
         filename_prefix=prefix,
     )

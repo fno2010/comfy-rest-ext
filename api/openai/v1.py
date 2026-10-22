@@ -55,6 +55,7 @@ def _model_card(model_id: str, created: int) -> dict:
         "task_type": task_type or "auto",
         "capabilities": sorted(spec.capabilities),
         "defaults": dict(spec.defaults),
+        "description": spec.description,
     }
 
 
@@ -206,10 +207,10 @@ async def create_video(request: web.Request) -> web.Response:
     if missing_node:
         return web.json_response({"error": f"invalid speed: {missing_node}"}, status=400)
 
-    width = _parse_int(fields.get("width"), 1344)
-    height = _parse_int(fields.get("height"), 768)
-    seconds = _parse_float(fields.get("seconds"), 5.0)
-    seed = _parse_int(fields.get("seed"), 0)
+    width = _parse_int(fields.get("width"), int(spec.defaults.get("width", 1344)))
+    height = _parse_int(fields.get("height"), int(spec.defaults.get("height", 768)))
+    seconds = _parse_float(fields.get("seconds"), float(spec.defaults.get("seconds", 5.0)))
+    seed = _parse_int(fields.get("seed"), int(spec.defaults.get("seed", 0)))
 
     first_frame = None
     ref_images = None
