@@ -6,7 +6,7 @@ ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 R
 
 - **OpenAI 兼容视频生成 API** — T2V / I2V / R2V 生成、任务持久化、历史查询（MiniMax-H3）
 - **OpenAI 兼容图片生成 API** — 同步 `/v1/images/generations`、Qwen-Image 2.1 编辑、Anima/Qwen-Image 2.1 模型目录
-- **任务面板** — 单页 Web UI，显示视频/图片任务列表、进度、错误和生成结果；只依赖扩展 API 与 OpenAI 兼容端点
+- **任务面板** — 单页 Web UI，显示视频/图片任务列表、进度、错误和生成结果，并可直接通过 OpenAI 兼容端点提交图片/视频任务
 - **模型下载** — 从 CivitAI、HuggingFace、直链下载模型到本地
 - **模型管理** — 递归列出模型、获取元数据、删除模型
 - **工作流依赖安装** — 从 workflow JSON 解析依赖并自动安装
@@ -49,6 +49,7 @@ http://<host>:8188/v2/extension/ui
 - 视频播放和图片缩略图/大图预览
 - 分页、每页数量、按状态/类型/模型筛选、搜索、排序
 - Models 弹窗直接读取 `/v1/models`，以卡片展示并支持一键筛选，不跳转 JSON
+- `+ Image` / `+ Video` 弹窗直接提交生成任务：图片走 `POST /v1/images/generations` + `Prefer: respond-async`，视频走 `POST /v1/videos`；提交后任务立即进入列表并可跟踪进度
 
 面板只请求扩展自身和 OpenAI 兼容端点：
 
@@ -167,6 +168,20 @@ curl -X POST http://host:8188/v1/images/generations \
 ```
 
 扩展字段：`negative_prompt`、`seed`、`steps`、`cfg`、`sampler`、`scheduler`、`aspect_ratio`、`megapixels`、`resolution`（edit）、`n`。`size` 支持 `WIDTHxHEIGHT` 或 `auto`；`response_format` 支持 `b64_json`（默认）和 `url`。
+
+异步提交（立即返回任务记录，不等待生成完成）：
+
+```bash
+curl -X POST http://host:8188/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -H "Prefer: respond-async" \
+  -d '{"model":"anima-base","prompt":"...","size":"1024x1024"}'
+# HTTP 202
+# {"id":"image_...","status":"queued",...}
+# Location: /v2/extension/image/image_...
+```
+
+面板的 `+ Image` 表单使用的就是这条路径。
 
 ### 编辑（Qwen-Image 2.1）
 

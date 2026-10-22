@@ -314,8 +314,13 @@ def _image_response(request: web.Request, task: GenerationTask,
     }
 
 
-async def _run_sync(request: web.Request, body: Dict[str, Any],
-                    *, edit: bool, refs: Optional[List[str]] = None) -> web.Response:
+async def _prepare_task(
+    body: Dict[str, Any], *, edit: bool, refs: Optional[List[str]] = None
+) -> Any:
+    """Validate an image request and create its queued task.
+
+    Returns either (spec, task) or a web.Response on validation failure.
+    """
     model = body.get("model")
     if not model:
         return _error(400, "model is required", "model")
@@ -339,6 +344,31 @@ async def _run_sync(request: web.Request, body: Dict[str, Any],
         task = await _create_task(spec, body, edit=edit, refs=resolved_refs)
     except BadRequest as e:
         return _error(400, e.message, e.param)
+    return spec, task
+
+
+def _wants_async(request: web.Request) -> bool:
+    headers = getattr(request, "headers", {}) or {}
+    return "respond-async" in headers.get("Prefer", "").lower()
+
+
+def _async_image_response(task: GenerationTask) -> web.Response:
+    return web.json_response(
+        _image_task_summary(task),
+        status=202,
+        headers={
+            "Location": f"/v2/extension/image/{task.task_id}",
+            "Preference-Applied": "respond-async",
+        },
+    )
+
+
+async def _run_sync(request: web.Request, body: Dict[str, Any],
+                    *, edit: bool, refs: Optional[List[str]] = None) -> web.Response:
+    prepared = await _prepare_task(body, edit=edit, refs=refs)
+    if isinstance(prepared, web.Response):
+        return prepared
+    spec, task = prepared
 
     try:
         await asyncio.wait_for(task.done.wait(), timeout=spec.timeout_s)
@@ -375,13 +405,22 @@ async def _run_sync(request: web.Request, body: Dict[str, Any],
 
 @routes.post("/v1/images/generations")
 async def create_image(request: web.Request) -> web.Response:
-    """OpenAI Images API text-to-image endpoint (synchronous)."""
+    """OpenAI Images API text-to-image endpoint.
+
+    Synchronous by default; `Prefer: respond-async` returns 202 with a job
+    record and Location header instead of waiting for the image.
+    """
     try:
         body = await request.json()
     except Exception:
         return _error(400, "Invalid JSON body")
     if not isinstance(body, dict):
         return _error(400, "JSON body must be an object")
+    if _wants_async(request):
+        prepared = await _prepare_task(body, edit=False)
+        if isinstance(prepared, web.Response):
+            return prepared
+        return _async_image_response(prepared[1])
     return await _run_sync(request, body, edit=False)
 
 
@@ -395,6 +434,11 @@ async def edit_image(request: web.Request) -> web.Response:
         fields, refs = await _parse_multipart(request)
     except BadRequest as e:
         return _error(400, e.message, e.param)
+    if _wants_async(request):
+        prepared = await _prepare_task(fields, edit=True, refs=refs)
+        if isinstance(prepared, web.Response):
+            return prepared
+        return _async_image_response(prepared[1])
     return await _run_sync(request, fields, edit=True, refs=refs)
 
 

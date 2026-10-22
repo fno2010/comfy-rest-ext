@@ -841,6 +841,7 @@ ws.addEventListener('message', (event) => {
 | `seed` / `steps` / `cfg` / `sampler` / `scheduler` | 扩展字段 |
 | `quality` / `style` | 接受但不改变生成参数 |
 | `output_format` | 仅支持 `png`（Qwen-Image 2.1 的 alpha 通道） |
+| `Prefer` | 请求头；`respond-async` 时立即返回 202 + 任务记录，不等待生成完成 |
 | `stream` / `partial_images` | 不支持，返回 400 |
 
 **响应：**
@@ -892,6 +893,8 @@ GET /v2/extension/image/{id}/content?index=N
 ```
 
 不调用 ComfyUI 原生 API、`/view` 或前端 SDK。支持自动刷新（有活跃任务时 2s，否则 5s）、分页、排序、类型/状态/模型筛选、搜索，以及 Models 弹窗（读取 `/v1/models`，不跳转 JSON）。卡片采用增量更新，视频播放不会被轮询刷新打断。
+
+`+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。
 
 ---
 

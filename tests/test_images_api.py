@@ -136,6 +136,45 @@ async def test_v1_videos_excludes_image_tasks(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_generations_prefer_async(monkeypatch):
+    import api.openai.images as images
+    from api.tasks.video_task import GenerationTask
+
+    task = GenerationTask(
+        task_id="image_async_1",
+        status="queued",
+        prompt="a cat",
+        task_type="t2i",
+        width=1024,
+        height=1024,
+        length=1,
+        seed=1,
+        model_id="anima-base",
+        modality="image",
+        params={"n": 1},
+        created_at=1.0,
+    )
+
+    async def fake_prepare(body, *, edit, refs=None):
+        return get_model("anima-base"), task
+
+    monkeypatch.setattr(images, "_prepare_task", fake_prepare)
+
+    class Request:
+        headers = {"Prefer": "respond-async"}
+
+        async def json(self):
+            return {"model": "anima-base", "prompt": "a cat"}
+
+    response = await images.create_image(Request())
+    assert response.status == 202
+    assert response.headers["Location"] == "/v2/extension/image/image_async_1"
+    body = json.loads(response.text)
+    assert body["id"] == "image_async_1"
+    assert body["status"] == "queued"
+
+
+@pytest.mark.asyncio
 async def test_generations_returns_b64(monkeypatch):
     import folder_paths
     import api.openai.images as images
