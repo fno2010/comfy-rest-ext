@@ -6,6 +6,7 @@ ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 R
 
 - **OpenAI 兼容视频生成 API** — T2V / I2V / R2V 生成、任务持久化、历史查询（MiniMax-H3）
 - **OpenAI 兼容图片生成 API** — 同步 `/v1/images/generations`、Qwen-Image 2.1 编辑、Anima/Qwen-Image 2.1 模型目录
+- **任务面板** — 单页 Web UI，显示视频/图片任务列表、进度、错误和生成结果；只依赖扩展 API 与 OpenAI 兼容端点
 - **模型下载** — 从 CivitAI、HuggingFace、直链下载模型到本地
 - **模型管理** — 递归列出模型、获取元数据、删除模型
 - **工作流依赖安装** — 从 workflow JSON 解析依赖并自动安装
@@ -32,6 +33,31 @@ ln -s /path/to/comfy-rest-ext $COMFYUI/custom_nodes/comfy-rest-ext
 curl http://127.0.0.1:8188/v2/extension/health
 # {"status": "ok", "extension": "comfy-rest-ext"}
 ```
+
+## 任务面板
+
+启动 ComfyUI 后打开：
+
+```text
+http://<host>:8188/v2/extension/ui
+```
+
+`/ui` 会 302 到同一页面。面板每 2.5 秒自动刷新，展示：
+
+- 视频任务（`GET /v1/videos`）和图片任务（`GET /v2/extension/image`）
+- 状态、进度条、当前节点、ETA、耗时、错误
+- 视频播放和图片缩略图/大图预览
+
+面板只请求扩展自身和 OpenAI 兼容端点：
+
+```text
+GET /v1/videos
+GET /v1/videos/{id}/content
+GET /v2/extension/image
+GET /v2/extension/image/{id}/content?index=N
+```
+
+不调用 ComfyUI 的 `/view`、`/prompt`、`/object_info`，也不依赖 ComfyUI 前端 SDK。
 
 ## CLI 工具
 

@@ -714,7 +714,10 @@ ws.addEventListener('message', (event) => {
 | GET | `/v2/extension/video` | 列出视频生成任务 |
 | POST | `/v2/extension/image/generate` | 提交图片生成任务（异步） |
 | GET | `/v2/extension/image/{task_id}` | 查询图片生成状态 |
+| GET | `/v2/extension/image/{task_id}/content` | 读取图片输出（`?index=N`） |
 | GET | `/v2/extension/image` | 列出图片生成任务 |
+| GET | `/v2/extension/ui` | 任务面板（HTML） |
+| GET | `/ui` | 302 到任务面板 |
 | GET | `/v1/models` | 列出模型（OpenAI 兼容） |
 | POST | `/v1/images/generations` | 生成图片（OpenAI 兼容，同步） |
 | POST | `/v1/images/edits` | 编辑图片（OpenAI 兼容，multipart） |
@@ -724,7 +727,7 @@ ws.addEventListener('message', (event) => {
 | GET | `/v1/videos` | 列出视频任务（OpenAI 兼容） |
 | DELETE | `/v1/videos/{video_id}` | 删除视频任务（OpenAI 兼容） |
 
-**总计：42 个端点**
+**总计：45 个端点**
 
 ---
 
@@ -870,9 +873,25 @@ curl -X POST http://host:8188/v1/images/edits \
 
 - `POST /v2/extension/image/generate` — JSON 请求，立即返回 `{"id":"image_...","status":"queued"}`。
 - `GET /v2/extension/image/{task_id}` — 查询状态、进度、`view_urls`。
+- `GET /v2/extension/image/{task_id}/content?index=N` — 读取第 N 张输出图（`Content-Type: image/png`）。
 - `GET /v2/extension/image` — 列出图片任务。
 
+`view_urls` 由扩展生成，指向 `/v2/extension/image/{id}/content?index=N`，不依赖 ComfyUI 的 `/view` 路由。视频的 `view_url` 同理指向 `/v1/videos/{id}/content`。
+
 同步请求超时返回 504，任务不会自动取消；可继续轮询异步端点。
+
+### GET `/v2/extension/ui` — 任务面板
+
+返回零依赖单页 HTML（`/ui` 会 302 到此地址）。页面只请求：
+
+```text
+GET /v1/videos
+GET /v1/videos/{id}/content
+GET /v2/extension/image
+GET /v2/extension/image/{id}/content?index=N
+```
+
+不调用 ComfyUI 原生 API、`/view` 或前端 SDK。支持自动刷新、状态筛选、进度/ETA、视频播放和图片预览。
 
 ---
 

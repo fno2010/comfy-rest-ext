@@ -23,7 +23,6 @@ from ..tasks.video_task import (
     get_video_manager,
     submit_video_task,
     _record_to_task,
-    comfyui_view_url,
 )
 from ..tasks.video_persistence import get_video_persistence
 
@@ -38,7 +37,11 @@ def _task_summary(task: VideoTask) -> dict:
         "progress": task.progress,
         "created_at": task.created_at,
         "completed_at": task.completed_at,
-        "view_url": comfyui_view_url(task.output_path),
+        "view_url": (
+            f"/v1/videos/{task.task_id}/content"
+            if task.status == "completed" and task.output_path
+            else None
+        ),
     }
 
 logger = logging.getLogger("comfy-rest-ext.video")
@@ -175,7 +178,11 @@ async def get_video_task_status(request: web.Request) -> web.Response:
         "progress": task.progress,
         "prompt_id": task.prompt_id,
         "output_path": task.output_path,
-        "view_url": comfyui_view_url(task.output_path),
+        "view_url": (
+            f"/v1/videos/{task.task_id}/content"
+            if task.status == "completed" and task.output_path
+            else None
+        ),
         "error": task.error,
         "created_at": task.created_at,
         "completed_at": task.completed_at,

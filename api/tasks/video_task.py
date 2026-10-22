@@ -266,21 +266,6 @@ def _collect_output_paths(outputs: dict) -> List[str]:
     return paths
 
 
-def comfyui_view_url(output_path: Optional[str]) -> Optional[str]:
-    """Build a ComfyUI /view URL for a completed output file."""
-    if not output_path:
-        return None
-    from urllib.parse import urlencode
-    import folder_paths
-    output_dir = folder_paths.get_output_directory()
-    rel = os.path.relpath(output_path, output_dir)
-    parts = rel.split(os.sep)
-    filename = parts[-1]
-    subfolder = os.sep.join(parts[:-1]) if len(parts) > 1 else ""
-    params = urlencode({"filename": filename, "type": "output", "subfolder": subfolder})
-    return f"/view?{params}"
-
-
 # Weighted total-progress model. Only the sampler reports step-level
 # progress; conditioning/decode/save phases are modeled with fixed weights.
 COND_PHASE_WEIGHT = H3_PHASE_WEIGHTS["cond"]

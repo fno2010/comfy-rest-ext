@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comfy-REST-Ext Tasks</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: rgba(13,17,23,.94);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+  }
+  .bar {
+    max-width: 1400px; margin: 0 auto; padding: 14px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  h1 span { color: var(--accent); }
+  .spacer { flex: 1; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  button, .btn {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; cursor: pointer; font: inherit;
+    text-decoration: none;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  input[type=search] {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 10px; min-width: 220px; font: inherit;
+  }
+  .toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  main { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin-bottom: 16px;
+  }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .stat b { display: block; font-size: 22px; line-height: 1.2; }
+  .stat span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .filters {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .chip {
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 12px; color: var(--muted);
+  }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+  .notice {
+    display: none; background: #3d1418; border: 1px solid #6e2329;
+    color: #ffb3ad; padding: 10px 12px; border-radius: 8px; margin-bottom: 16px;
+  }
+  .notice.show { display: block; }
+  section { margin-bottom: 26px; }
+  .section-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .section-head h2 { font-size: 16px; margin: 0; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 9px;
+    min-height: 180px;
+  }
+  .card.running { border-color: #2f5f9e; }
+  .card.completed { border-color: #245c35; }
+  .card.failed { border-color: #6e2329; }
+  .card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .kind {
+    font-size: 10px; font-weight: 700; letter-spacing: .08em;
+    padding: 2px 6px; border-radius: 4px; background: #21262d; color: var(--muted);
+  }
+  .kind.video { color: var(--purple); }
+  .kind.image { color: var(--accent); }
+  .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text); }
+  .badge {
+    margin-left: auto; font-size: 11px; font-weight: 600;
+    padding: 3px 8px; border-radius: 999px; background: #21262d; color: var(--muted);
+  }
+  .badge.running { background: #173b63; color: #8cc8ff; }
+  .badge.completed { background: #173d24; color: #7ee787; }
+  .badge.failed { background: #4a1d20; color: #ffa198; }
+  .badge.queued { background: #3d3213; color: #e3b341; }
+  .prompt {
+    margin: 0; color: var(--text); overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    word-break: break-word;
+  }
+  .prompt.empty { color: var(--muted); font-style: italic; }
+  .progress {
+    height: 7px; background: #0b0f14; border-radius: 999px; overflow: hidden;
+    border: 1px solid #21262d;
+  }
+  .progress > i {
+    display: block; height: 100%; width: 0;
+    background: linear-gradient(90deg, #1f6feb, #58a6ff);
+    transition: width .35s ease;
+  }
+  .card.completed .progress > i { background: linear-gradient(90deg, #238636, #3fb950); }
+  .card.failed .progress > i { background: var(--red); }
+  .meta { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+  .meta b { color: var(--text); font-weight: 500; }
+  .error {
+    color: #ffa198; background: #2d1215; border: 1px solid #5c1f24;
+    border-radius: 6px; padding: 7px 8px; font-size: 12px; word-break: break-word;
+  }
+  .media { display: grid; gap: 6px; }
+  .media img, .media video {
+    width: 100%; max-height: 260px; object-fit: contain;
+    background: #000; border-radius: 6px; border: 1px solid var(--border);
+    display: block;
+  }
+  .media .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+  .media .thumbs img { cursor: zoom-in; aspect-ratio: 1; object-fit: cover; }
+  .media video { max-height: 300px; }
+  .card-foot { margin-top: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .card-foot a { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .card-foot a:hover { text-decoration: underline; }
+  .empty { color: var(--muted); padding: 18px 0; }
+  dialog {
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    border-radius: 10px; padding: 10px; max-width: 94vw; max-height: 94vh;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.82); }
+  dialog img { max-width: 90vw; max-height: 86vh; display: block; border-radius: 6px; }
+  @media (max-width: 640px) {
+    .bar { padding: 12px; }
+    main { padding: 12px; }
+    input[type=search] { min-width: 0; flex: 1; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Comfy-REST-Ext <span>Tasks</span></h1>
+    <span id="updated" class="muted small"></span>
+    <div class="spacer"></div>
+    <input id="search" type="search" placeholder="Filter by model, prompt, or id">
+    <label class="toggle small"><input id="auto" type="checkbox" checked> auto refresh</label>
+    <button id="refresh" type="button">Refresh</button>
+    <a class="btn" href="/v1/models" target="_blank" rel="noreferrer">Models</a>
+  </div>
+</header>
+
+<main>
+  <div id="notice" class="notice"></div>
+
+  <div class="stats">
+    <div class="stat"><b id="stat-video-total">0</b><span>Videos</span></div>
+    <div class="stat"><b id="stat-video-running">0</b><span>Videos active</span></div>
+    <div class="stat"><b id="stat-image-total">0</b><span>Images</span></div>
+    <div class="stat"><b id="stat-image-running">0</b><span>Images active</span></div>
+  </div>
+
+  <div class="filters">
+    <button class="chip active" data-status="all" type="button">All</button>
+    <button class="chip" data-status="active" type="button">Active</button>
+    <button class="chip" data-status="completed" type="button">Completed</button>
+    <button class="chip" data-status="failed" type="button">Failed</button>
+  </div>
+
+  <section id="video-section">
+    <div class="section-head"><h2>Videos</h2><span id="video-count" class="muted small"></span></div>
+    <div id="videos" class="grid"></div>
+  </section>
+
+  <section id="image-section">
+    <div class="section-head"><h2>Images</h2><span id="image-count" class="muted small"></span></div>
+    <div id="images" class="grid"></div>
+  </section>
+</main>
+
+<dialog id="lightbox">
+  <img id="lightbox-img" alt="">
+</dialog>
+
+<script>
+(() => {
+  "use strict";
+
+  const state = {
+    videos: [],
+    images: [],
+    status: "all",
+    query: "",
+    timer: null,
+    loading: false,
+    fetchedAt: null,
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const ACTIVE = new Set(["queued", "running", "in_progress"]);
+
+  function esc(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return "—";
+    try { return new Date(Number(ts) * 1000).toLocaleString(); }
+    catch (_) { return String(ts); }
+  }
+
+  function fmtDuration(seconds) {
+    if (seconds == null || isNaN(seconds)) return "—";
+    const s = Math.max(0, Math.round(Number(seconds)));
+    if (s < 60) return s + "s";
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + "m " + (s % 60) + "s";
+    return Math.floor(m / 60) + "h " + (m % 60) + "m";
+  }
+
+  function statusClass(status) {
+    if (ACTIVE.has(status)) return "running";
+    return status || "queued";
+  }
+
+  function statusLabel(status) {
+    return ({ in_progress: "running", running: "running" })[status] || status || "unknown";
+  }
+
+  function normalizeVideo(task) {
+    return {
+      kind: "video",
+      id: task.id,
+      object: task.object || "video",
+      model: task.model || "",
+      prompt: task.prompt || "",
+      status: task.status || "unknown",
+      progress: Number(task.progress || 0),
+      current_node: task.current_node || "",
+      node_progress: Number(task.node_progress || 0),
+      eta: task.eta,
+      elapsed: task.elapsed,
+      size: task.size || "",
+      seconds: task.seconds,
+      created_at: task.created_at,
+      completed_at: task.completed_at,
+      error: task.error,
+      media: task.view_url ? [task.view_url] : [],
+      json_url: "/v1/videos/" + encodeURIComponent(task.id),
+    };
+  }
+
+  function normalizeImage(task) {
+    return {
+      kind: "image",
+      id: task.id,
+      object: task.object || "image.generation",
+      model: task.model || "",
+      prompt: task.prompt || "",
+      status: task.status || "unknown",
+      progress: Number(task.progress || 0),
+      current_node: task.current_node || "",
+      node_progress: Number(task.node_progress || 0),
+      eta: task.eta,
+      elapsed: null,
+      size: task.size || "",
+      n: task.n || 1,
+      created_at: task.created_at,
+      completed_at: task.completed_at,
+      error: task.error,
+      media: task.view_urls || [],
+      json_url: "/v2/extension/image/" + encodeURIComponent(task.id),
+    };
+  }
+
+  function matches(task) {
+    if (state.status === "active" && !ACTIVE.has(task.status)) return false;
+    if (state.status === "completed" && task.status !== "completed") return false;
+    if (state.status === "failed" && task.status !== "failed") return false;
+    if (!state.query) return true;
+    const q = state.query.toLowerCase();
+    return [task.id, task.model, task.prompt, task.status]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+  }
+
+  function sortTasks(tasks) {
+    return tasks.slice().sort((a, b) => {
+      const aa = ACTIVE.has(a.status) ? 0 : 1;
+      const bb = ACTIVE.has(b.status) ? 0 : 1;
+      if (aa !== bb) return aa - bb;
+      return (b.created_at || 0) - (a.created_at || 0);
+    });
+  }
+
+  function mediaHtml(task) {
+    if (!task.media.length || task.status !== "completed") return "";
+    if (task.kind === "video") {
+      return `<div class="media"><video controls preload="none" src="${esc(task.media[0])}"></video></div>`;
+    }
+    return `<div class="media"><div class="thumbs">${task.media.map((url, i) =>
+      `<img loading="lazy" src="${esc(url)}" alt="output ${i + 1}" data-full="${esc(url)}">`
+    ).join("")}</div></div>`;
+  }
+
+  function cardHtml(task) {
+    const cls = statusClass(task.status);
+    const progress = Math.max(0, Math.min(100, task.progress || 0));
+    const meta = [];
+    if (task.size) meta.push(`<span>size <b>${esc(task.size)}</b></span>`);
+    if (task.seconds) meta.push(`<span>seconds <b>${esc(task.seconds)}</b></span>`);
+    if (task.n && task.kind === "image") meta.push(`<span>n <b>${esc(task.n)}</b></span>`);
+    if (task.current_node && ACTIVE.has(task.status)) {
+      meta.push(`<span>node <b>${esc(task.current_node)}</b> ${esc(task.node_progress)}%</span>`);
+    }
+    if (task.eta != null && ACTIVE.has(task.status)) {
+      meta.push(`<span>eta <b>${esc(fmtDuration(task.eta))}</b></span>`);
+    } else if (task.elapsed != null) {
+      meta.push(`<span>elapsed <b>${esc(fmtDuration(task.elapsed))}</b></span>`);
+    }
+    meta.push(`<span>${esc(fmtTime(task.created_at))}</span>`);
+
+    const error = task.error && task.error.message
+      ? `<div class="error">${esc(task.error.message)}</div>` : "";
+
+    const links = [`<a href="${esc(task.json_url)}" target="_blank" rel="noreferrer">JSON</a>`];
+    if (task.media.length) {
+      links.push(`<a href="${esc(task.media[0])}" target="_blank" rel="noreferrer">Open output</a>`);
+    }
+
+    return `<article class="card ${cls}">
+      <div class="card-top">
+        <span class="kind ${task.kind}">${task.kind === "video" ? "VIDEO" : "IMAGE"}</span>
+        <span class="model">${esc(task.model || "unknown")}</span>
+        <span class="badge ${cls}">${esc(statusLabel(task.status))}</span>
+      </div>
+      <p class="prompt${task.prompt ? "" : " empty"}">${esc(task.prompt || "(no prompt)")}</p>
+      <div class="progress"><i style="width:${progress}%"></i></div>
+      <div class="meta">${meta.join("")}</div>
+      ${error}
+      ${mediaHtml(task)}
+      <div class="card-foot">${links.join("")}</div>
+    </article>`;
+  }
+
+  function renderSection(tasks, container, counter) {
+    const filtered = sortTasks(tasks.filter(matches));
+    container.innerHTML = filtered.length
+      ? filtered.map(cardHtml).join("")
+      : `<div class="empty">No ${container.id} match this filter.</div>`;
+    counter.textContent = filtered.length + " shown";
+  }
+
+  function summarize() {
+    const vActive = state.videos.filter((t) => ACTIVE.has(t.status)).length;
+    const iActive = state.images.filter((t) => ACTIVE.has(t.status)).length;
+    $("stat-video-total").textContent = state.videos.length;
+    $("stat-video-running").textContent = vActive;
+    $("stat-image-total").textContent = state.images.length;
+    $("stat-image-running").textContent = iActive;
+  }
+
+  function render() {
+    summarize();
+    renderSection(state.videos, $("videos"), $("video-count"));
+    renderSection(state.images, $("images"), $("image-count"));
+  }
+
+  async function fetchJson(url) {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(url + " -> HTTP " + response.status);
+    return response.json();
+  }
+
+  async function load() {
+    if (state.loading) return;
+    state.loading = true;
+    try {
+      const [videoData, imageData] = await Promise.all([
+        fetchJson("/v1/videos"),
+        fetchJson("/v2/extension/image"),
+      ]);
+      state.videos = (videoData.data || []).map(normalizeVideo);
+      state.images = (imageData.tasks || []).map(normalizeImage);
+      state.fetchedAt = new Date();
+      $("updated").textContent = "updated " + state.fetchedAt.toLocaleTimeString();
+      $("notice").classList.remove("show");
+      render();
+    } catch (error) {
+      const notice = $("notice");
+      notice.textContent = "Refresh failed: " + error.message;
+      notice.classList.add("show");
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  function schedule() {
+    if (state.timer) clearInterval(state.timer);
+    state.timer = null;
+    if ($("auto").checked) {
+      state.timer = setInterval(() => {
+        if (document.visibilityState === "visible") load();
+      }, 2500);
+    }
+  }
+
+  $("refresh").addEventListener("click", load);
+  $("auto").addEventListener("change", schedule);
+  $("search").addEventListener("input", (event) => {
+    state.query = event.target.value.trim();
+    render();
+  });
+  document.querySelectorAll(".chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      state.status = chip.dataset.status;
+      document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c === chip));
+      render();
+    });
+  });
+  document.addEventListener("click", (event) => {
+    const img = event.target.closest("img[data-full]");
+    if (img) {
+      event.preventDefault();
+      $("lightbox-img").src = img.dataset.full;
+      $("lightbox").showModal();
+    }
+  });
+  $("lightbox").addEventListener("click", (event) => {
+    if (event.target === $("lightbox")) $("lightbox").close();
+  });
+
+  load();
+  schedule();
+})();
+</script>
+</body>
+</html>

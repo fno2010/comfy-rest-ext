@@ -25,7 +25,6 @@ from ..tasks.video_task import (
     get_video_manager,
     submit_video_task,
     _record_to_task,
-    comfyui_view_url,
 )
 from ..tasks.video_persistence import get_video_persistence
 from ..catalog import (
@@ -115,7 +114,11 @@ def _video_response(task: VideoTask) -> dict:
         "completed_at": int(task.completed_at) if task.completed_at else None,
         "media_type": task.output_mime or "video/mp4",
         "file_name": task.output_path,
-        "view_url": comfyui_view_url(task.output_path),
+        "view_url": (
+            f"/v1/videos/{task.task_id}/content"
+            if task.status == "completed" and task.output_path
+            else None
+        ),
         "inference_time_s": inference_time_s,
         "error": (
             {"code": "generation_error", "message": task.error}

@@ -23,7 +23,6 @@ from ..catalog import ModelSpec, get_model
 from ..tasks.video_task import (
     GenerationTask,
     _record_to_task,
-    comfyui_view_url,
     get_video_manager,
     submit_generation_task,
 )
@@ -91,7 +90,10 @@ def _image_task_summary(task: GenerationTask) -> dict:
         "eta": round(task.eta, 1) if task.eta is not None else None,
         "created_at": int(task.created_at),
         "completed_at": int(task.completed_at) if task.completed_at else None,
-        "view_urls": [comfyui_view_url(p) for p in task.output_paths],
+        "view_urls": [
+            f"/v2/extension/image/{task.task_id}/content?index={index}"
+            for index in range(len(task.output_paths))
+        ] if task.status == "completed" else [],
         "error": (
             {"code": "generation_error", "message": task.error}
             if task.error else None
@@ -283,23 +285,22 @@ async def _create_task(
     return task
 
 
-def _absolute_view_url(request: web.Request, output_path: str) -> Optional[str]:
-    rel = comfyui_view_url(output_path)
-    if not rel:
-        return None
+def _absolute_view_url(
+    request: web.Request, task: GenerationTask, index: int
+) -> str:
     base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
     if not base:
         base = str(request.url.origin())
-    return f"{base}{rel}"
+    return f"{base}/v2/extension/image/{task.task_id}/content?index={index}"
 
 
 def _image_response(request: web.Request, task: GenerationTask,
                     response_format: str) -> dict:
     data: List[dict] = []
-    for path in task.output_paths:
+    for index, path in enumerate(task.output_paths):
         item: Dict[str, Any] = {"revised_prompt": task.prompt}
         if response_format == "url":
-            item["url"] = _absolute_view_url(request, path)
+            item["url"] = _absolute_view_url(request, task, index)
         else:
             item["b64_json"] = base64.b64encode(
                 Path(path).read_bytes()
@@ -429,17 +430,46 @@ async def create_image_task(request: web.Request) -> web.Response:
     return web.json_response(_image_task_summary(task))
 
 
-@routes.get("/v2/extension/image/{task_id}")
-async def get_image_task(request: web.Request) -> web.Response:
-    task_id = request.match_info["task_id"]
-    task = get_video_manager().get(task_id)
-    if not task:
+def _get_image_task(task_id: str) -> Optional[GenerationTask]:
+    manager = get_video_manager()
+    task = manager.get(task_id)
+    if task is None:
         record = get_video_persistence().get(task_id)
         if record is None:
-            return _error(404, "Task not found")
+            return None
         task = _record_to_task(record)
-        get_video_manager().restore(task)
+        manager.restore(task)
+    if task.modality != "image":
+        return None
+    return task
+
+
+@routes.get("/v2/extension/image/{task_id}")
+async def get_image_task(request: web.Request) -> web.Response:
+    task = _get_image_task(request.match_info["task_id"])
+    if task is None:
+        return _error(404, "Task not found")
     return web.json_response(_image_task_summary(task))
+
+
+@routes.get("/v2/extension/image/{task_id}/content")
+async def get_image_content(request: web.Request) -> web.Response:
+    """Serve one generated image. Index selects the n-th output."""
+    task = _get_image_task(request.match_info["task_id"])
+    if task is None:
+        return _error(404, "Task not found")
+    if task.status != "completed" or not task.output_paths:
+        return _error(409, "Image generation still in progress")
+    try:
+        index = int(request.query.get("index", "0"))
+    except ValueError:
+        return _error(400, "index must be an integer", "index")
+    if index < 0 or index >= len(task.output_paths):
+        return _error(404, "Image index out of range", "index")
+    return web.FileResponse(
+        task.output_paths[index],
+        headers={"Content-Disposition": "inline"},
+    )
 
 
 @routes.get("/v2/extension/image")
