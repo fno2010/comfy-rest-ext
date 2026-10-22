@@ -18,6 +18,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
 
 from .video_persistence import get_video_persistence
+from ..accel import (
+    AccelConfig,
+    AccelConfigError,
+    check_config_available,
+    parse_accel_config,
+)
 
 logger = logging.getLogger("comfy-rest-ext.video")
 
@@ -35,7 +41,7 @@ class VideoTask:
     seed: int
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
-    speed: Optional[str] = None
+    speed: Optional[Any] = None  # legacy str (auto|none|te-speed|sol-stack) or AccelConfig dict
     prompt_id: Optional[str] = None
     progress: float = 0.0
     current_node: Optional[str] = None
@@ -65,6 +71,114 @@ def frames_for_seconds(seconds: float) -> int:
     return min(frames, 362)
 
 
+def _apply_accel_layers(workflow, add, model_ref: list, accel) -> list:
+    """Apply acceleration layers in pipeline order (cross-layer stacking).
+
+    Layer order: turbo (L1) -> attention (L4) -> block_cache (L2) ->
+    step_cache (L3). In-layer exclusivity is enforced by schema
+    validation in api/accel.py, not by if/elif here.
+    """
+    model_out = list(model_ref)
+    # Sequential node ids within the 1x namespace, so a lone layer (e.g.
+    # only block_cache) still lands on "1b" like the legacy builder did.
+    seq = iter("bcdefghij")
+
+    if accel.turbo != "none":
+        nid = "1" + next(seq)
+        add(nid, "MiniMaxH3TurboLoRA", {
+            "model": model_out,
+            "lora_name": "minimax_h3_turbo_v4_step600_ema.safetensors",
+            "strength": 1.0,
+            "low_vram": False,
+        })
+        model_out = [nid, 0]
+
+    if accel.attention == "sol":
+        nid = "1" + next(seq)
+        add(nid, "SolAttnMiniMaxH3Patcher", {
+            "model": model_out,
+            "enabled": True,
+            "tau": 1.0,
+            "thresh_type": "diag",
+        })
+        model_out = [nid, 0]
+    elif accel.attention == "sage":
+        nid = "1" + next(seq)
+        add(nid, "PathchSageAttentionKJ", {
+            "model": model_out,
+            "sage_attention": "auto",
+        })
+        model_out = [nid, 0]
+    elif accel.attention == "flash":
+        nid = "1" + next(seq)
+        add(nid, "PatchFlashAttentionKJ", {
+            "model": model_out,
+        })
+        model_out = [nid, 0]
+
+    if accel.block_cache == "te-speed":
+        nid = "1" + next(seq)
+        add(nid, "TESpeedMiniMaxH3", {
+            "model": model_out,
+            "processing_control_value": 0.12,
+            "processing_percent_1": 0.1,
+            "processing_percent_2": 0.9,
+            "mcs": 2,
+            "device": "auto",
+            "cache_depth": 0.75,
+        })
+        model_out = [nid, 0]
+    elif accel.block_cache == "fbc":
+        nid = "1" + next(seq)
+        add(nid, "H3FirstBlockCache", {
+            "model": model_out,
+            "threshold": 0.08,
+            "start_step": 2,
+            "end_dense_steps": 2,
+            "max_consecutive_skips": 2,
+        })
+        model_out = [nid, 0]
+
+    if accel.step_cache == "easycache":
+        nid = "1" + next(seq)
+        add(nid, "EasyCache", {
+            "model": model_out,
+            "reuse_threshold": 0.2,
+            "start_percent": 0.15,
+            "end_percent": 1.0,
+            "verbose": False,
+        })
+        model_out = [nid, 0]
+    elif accel.step_cache == "lazycache":
+        nid = "1" + next(seq)
+        add(nid, "LazyCache", {
+            "model": model_out,
+            "reuse_threshold": 0.2,
+            "start_percent": 0.15,
+            "end_percent": 1.0,
+            "verbose": False,
+        })
+        model_out = [nid, 0]
+    elif accel.step_cache == "spectrum":
+        nid = "1" + next(seq)
+        add(nid, "SpectrumApplyMiniMaxH3", {
+            "model": model_out,
+            "enabled": True,
+            "blend_weight": 0.50,
+            "degree": 1,
+            "ridge_lambda": 0.10,
+            "window_size": 2.0,
+            "flex_window": 0.75,
+            "warmup_steps": 1,
+            "tail_actual_steps": 1,
+            "max_history": 4,
+            "debug": False,
+        })
+        model_out = [nid, 0]
+
+    return model_out
+
+
 def build_h3_workflow(
     *,
     prompt: str,
@@ -84,6 +198,7 @@ def build_h3_workflow(
     steps: int = 20,
     te_speed: bool = False,
     sol_stack: bool = False,
+    accel: Optional["AccelConfig"] = None,
     ref_image_size: str = "match",
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V.
@@ -97,7 +212,20 @@ def build_h3_workflow(
     R2V (ref_images given) uses the ref2va checkpoint and the
     MiniMaxH3ReferenceToVideo node; the prompt references images via
     <Picture N> tags in insertion order.
+
+    Acceleration: legacy `te_speed`/`sol_stack` booleans map to an
+    AccelConfig; or pass a full `accel` config for composable layers.
     """
+    from ..accel import AccelConfig
+
+    if accel is None:
+        accel = AccelConfig(steps=steps)
+        if te_speed:
+            accel.block_cache = "te-speed"
+        if sol_stack:
+            accel.block_cache = "fbc"
+            accel.attention = "sol"
+
     workflow: Dict[str, Any] = {}
 
     def add(nid: str, class_type: str, inputs: Dict[str, Any]) -> str:
@@ -117,33 +245,7 @@ def build_h3_workflow(
     add("3", "VAELoader", {"vae_name": video_vae})
     add("4", "VAELoader", {"vae_name": audio_vae})
 
-    model_out = ["1", 0]
-    if te_speed:
-        add("1b", "TESpeedMiniMaxH3", {
-            "model": ["1", 0],
-            "processing_control_value": 0.12,
-            "processing_percent_1": 0.1,
-            "processing_percent_2": 0.9,
-            "mcs": 2,
-            "device": "auto",
-            "cache_depth": 0.75,
-        })
-        model_out = ["1b", 0]
-    elif sol_stack:
-        add("1b", "SolAttnMiniMaxH3Patcher", {
-            "model": ["1", 0],
-            "enabled": True,
-            "tau": 1.0,
-            "thresh_type": "diag",
-        })
-        add("1c", "H3FirstBlockCache", {
-            "model": ["1b", 0],
-            "threshold": 0.08,
-            "start_step": 2,
-            "end_dense_steps": 2,
-            "max_consecutive_skips": 2,
-        })
-        model_out = ["1c", 0]
+    model_out = _apply_accel_layers(workflow, add, ["1", 0], accel)
 
     add("5", "MiniMaxH3SigmaShift", {
         "model": model_out,
@@ -541,16 +643,20 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         record.pop("task_id", None)
         manager.update(task.task_id, **record)
 
-    speed = (task.speed or "auto").lower()
-    if speed == "te-speed":
-        te_speed, sol_stack = True, False
-    elif speed == "sol-stack":
-        te_speed, sol_stack = False, True
-    elif speed == "none":
-        te_speed, sol_stack = False, False
-    else:
-        te_speed = os.environ.get("H3_TE_SPEED", "0") == "1"
-        sol_stack = os.environ.get("H3_SOL_STACK", "0") == "1"
+    try:
+        accel_cfg = parse_accel_config(task.speed)
+    except AccelConfigError as e:
+        task.status = "failed"
+        task.error = str(e)
+        sync_status()
+        return task
+
+    missing_node = check_config_available(accel_cfg)
+    if missing_node:
+        task.status = "failed"
+        task.error = missing_node
+        sync_status()
+        return task
 
     workflow = build_h3_workflow(
         prompt=task.prompt,
@@ -562,9 +668,8 @@ async def submit_video_task(task: VideoTask) -> VideoTask:
         ref_images=task.ref_images,
         sampler_name=os.environ.get("H3_SAMPLER", "euler"),
         scheduler=os.environ.get("H3_SCHEDULER", "simple"),
-        steps=int(os.environ.get("H3_STEPS", "20")),
-        te_speed=te_speed,
-        sol_stack=sol_stack,
+        steps=accel_cfg.steps if task.speed is not None else int(os.environ.get("H3_STEPS", "20")),
+        accel=accel_cfg,
         ref_image_size=os.environ.get("H3_REF_SIZE", "match"),
         ref2va_model=os.environ.get(
             "H3_REF2VA_MODEL", "minimax_h3_ref2va_pruned_nvfp4.safetensors"
