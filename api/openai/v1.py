@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
 import time
 import uuid
 from typing import Optional
@@ -126,6 +127,26 @@ def _video_response(task: VideoTask) -> dict:
         "completed_at": int(task.completed_at) if task.completed_at else None,
         "media_type": task.output_mime or "video/mp4",
         "file_name": task.output_path,
+        "reference_images": list(task.ref_images or []),
+        "reference_videos": list(task.ref_videos or []),
+        "reference_image_urls": [
+            f"/v2/extension/video/{task.task_id}/assets/image/{index}"
+            for index in range(len(task.ref_images or []))
+        ],
+        "reference_video_urls": [
+            f"/v2/extension/video/{task.task_id}/assets/video/{index}"
+            for index in range(len(task.ref_videos or []))
+        ],
+        "first_frame": task.first_frame,
+        "last_frame": task.last_frame,
+        "first_frame_url": (
+            f"/v2/extension/video/{task.task_id}/assets/first_frame/0"
+            if task.first_frame else None
+        ),
+        "last_frame_url": (
+            f"/v2/extension/video/{task.task_id}/assets/last_frame/0"
+            if task.last_frame else None
+        ),
         "view_url": (
             f"/v1/videos/{task.task_id}/content"
             if task.status == "completed" and task.output_path
@@ -525,6 +546,44 @@ def _get_task_or_restore(video_id: str) -> Optional[VideoTask]:
     task = _record_to_task(record)
     manager.restore(task)
     return task
+
+
+@routes.get("/v2/extension/video/{video_id}/assets/{kind}/{index}")
+async def get_video_asset(request: web.Request) -> web.Response:
+    """Serve a reference asset attached to a video task."""
+    task = _get_task_or_restore(request.match_info["video_id"])
+    if task is None:
+        return web.json_response({"error": "Video not found"}, status=404)
+    kind = request.match_info["kind"]
+    try:
+        index = int(request.match_info["index"])
+    except ValueError:
+        return web.json_response({"error": "Invalid asset index"}, status=400)
+    if index < 0:
+        return web.json_response({"error": "Invalid asset index"}, status=404)
+    if kind == "image":
+        names = task.ref_images or []
+    elif kind == "video":
+        names = task.ref_videos or []
+    elif kind == "first_frame":
+        names = [task.first_frame] if task.first_frame else []
+    elif kind == "last_frame":
+        names = [task.last_frame] if task.last_frame else []
+    else:
+        return web.json_response({"error": "Unknown asset kind"}, status=404)
+    if index >= len(names):
+        return web.json_response({"error": "Asset not found"}, status=404)
+    import folder_paths
+    input_dir = os.path.realpath(folder_paths.get_input_directory())
+    path = os.path.realpath(os.path.join(input_dir, names[index]))
+    try:
+        if os.path.commonpath([input_dir, path]) != input_dir:
+            return web.json_response({"error": "Asset not found"}, status=404)
+    except ValueError:
+        return web.json_response({"error": "Asset not found"}, status=404)
+    if not os.path.isfile(path):
+        return web.json_response({"error": "Asset not found"}, status=404)
+    return web.FileResponse(path, headers={"Content-Disposition": "inline"})
 
 
 @routes.get("/v1/videos/{video_id}")

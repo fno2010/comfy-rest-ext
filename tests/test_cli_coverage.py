@@ -468,6 +468,7 @@ EXCLUDED_ROUTES = {
     ("GET", "/v2/extension/video"),
     ("POST", "/v2/extension/video/generate"),
     ("GET", "/v2/extension/video/{task_id}"),
+    ("GET", "/v2/extension/video/{video_id}/assets/{kind}/{index}"),
     ("POST", "/v2/extension/image/generate"),
 }
 

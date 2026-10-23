@@ -269,6 +269,13 @@ def cmd_status(client: ComfyRestClient, args: Any) -> int:
     print(f"model:     {task.get('model', '')}")
     print(f"size:      {task.get('size', '')}")
     print(f"seconds:   {task.get('seconds', '')}")
+    for key in ("reference_images", "reference_videos",
+                "first_frame", "last_frame"):
+        if task.get(key):
+            value = task[key]
+            if isinstance(value, list):
+                value = ", ".join(value)
+            print(f"{key + ':':<18} {value}")
     if task.get("error"):
         print(f"error:     {task['error'].get('message', task['error'])}")
     if task.get("view_url"):

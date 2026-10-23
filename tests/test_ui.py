@@ -106,3 +106,13 @@ async def test_dashboard_exposes_reference_video_controls():
     assert "reference_video" in html
     assert 'form.append("video"' in html
     assert "Reference video(s)" in html
+
+
+@pytest.mark.asyncio
+async def test_dashboard_exposes_reference_assets():
+    from api.ui import task_dashboard
+    response = await task_dashboard(None)
+    html = response.text
+    assert "reference_video_urls" in html
+    assert "reference_image_urls" in html
+    assert 'class="refs"' in html

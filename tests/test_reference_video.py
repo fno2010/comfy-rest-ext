@@ -270,3 +270,74 @@ async def test_route_accepts_ref_video_urls_alias(monkeypatch):
     }))
     assert response.status == 200
     assert manager.task.ref_videos == ["ref.mp4"]
+
+
+def test_video_response_exposes_reference_urls():
+    from api.openai.v1 import _video_response
+    task = VideoTask(
+        task_id="video_refs", status="completed", prompt="p", task_type="r2v",
+        width=512, height=512, length=39, seed=1,
+        ref_images=["a.png"], ref_videos=["b.mp4"],
+        first_frame="first.png", last_frame="last.png",
+        output_path="/tmp/out.mp4", output_paths=["/tmp/out.mp4"],
+    )
+    resp = _video_response(task)
+    assert resp["reference_images"] == ["a.png"]
+    assert resp["reference_videos"] == ["b.mp4"]
+    assert resp["reference_image_urls"] == [
+        "/v2/extension/video/video_refs/assets/image/0"
+    ]
+    assert resp["reference_video_urls"] == [
+        "/v2/extension/video/video_refs/assets/video/0"
+    ]
+    assert resp["first_frame_url"].endswith("/assets/first_frame/0")
+    assert resp["last_frame_url"].endswith("/assets/last_frame/0")
+
+
+@pytest.mark.asyncio
+async def test_video_asset_endpoint_serves_reference(monkeypatch, tmp_path):
+    import api.openai.v1 as v1
+    import folder_paths
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "ref.mp4").write_bytes(b"video-bytes")
+    monkeypatch.setattr(folder_paths, "get_input_directory", lambda: str(input_dir), raising=False)
+    task = VideoTask(
+        task_id="video_asset", status="completed", prompt="p", task_type="r2v",
+        width=512, height=512, length=39, seed=1, ref_videos=["ref.mp4"],
+    )
+    monkeypatch.setattr(v1, "_get_task_or_restore", lambda _: task)
+
+    class Request:
+        match_info = {
+            "video_id": "video_asset", "kind": "video", "index": "0",
+        }
+
+    response = await v1.get_video_asset(Request())
+    assert response.status == 200
+    assert str(response._path) == str(input_dir / "ref.mp4")
+
+
+@pytest.mark.asyncio
+async def test_video_asset_endpoint_rejects_traversal(monkeypatch, tmp_path):
+    import api.openai.v1 as v1
+    import folder_paths
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (tmp_path / "secret.mp4").write_bytes(b"secret")
+    monkeypatch.setattr(folder_paths, "get_input_directory", lambda: str(input_dir), raising=False)
+    task = VideoTask(
+        task_id="video_asset", status="completed", prompt="p", task_type="r2v",
+        width=512, height=512, length=39, seed=1, ref_videos=["../secret.mp4"],
+    )
+    monkeypatch.setattr(v1, "_get_task_or_restore", lambda _: task)
+
+    class Request:
+        match_info = {
+            "video_id": "video_asset", "kind": "video", "index": "0",
+        }
+
+    response = await v1.get_video_asset(Request())
+    assert response.status == 404
