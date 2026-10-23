@@ -209,8 +209,9 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
     """Build a content[]/input[] video request (industry-standard format).
 
     Text goes into an input_text item; uploaded images become input_image
-    items. A single image is a first_frame (I2V); multiple images are
-    reference_image items (R2V) referenced via <Picture N> tags.
+    items. A single image is a first_frame (I2V) unless reference videos are
+    also supplied; multiple images or any video make images reference_image
+    items (R2V) referenced via <Picture N> / <Video N> tags.
     """
     payload = _build_video_payload(args)
     items: list = [{"type": "input_text", "text": args.prompt}]
