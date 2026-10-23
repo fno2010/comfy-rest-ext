@@ -116,3 +116,33 @@ async def test_dashboard_exposes_reference_assets():
     assert "reference_video_urls" in html
     assert "reference_image_urls" in html
     assert 'class="refs"' in html
+
+
+def test_task_summaries_expose_params_and_acceleration():
+    from api.openai.images import _image_task_summary
+    from api.openai.v1 import _video_response
+    from api.tasks.video_task import GenerationTask
+
+    accel = {"steps": 4, "turbo": {"method": "lightx2v-4step-v1.3", "params": {}}}
+    video = GenerationTask(
+        task_id="v", status="completed", prompt="p", task_type="t2va",
+        width=512, height=512, length=39, seed=1,
+        params={"seconds": 1.625}, speed={"turbo": "lightx2v-4step-v1.3"},
+        acceleration=accel,
+    )
+    resp = _video_response(video)
+    assert resp["params"]["seconds"] == 1.625
+    assert resp["params"]["width"] == 512
+    assert resp["params"]["height"] == 512
+    assert resp["params"]["steps"] == 4
+    assert resp["speed"] == {"turbo": "lightx2v-4step-v1.3"}
+    assert resp["acceleration"] == accel
+
+    image = GenerationTask(
+        task_id="i", status="completed", prompt="p", task_type="t2i",
+        width=512, height=512, length=1, seed=1,
+        params={"steps": 8, "cfg": 2.0}, acceleration=None,
+    )
+    summary = _image_task_summary(image)
+    assert summary["params"] == {"steps": 8, "cfg": 2.0}
+    assert summary["acceleration"] is None

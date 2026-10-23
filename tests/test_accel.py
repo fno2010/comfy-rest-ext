@@ -398,3 +398,25 @@ class TestLightX2VPrecedence:
         assert wf[turbo_id]["inputs"]["lora_name"] == (
             "minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors"
         )
+
+
+def test_build_task_records_resolved_acceleration(monkeypatch):
+    import api.workflows.h3 as h3_mod
+
+    monkeypatch.setattr(h3_mod, "require_asset", lambda *a, **k: None)
+    task = type("Task", (), {
+        "task_id": "t", "prompt": "p", "width": 512, "height": 512,
+        "length": 39, "seed": 1, "first_frame": None, "last_frame": None,
+        "ref_images": None, "ref_videos": None, "assets": {},
+        "params": {}, "speed": {"turbo": "lightx2v-4step-v1.3"},
+    })()
+    h3_mod.build_h3_task(task)
+    accel = task.acceleration
+    assert accel["steps"] == 4
+    assert accel["sampler"] == "euler"
+    assert accel["scheduler"] == "simple"
+    assert accel["shift_video"] == 6.0
+    assert accel["shift_audio"] == 3.0
+    assert accel["turbo"]["method"] == "lightx2v-4step-v1.3"
+    assert accel["turbo"]["params"]["lora_name"].endswith(".safetensors")
+    assert accel["vae_decode"] == {"method": "default", "applied": False}

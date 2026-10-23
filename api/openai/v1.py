@@ -110,11 +110,23 @@ def _video_response(task: VideoTask) -> dict:
     if task.started_at:
         base = task.completed_at or time.time()
         elapsed_s = round(base - task.started_at, 2)
+    effective_params = dict(task.params or {})
+    effective_params.update({
+        "width": task.width,
+        "height": task.height,
+        "seconds": round(task.length / 24, 6),
+    })
+    if task.acceleration and task.acceleration.get("steps") is not None:
+        effective_params["steps"] = task.acceleration["steps"]
+
     return {
         "id": task.task_id,
         "object": "video",
         "model": task.model_id or _model_for_task(task.task_type),
         "prompt": task.prompt,
+        "speed": task.speed,
+        "params": effective_params,
+        "acceleration": task.acceleration,
         "status": status,
         "progress": int(task.progress * 100),
         "current_node": task.current_node,

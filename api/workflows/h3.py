@@ -209,6 +209,15 @@ def build_h3_workflow(
     return workflow
 
 
+def _accel_layer_snapshot(accel_cfg, layer: str, **extra: Any) -> Dict[str, Any]:
+    method = getattr(accel_cfg, layer)
+    if method in (None, "none"):
+        return {"method": "none", "params": {}}
+    params = resolve_method_params(accel_cfg, layer)
+    params.update(extra)
+    return {"method": method, "params": params}
+
+
 def build_h3_task(task: Any) -> BuildResult:
     """Build an H3 workflow from a generic GenerationTask."""
     accel_cfg = parse_accel_config(task.speed)
@@ -256,6 +265,26 @@ def build_h3_task(task: Any) -> BuildResult:
         require_asset("loras", turbo_lora)
 
     prefix = f"video/comfy-rest-ext_{(task.task_id or 'task')[:8]}"
+    sampler_name = (
+        turbo_params.get("sampler")
+        or os.environ.get("H3_SAMPLER")
+        or params.get("sampler")
+        or "euler"
+    )
+    scheduler_name = (
+        turbo_params.get("scheduler")
+        or os.environ.get("H3_SCHEDULER")
+        or params.get("scheduler")
+        or "simple"
+    )
+    ref_image_size = (
+        os.environ.get("H3_REF_SIZE")
+        or params.get("ref_image_size")
+        or "match"
+    )
+    shift_video = turbo_params.get("shift_video", 12.0)
+    shift_audio = turbo_params.get("shift_audio", 3.0)
+
     workflow = build_h3_workflow(
         prompt=task.prompt,
         width=task.width,
@@ -271,28 +300,34 @@ def build_h3_task(task: Any) -> BuildResult:
         video_vae=video_vae,
         audio_vae=audio_vae,
         ref2va_model=unet,
-        sampler_name=(
-            turbo_params.get("sampler")
-            or os.environ.get("H3_SAMPLER")
-            or params.get("sampler")
-            or "euler"
-        ),
-        scheduler=(
-            turbo_params.get("scheduler")
-            or os.environ.get("H3_SCHEDULER")
-            or params.get("scheduler")
-            or "simple"
-        ),
+        sampler_name=sampler_name,
+        scheduler=scheduler_name,
         steps=steps,
         accel=accel_cfg,
-        ref_image_size=(
-            os.environ.get("H3_REF_SIZE")
-            or params.get("ref_image_size")
-            or "match"
-        ),
+        ref_image_size=ref_image_size,
         turbo_lora=turbo_lora,
         filename_prefix=prefix,
     )
+
+    task.acceleration = {
+        "steps": steps,
+        "sampler": sampler_name,
+        "scheduler": scheduler_name,
+        "shift_video": shift_video,
+        "shift_audio": shift_audio,
+        "ref_image_size": ref_image_size,
+        "turbo": _accel_layer_snapshot(
+            accel_cfg, "turbo", lora_name=turbo_lora
+        ),
+        "attention": _accel_layer_snapshot(accel_cfg, "attention"),
+        "block_cache": _accel_layer_snapshot(accel_cfg, "block_cache"),
+        "step_cache": _accel_layer_snapshot(accel_cfg, "step_cache"),
+        "vae_decode": {"method": accel_cfg.vae_decode, "applied": False},
+        "precision": {
+            "values": dict(accel_cfg.precision),
+            "applied": False,
+        },
+    }
 
     return BuildResult(
         workflow=workflow,
