@@ -896,7 +896,7 @@ GET /v2/extension/image/{id}/content?index=N
 
 `+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。
 
-参考图：选择 Qwen-Image 2.1 时图片表单显示参考图上传（走 `/v1/images/edits`，prompt 用 `<image1>`…）；视频表单提供 `Text only` / `First frame (I2V)` / `Reference images (R2V)`，后两者走 `/v1/videos` multipart，R2V prompt 用 `<Picture N>`。参考视频不在本版本范围内（#23）。
+参考图：选择 Qwen-Image 2.1 时图片表单显示参考图上传（走 `/v1/images/edits`，prompt 用 `<image1>`…）；视频表单提供 `Text only` / `First frame (I2V)` / `Reference images (R2V)`，后两者走 `/v1/videos` multipart，R2V prompt 用 `<Picture N>`。R2V 下若模型声明 `reference_video` capability，还会显示参考视频上传（最多 3 个，prompt 用 `<Video N>`）。
 
 ---
 
@@ -934,7 +934,7 @@ GET /v2/extension/image/{id}/content?index=N
 ```
 
 **model 字段语义：**
-- 默认/`minimax-h3`：任务类型**从请求内容自动推断**（多图→R2V、单图→I2V、无图→T2V）
+- 默认/`minimax-h3`：任务类型**从请求内容自动推断**（任意视频参考或多图→R2V、单图→I2V、无图→T2V）
 - 旧别名 `minimax-h3-t2v` / `minimax-h3-i2v` / `minimax-h3-r2v`：显式指定任务类型（向后兼容）
 - 未知 model：返回 400 `Model mismatch`（对齐 vllm-omni）
 
@@ -945,7 +945,8 @@ GET /v2/extension/image/{id}/content?index=N
   "input": [
     {"type": "input_text", "text": "Use <Picture 1> as character reference"},
     {"type": "input_image", "image_url": "https://.../ref1.png", "role": "reference_image"},
-    {"type": "input_image", "image_url": "https://.../ref2.png", "role": "reference_image"}
+    {"type": "input_image", "image_url": "https://.../ref2.png", "role": "reference_image"},
+    {"type": "input_video", "video_url": "https://.../ref1.mp4"}
   ],
   "seconds": 5
 }
@@ -953,6 +954,7 @@ GET /v2/extension/image/{id}/content?index=N
 - `type: "input_text"`（或 `"text"`）：贡献 prompt 文本，多个会换行拼接
 - `type: "input_image"`（或 `"image_url"`）：`image_url` 可为 URL / data URL / ComfyUI input 目录文件名
 - `role`：`reference_image`（默认，最多 9 张 → R2V）、`first_frame` / `last_frame`（→ I2V 首尾帧）
+- `type: "input_video"`（或 `"video_url"`）：`video_url` 可为 URL / `data:video/...` / ComfyUI input 文件名；最多 3 个 → R2V，prompt 用 `<Video 1>`… 引用。模型必须声明 `reference_video` capability，否则返回 400
 - `input` 和 `content` 字段名等价
 
 **multipart 字段（I2V）：**
@@ -974,6 +976,17 @@ curl -X POST http://host:8188/v1/videos \
   -F "input_reference=@/path/to/ref2.png;type=image/png"
 ```
 R2V 使用 `ref2va` checkpoint，prompt 中通过 `<Picture 1>`、`<Picture 2>` 标签按上传顺序引用参考图（最多 9 张）。
+
+**multipart 字段（R2V，参考视频）：**
+```bash
+curl -X POST http://host:8188/v1/videos \
+  -F "model=minimax-h3" \
+  -F "task=r2v" \
+  -F "prompt=Use <Video 1> as motion reference" \
+  -F "seconds=2" \
+  -F "video=@/path/to/ref.mp4;type=video/mp4"
+```
+H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` 参考。视频参考（参考图同理）会让任务走 `ref2va` checkpoint。参考视频帧会参与每个采样步，耗时显著高于纯文本/首帧；建议先用 `512x512`、短时长验证。
 
 **响应（OpenAI VideoResource 形状）：**
 ```json

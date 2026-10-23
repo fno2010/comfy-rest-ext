@@ -22,6 +22,8 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("prompt", help="text prompt")
     parser.add_argument("--image", action="append", default=None,
                         help="reference image for I2V/R2V (repeatable)")
+    parser.add_argument("--video", action="append", default=None,
+                        help="reference video for R2V (repeatable, max 3)")
     parser.add_argument("--model",
                         help="model id (default minimax-h3; aliases minimax-h3-t2v/i2v/r2v)")
     parser.add_argument("--width", type=int, help="frame width (default 1344)")

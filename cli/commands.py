@@ -186,6 +186,9 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
                     files.append(
                         ("input_reference", os.path.basename(path), f.read())
                     )
+            for path in getattr(args, "video", None) or []:
+                with open(path, "rb") as f:
+                    files.append(("video", os.path.basename(path), f.read()))
             task = client.create_video_multipart(payload, files)
         else:
             task = client.create_video(_build_video_request(args))
@@ -230,6 +233,16 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
                 "image_url": f"data:image/{ext};base64,{b64}",
                 "role": role,
             })
+    videos = getattr(args, "video", None) or []
+    for vid in videos:
+        with open(vid, "rb") as f:
+            data = f.read()
+        ext = os.path.splitext(vid)[1].lower().lstrip(".") or "mp4"
+        b64 = base64.b64encode(data).decode("ascii")
+        items.append({
+            "type": "input_video",
+            "video_url": f"data:video/{ext};base64,{b64}",
+        })
     payload["input"] = items
     payload.pop("prompt", None)
     return payload

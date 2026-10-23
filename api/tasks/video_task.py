@@ -45,7 +45,9 @@ class GenerationTask:
     assets: Dict[str, str] = field(default_factory=dict)
     variant: Optional[str] = None
     first_frame: Optional[str] = None
+    last_frame: Optional[str] = None
     ref_images: Optional[list] = None
+    ref_videos: Optional[list] = None
     speed: Optional[Any] = None  # legacy str or AccelConfig dict
     prompt_id: Optional[str] = None
     progress: float = 0.0
@@ -142,7 +144,9 @@ def _task_to_record(task: GenerationTask) -> dict:
         "modality": task.modality,
         "params": dict(task.params or {}),
         "first_frame": task.first_frame,
+        "last_frame": task.last_frame,
         "ref_images": task.ref_images,
+        "ref_videos": task.ref_videos,
         "speed": task.speed,
         "prompt_id": task.prompt_id,
         "progress": task.progress,
@@ -179,7 +183,9 @@ def _record_to_task(record: dict) -> GenerationTask:
         modality=record.get("modality", "video"),
         params=dict(record.get("params") or {}),
         first_frame=record.get("first_frame"),
+        last_frame=record.get("last_frame"),
         ref_images=record.get("ref_images"),
+        ref_videos=record.get("ref_videos"),
         speed=record.get("speed"),
         prompt_id=record.get("prompt_id"),
         progress=record.get("progress", 0.0),

@@ -45,6 +45,19 @@ def _sniff_extension(data: bytes) -> str:
     return "png"
 
 
+def _sniff_video_extension(data: bytes) -> str:
+    """Detect common video containers from their magic bytes."""
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        return "mp4"
+    if data.startswith(b"\x1a\x45\xdf\xa3"):
+        return "webm"
+    if data.startswith(b"RIFF") and len(data) >= 12 and data[8:12] == b"AVI ":
+        return "avi"
+    if data.startswith(b"OggS"):
+        return "ogv"
+    return "mp4"
+
+
 def _input_dir() -> str:
     """Return (and create) ComfyUI's input directory."""
     import folder_paths
@@ -64,6 +77,22 @@ def save_input_asset(data: bytes, prefix: str) -> Optional[str]:
     if not data:
         return None
     filename = f"{prefix}_{_hash_bytes(data)}.{_sniff_extension(data)}"
+    path = os.path.join(_input_dir(), filename)
+    if not os.path.exists(path):
+        with open(path, "wb") as f:
+            f.write(data)
+    return filename
+
+
+def save_input_video(data: bytes, prefix: str) -> Optional[str]:
+    """Write video bytes to the input dir, deduplicated by content hash.
+
+    Container is sniffed from the bytes (mp4/webm/avi/ogv); LoadVideo
+    references the returned filename. Identical bytes reuse one file.
+    """
+    if not data:
+        return None
+    filename = f"{prefix}_{_hash_bytes(data)}.{_sniff_video_extension(data)}"
     path = os.path.join(_input_dir(), filename)
     if not os.path.exists(path):
         with open(path, "wb") as f:

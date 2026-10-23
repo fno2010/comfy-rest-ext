@@ -672,3 +672,40 @@ def test_deps_install_sync_non_success_exit(monkeypatch, result):
         assert commands.cmd_deps_install(
             client, Args(json=True, workflow=f.name, sync=True)
         ) == 1
+
+
+def test_build_video_request_video_reference(tmp_path):
+    video = tmp_path / "ref.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"x" * 32)
+    req = commands._build_video_request(Args(
+        prompt="use <Video 1>", image=None, video=[str(video)], model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+    ))
+    assert req["input"][0] == {"type": "input_text", "text": "use <Video 1>"}
+    item = req["input"][1]
+    assert item["type"] == "input_video"
+    assert item["video_url"].startswith("data:video/mp4;base64,")
+
+
+def test_cmd_generate_multipart_video(tmp_path, capsys):
+    client = FakeClient()
+    video = tmp_path / "ref.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"x" * 32)
+    args = Args(
+        json=True, prompt="p", image=None, video=[str(video)], model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+        steps=None, turbo=None, block_cache=None, step_cache=None,
+        attention=None, vae_decode=None, multipart=True,
+    )
+    assert commands.cmd_generate(client, args) == 0
+    kind, payload, files = client.calls[-1]
+    assert kind == "video-multipart"
+    assert files[0][0] == "video"
+    assert files[0][1] == "ref.mp4"
+
+
+def test_media_type_guessing():
+    from cli.client import _guess_media_type
+    assert _guess_media_type("a.mp4") == "video/mp4"
+    assert _guess_media_type("a.webm") == "video/webm"
+    assert _guess_media_type("a.png") == "image/png"

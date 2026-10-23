@@ -220,7 +220,7 @@ H3_SPEC = register(ModelSpec(
         ("minimax-h3-i2v", "fl2va"),
         ("minimax-h3-r2v", "r2v"),
     ),
-    capabilities=frozenset({"negative_prompt", "seed", "accel"}),
+    capabilities=frozenset({"negative_prompt", "seed", "accel", "reference_video"}),
     max_n=1,
     output_mime="video/mp4",
     timeout_s=3600,

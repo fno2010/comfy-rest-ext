@@ -10,6 +10,7 @@ OpenAI Videos API job lifecycle so agents using the official SDK
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 import uuid
@@ -39,6 +40,9 @@ routes = PromptServer.instance.routes
 
 CANONICAL_MODEL_ID = "minimax-h3"
 MODEL_IDS = list(all_model_ids())
+
+MAX_REFERENCE_VIDEOS = 3
+MAX_VIDEO_BYTES = 256 * 1024 * 1024
 
 
 def _model_card(model_id: str, created: int) -> dict:
@@ -75,7 +79,15 @@ def _task_type_from_model(model: Optional[str]) -> Optional[str]:
 
 
 def _infer_task_type(fields: dict) -> str:
-    """Infer task type from request content (image presence/count)."""
+    """Infer task type from request content (video/image references)."""
+    videos = (
+        fields.get("_ref_videos_data")
+        or fields.get("ref_videos")
+        or fields.get("ref_video_urls")
+        or []
+    )
+    if videos:
+        return "r2v"
     images = fields.get("_ref_images_data") or fields.get("ref_images") or []
     if len(images) > 1:
         return "r2v"
@@ -170,6 +182,8 @@ async def create_video(request: web.Request) -> web.Response:
             fields["first_frame_url"] = content_items["first_frame_url"]
         if content_items["last_frame_url"]:
             fields["last_frame_url"] = content_items["last_frame_url"]
+        if content_items["ref_video_urls"]:
+            fields["ref_videos"] = content_items["ref_video_urls"]
 
     prompt = fields.get("prompt")
     if not prompt:
@@ -197,6 +211,19 @@ async def create_video(request: web.Request) -> web.Response:
     if task_type not in spec.tasks:
         return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
+    has_video_refs = bool(
+        fields.get("_ref_videos_data") or fields.get("ref_videos")
+    )
+    if has_video_refs and "reference_video" not in spec.capabilities:
+        return web.json_response(
+            {"error": f"model {spec.id!r} does not support reference video"},
+            status=400,
+        )
+    if has_video_refs and task_type != "r2v":
+        return web.json_response(
+            {"error": "reference videos require task 'r2v'"}, status=400
+        )
+
     speed = fields.get("speed", "auto")
     try:
         from ..accel import check_config_available, parse_accel_config
@@ -213,7 +240,9 @@ async def create_video(request: web.Request) -> web.Response:
     seed = _parse_int(fields.get("seed"), int(spec.defaults.get("seed", 0)))
 
     first_frame = None
+    last_frame = None
     ref_images = None
+    ref_videos = None
     if task_type == "r2v":
         if fields.get("_ref_images_data"):
             ref_images = [
@@ -223,9 +252,36 @@ async def create_video(request: web.Request) -> web.Response:
             ref_images = [
                 await _resolve_ref_image(ref) for ref in fields["ref_images"]
             ]
-        if not ref_images:
+
+        raw_videos = fields.get("_ref_videos_data") or fields.get("ref_videos") or []
+        if len(raw_videos) > MAX_REFERENCE_VIDEOS:
             return web.json_response(
-                {"error": "r2v requires at least one reference image"}, status=400
+                {"error": f"at most {MAX_REFERENCE_VIDEOS} reference videos are supported"},
+                status=400,
+            )
+        if fields.get("_ref_videos_data"):
+            ref_videos = []
+            for data in fields["_ref_videos_data"]:
+                filename = await _save_video_upload(data, "ref_video")
+                if not filename:
+                    return web.json_response(
+                        {"error": "reference video is empty"}, status=400
+                    )
+                ref_videos.append(filename)
+        elif fields.get("ref_videos"):
+            ref_videos = []
+            for ref in fields["ref_videos"]:
+                filename = await _resolve_ref_video(ref)
+                if not filename:
+                    return web.json_response(
+                        {"error": f"could not resolve reference video: {ref}"},
+                        status=400,
+                    )
+                ref_videos.append(filename)
+        if not ref_images and not ref_videos:
+            return web.json_response(
+                {"error": "r2v requires at least one reference image or video"},
+                status=400,
             )
     else:
         if fields.get("_first_frame_data"):
@@ -234,6 +290,8 @@ async def create_video(request: web.Request) -> web.Response:
             first_frame = await _resolve_ref_image(fields["first_frame_url"])
         elif fields.get("input_reference"):
             first_frame = await _upload_input_reference(fields["input_reference"])
+        if fields.get("last_frame_url"):
+            last_frame = await _resolve_ref_image(fields["last_frame_url"])
         if task_type == "fl2va" and first_frame is None:
             return web.json_response(
                 {"error": "fl2va requires input_reference image"}, status=400
@@ -255,7 +313,9 @@ async def create_video(request: web.Request) -> web.Response:
         modality="video",
         params={"seconds": seconds},
         first_frame=first_frame,
+        last_frame=last_frame,
         ref_images=ref_images,
+        ref_videos=ref_videos,
         speed=speed,
         created_at=time.time(),
     )
@@ -282,18 +342,20 @@ def _parse_content_items(body: dict) -> dict:
     Accepts the industry-standard media array (OpenAI Responses input items,
     MiniMax V2 content[]): items with type=input_text contribute prompt text;
     items with type=input_image carry image_url plus an optional role
-    (reference_image | first_frame | last_frame).
+    (reference_image | first_frame | last_frame); type=input_video carries
+    video_url and is treated as a reference video.
 
     Returns a normalized dict with keys: prompt, ref_image_urls (list),
-    first_frame_url (str|None), last_frame_url (str|None).
+    ref_video_urls (list), first_frame_url (str|None), last_frame_url (str|None).
     """
     items = body.get("input") or body.get("content") or []
     if not isinstance(items, list):
-        return {"prompt": None, "ref_image_urls": [], "first_frame_url": None,
-                "last_frame_url": None}
+        return {"prompt": None, "ref_image_urls": [], "ref_video_urls": [],
+                "first_frame_url": None, "last_frame_url": None}
 
     texts: list = []
     ref_urls: list = []
+    ref_video_urls: list = []
     first_frame_url = None
     last_frame_url = None
     for item in items:
@@ -317,9 +379,16 @@ def _parse_content_items(body: dict) -> dict:
                 last_frame_url = url
             else:
                 ref_urls.append(url)
+        elif itype in ("input_video", "video_url"):
+            url = item.get("video_url") or item.get("url")
+            if isinstance(url, dict):
+                url = url.get("url")
+            if url:
+                ref_video_urls.append(url)
     return {
         "prompt": "\n".join(texts) if texts else None,
         "ref_image_urls": ref_urls,
+        "ref_video_urls": ref_video_urls,
         "first_frame_url": first_frame_url,
         "last_frame_url": last_frame_url,
     }
@@ -335,21 +404,27 @@ async def _parse_multipart(request: web.Request):
     reader = MultipartReader.from_response(request)
     fields: dict = {}
     ref_images_data: list = []
+    ref_videos_data: list = []
     while True:
         part = await reader.next()
         if part is None:
             break
-        if part.headers.get("Content-Type", "").startswith(("image/", "video/")):
+        content_type = part.headers.get("Content-Type", "")
+        if content_type.startswith("image/"):
             data = await part.read()
             ref_images_data.append(data)
             if not fields.get("_first_frame_data"):
                 fields["_first_frame_data"] = data
+        elif content_type.startswith("video/"):
+            ref_videos_data.append(await part.read())
         else:
             name = part.name
             value = (await part.read()).decode("utf-8", errors="replace")
             fields[name] = value
     if ref_images_data:
         fields["_ref_images_data"] = ref_images_data
+    if ref_videos_data:
+        fields["_ref_videos_data"] = ref_videos_data
     return fields
 
 
@@ -391,6 +466,39 @@ async def _save_upload(data: bytes, prefix: str) -> Optional[str]:
     """Write image bytes into ComfyUI input dir, returning the filename."""
     from ..input_assets import save_input_asset
     return save_input_asset(data, prefix)
+
+
+async def _save_video_upload(data: bytes, prefix: str) -> Optional[str]:
+    """Write video bytes into ComfyUI input dir, returning the filename."""
+    from ..input_assets import save_input_video
+    return save_input_video(data, prefix)
+
+
+async def _resolve_ref_video(ref: str) -> Optional[str]:
+    """Resolve a reference video (data URL, http(s), or input filename)."""
+    if ref.startswith("data:video/"):
+        try:
+            _, b64 = ref.split(",", 1)
+            data = base64.b64decode(b64)
+        except Exception:
+            return None
+        if len(data) > MAX_VIDEO_BYTES:
+            return None
+        return await _save_video_upload(data, "ref_video")
+    if ref.startswith("http://") or ref.startswith("https://"):
+        import httpx
+        try:
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=120.0
+            ) as client:
+                resp = await client.get(ref)
+                resp.raise_for_status()
+        except Exception:
+            return None
+        if len(resp.content) > MAX_VIDEO_BYTES:
+            return None
+        return await _save_video_upload(resp.content, "ref_video")
+    return ref or None
 
 
 async def _resolve_ref_image(ref: str) -> Optional[str]:
