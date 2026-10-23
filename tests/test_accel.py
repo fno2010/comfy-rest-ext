@@ -122,6 +122,34 @@ class TestAcceleratedWorkflow:
         )
         assert wf["1b"]["class_type"] == "TESpeedMiniMaxH3"
 
+    def test_t8_lands_with_defaults_and_overrides(self):
+        cfg = accel.parse_accel_config({
+            "block_cache": {
+                "method": "t8",
+                "params": {"residual_diff_threshold": 0.15, "cache_device": "gpu"},
+            },
+        })
+        wf = build_h3_workflow(
+            prompt="p", width=512, height=512, length=124, seed=0, accel=cfg,
+        )
+        nid = _find(wf, "MiniMaxH3BlockCacheT8")
+        assert nid is not None
+        node = wf[nid]["inputs"]
+        assert node["model"] == ["1", 0]
+        assert node["residual_diff_threshold"] == 0.15
+        assert node["cache_device"] == "gpu"
+        assert node["start_percent"] == 0.08
+        assert node["end_percent"] == 0.95
+        assert node["max_consecutive_hits"] == 2
+        assert node["metric_stride"] == 8
+        assert node["verbose"] is False
+
+    def test_t8_rejects_bad_device(self):
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "block_cache": {"method": "t8", "params": {"cache_device": "auto"}},
+            })
+
     def test_chain_connections_correct(self):
         cfg = accel.parse_accel_config({
             "block_cache": "te-speed", "attention": "sage",
