@@ -428,3 +428,11 @@ def test_nonfinite_params_rejected():
             "turbo": {"method": "turbo-v4",
                       "params": {"strength": float("nan")}},
         })
+
+
+def test_huge_integer_float_param_rejected():
+    with pytest.raises(accel.AccelConfigError):
+        accel.parse_accel_config({
+            "turbo": {"method": "turbo-v4",
+                      "params": {"strength": 10 ** 400}},
+        })
