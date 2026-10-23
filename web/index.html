@@ -142,6 +142,13 @@
     word-break: break-word; min-height: 2.9em;
   }
   .prompt.empty { color: var(--muted); font-style: italic; }
+  .refs { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 8px; }
+  .ref-item { width: 64px; color: var(--muted); font-size: 10px; text-decoration: none; }
+  .ref-item img, .ref-item video {
+    width: 64px; height: 48px; object-fit: cover; display: block;
+    border: 1px solid var(--border); border-radius: 5px; background: #000;
+  }
+  .ref-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .progress {
     height: 7px; background: #0b0f14; border-radius: 999px; overflow: hidden;
     border: 1px solid #21262d;
@@ -238,7 +245,9 @@
     border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
     background: #000;
   }
-  .ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ref-thumb img, .ref-thumb video {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
   .ref-thumb button {
     position: absolute; top: 2px; right: 2px; width: 18px; height: 18px;
     padding: 0; line-height: 1; border-radius: 50%;
@@ -419,6 +428,12 @@
       <span class="hint" id="gen-video-ref-hint"></span>
       <div id="gen-video-ref-preview" class="ref-list"></div>
     </label>
+    <label class="form-row" id="gen-video-video-row" hidden>
+      <span>Reference video(s)</span>
+      <input id="gen-video-video-files" type="file" accept="video/*" multiple>
+      <span class="hint">Up to 3 videos. Use &lt;Video 1&gt;… in the prompt.</span>
+      <div id="gen-video-video-preview" class="ref-list"></div>
+    </label>
     <div class="form-grid">
       <label>Seed
         <input id="gen-seed" type="number" min="0" value="0">
@@ -470,6 +485,7 @@
     generateMode: "image",
     imageRefs: [],
     videoRefs: [],
+    referenceVideos: [],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -503,6 +519,28 @@
         previewUrls.delete(file);
       }
     }
+  }
+
+  function renderVideoRefList(containerId, files, onRemove) {
+    const container = $(containerId);
+    container.replaceChildren();
+    files.forEach((file, index) => {
+      const thumb = document.createElement("div");
+      thumb.className = "ref-thumb";
+      const video = document.createElement("video");
+      video.src = previewUrl(file);
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.title = file.name || "";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.title = "Remove";
+      remove.addEventListener("click", () => onRemove(index));
+      thumb.append(video, remove);
+      container.append(thumb);
+    });
   }
 
   function renderRefList(containerId, files, onRemove) {
@@ -539,6 +577,13 @@
     renderRefList("gen-video-ref-preview", [], () => {});
   }
 
+  function clearReferenceVideos() {
+    releaseRefs(state.referenceVideos);
+    state.referenceVideos = [];
+    $("gen-video-video-files").value = "";
+    renderVideoRefList("gen-video-video-preview", [], () => {});
+  }
+
   function removeImageRef(index) {
     const [removed] = state.imageRefs.splice(index, 1);
     if (removed) releaseRefs([removed]);
@@ -549,6 +594,14 @@
     const [removed] = state.videoRefs.splice(index, 1);
     if (removed) releaseRefs([removed]);
     renderRefList("gen-video-ref-preview", state.videoRefs, removeVideoRef);
+  }
+
+  function removeReferenceVideo(index) {
+    const [removed] = state.referenceVideos.splice(index, 1);
+    if (removed) releaseRefs([removed]);
+    renderVideoRefList(
+      "gen-video-video-preview", state.referenceVideos, removeReferenceVideo
+    );
   }
 
   function setImageRefs(files) {
@@ -563,9 +616,24 @@
     renderRefList("gen-video-ref-preview", state.videoRefs, removeVideoRef);
   }
 
+  function setReferenceVideos(files) {
+    releaseRefs(state.referenceVideos);
+    state.referenceVideos = Array.from(files || []).slice(0, 3);
+    renderVideoRefList(
+      "gen-video-video-preview", state.referenceVideos, removeReferenceVideo
+    );
+  }
+
   function modelSupportsEdit(modelId) {
     const model = state.catalog.find((item) => item.id === modelId);
     return Boolean(model && (model.capabilities || []).includes("edit"));
+  }
+
+  function modelSupportsReferenceVideo(modelId) {
+    const model = state.catalog.find((item) => item.id === modelId);
+    return Boolean(
+      model && (model.capabilities || []).includes("reference_video")
+    );
   }
 
   function updateRefControls() {
@@ -585,7 +653,11 @@
     $("gen-video-ref-hint").textContent =
       mode === "fl2va"
         ? "One image used as the first frame."
-        : "Images are reference slots; use <Picture 1>… in the prompt.";
+        : "Images use <Picture N>; videos use <Video N>.";
+    const supportsVideoRefs = videoMode && mode === "r2v"
+      && modelSupportsReferenceVideo($("gen-model").value);
+    $("gen-video-video-row").hidden = !supportsVideoRefs;
+    if (!supportsVideoRefs && state.referenceVideos.length) clearReferenceVideos();
     if (!usesRefs && state.videoRefs.length) clearVideoRefs();
     if (mode === "fl2va" && state.videoRefs.length > 1) {
       releaseRefs(state.videoRefs.slice(1));
@@ -637,6 +709,20 @@
       created_at: task.created_at,
       completed_at: task.completed_at,
       error: task.error,
+      refs: [
+        ...(task.reference_image_urls || []).map((url, index) => ({
+          kind: "image", url, label: `Image ${index + 1}`,
+        })),
+        ...(task.reference_video_urls || []).map((url, index) => ({
+          kind: "video", url, label: `Video ${index + 1}`,
+        })),
+        ...(task.first_frame_url
+          ? [{ kind: "image", url: task.first_frame_url, label: "First frame" }]
+          : []),
+        ...(task.last_frame_url
+          ? [{ kind: "image", url: task.last_frame_url, label: "Last frame" }]
+          : []),
+      ],
       media: task.view_url ? [task.view_url] : [],
       json_url: "/v1/videos/" + encodeURIComponent(task.id),
     };
@@ -661,6 +747,7 @@
       created_at: task.created_at,
       completed_at: task.completed_at,
       error: task.error,
+      refs: [],
       media: task.view_urls || [],
       json_url: "/v2/extension/image/" + encodeURIComponent(task.id),
     };
@@ -717,6 +804,7 @@
         <span class="badge"></span>
       </div>
       <p class="prompt"></p>
+      <div class="refs" hidden></div>
       <div class="progress"><i></i></div>
       <div class="meta"></div>
       <div class="error" hidden></div>
@@ -731,6 +819,8 @@
       model: el.querySelector(".model"),
       badge: el.querySelector(".badge"),
       prompt: el.querySelector(".prompt"),
+      refs: el.querySelector(".refs"),
+      refsSig: null,
       progress: el.querySelector(".progress > i"),
       meta: el.querySelector(".meta"),
       error: el.querySelector(".error"),
@@ -752,6 +842,33 @@
     card.badge.className = "badge " + cls;
     card.prompt.textContent = task.prompt || "(no prompt)";
     card.prompt.classList.toggle("empty", !task.prompt);
+    const refsSig = (task.refs || []).map((ref) => ref.kind + ":" + ref.url).join("|");
+    if (refsSig !== card.refsSig) {
+      card.refsSig = refsSig;
+      card.refs.replaceChildren();
+      card.refs.hidden = !(task.refs || []).length;
+      for (const ref of task.refs || []) {
+        const link = document.createElement("a");
+        link.className = "ref-item";
+        link.href = ref.url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        const node = document.createElement(ref.kind === "video" ? "video" : "img");
+        node.src = ref.url;
+        if (ref.kind === "video") {
+          node.muted = true;
+          node.preload = "metadata";
+          node.playsInline = true;
+        } else {
+          node.loading = "lazy";
+          node.alt = ref.label;
+        }
+        const label = document.createElement("span");
+        label.textContent = ref.label;
+        link.append(node, label);
+        card.refs.append(link);
+      }
+    }
     card.progress.style.width = Math.max(0, Math.min(100, task.progress || 0)) + "%";
 
     const meta = [];
@@ -1107,7 +1224,10 @@
   function setGenerateMode(mode) {
     state.generateMode = mode;
     if (mode !== "image") clearImageRefs();
-    if (mode !== "video") clearVideoRefs();
+    if (mode !== "video") {
+      clearVideoRefs();
+      clearReferenceVideos();
+    }
     document.querySelectorAll("#generate-tabs button").forEach((button) => {
       button.classList.toggle("active", button.dataset.mode === mode);
     });
@@ -1123,6 +1243,7 @@
   async function openGenerate(mode) {
     clearImageRefs();
     clearVideoRefs();
+    clearReferenceVideos();
     setGenerateMode(mode);
     $("generate-dialog").showModal();
     try {
@@ -1177,6 +1298,7 @@
     const videoMode = $("gen-video-mode").value;
     const imageRefs = state.imageRefs.slice();
     const videoRefs = state.videoRefs.slice();
+    const referenceVideos = state.referenceVideos.slice();
     let url;
     let headers = {};
     let body;
@@ -1232,11 +1354,17 @@
         body = JSON.stringify(payload);
       }
     } else {
-      if (videoMode !== "t2va" && !videoRefs.length) {
+      if (videoMode === "r2v" && referenceVideos.length
+          && !modelSupportsReferenceVideo(model)) {
+        showGenerateError("this model does not support reference video");
+        return;
+      }
+      if (videoMode !== "t2va" && !videoRefs.length
+          && !(videoMode === "r2v" && referenceVideos.length)) {
         showGenerateError(
           videoMode === "fl2va"
             ? "first frame image is required"
-            : "at least one reference image is required"
+            : "at least one reference image or video is required"
         );
         return;
       }
@@ -1258,6 +1386,11 @@
         videoRefs.forEach((file, index) => {
           form.append("image", file, file.name || `ref_${index + 1}.png`);
         });
+        if (videoMode === "r2v") {
+          referenceVideos.forEach((file, index) => {
+            form.append("video", file, file.name || `ref_${index + 1}.mp4`);
+          });
+        }
         url = "/v1/videos";
         body = form;
       } else {
@@ -1372,6 +1505,9 @@
   });
   $("gen-video-files").addEventListener("change", (event) => {
     setVideoRefs(event.target.files);
+  });
+  $("gen-video-video-files").addEventListener("change", (event) => {
+    setReferenceVideos(event.target.files);
   });
   $("gen-video-mode").addEventListener("change", updateRefControls);
   $("generate-form").addEventListener("submit", submitGenerate);

@@ -468,6 +468,7 @@ EXCLUDED_ROUTES = {
     ("GET", "/v2/extension/video"),
     ("POST", "/v2/extension/video/generate"),
     ("GET", "/v2/extension/video/{task_id}"),
+    ("GET", "/v2/extension/video/{video_id}/assets/{kind}/{index}"),
     ("POST", "/v2/extension/image/generate"),
 }
 
@@ -672,3 +673,56 @@ def test_deps_install_sync_non_success_exit(monkeypatch, result):
         assert commands.cmd_deps_install(
             client, Args(json=True, workflow=f.name, sync=True)
         ) == 1
+
+
+def test_build_video_request_video_reference(tmp_path):
+    video = tmp_path / "ref.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"x" * 32)
+    req = commands._build_video_request(Args(
+        prompt="use <Video 1>", image=None, video=[str(video)], model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+    ))
+    assert req["input"][0] == {"type": "input_text", "text": "use <Video 1>"}
+    item = req["input"][1]
+    assert item["type"] == "input_video"
+    assert item["video_url"].startswith("data:video/mp4;base64,")
+
+
+def test_cmd_generate_multipart_video(tmp_path, capsys):
+    client = FakeClient()
+    video = tmp_path / "ref.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"x" * 32)
+    args = Args(
+        json=True, prompt="p", image=None, video=[str(video)], model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+        steps=None, turbo=None, block_cache=None, step_cache=None,
+        attention=None, vae_decode=None, multipart=True,
+    )
+    assert commands.cmd_generate(client, args) == 0
+    kind, payload, files = client.calls[-1]
+    assert kind == "video-multipart"
+    assert files[0][0] == "video"
+    assert files[0][1] == "ref.mp4"
+
+
+def test_media_type_guessing():
+    from cli.client import _guess_media_type
+    assert _guess_media_type("a.mp4") == "video/mp4"
+    assert _guess_media_type("a.webm") == "video/webm"
+    assert _guess_media_type("a.png") == "image/png"
+    assert _guess_media_type("a.m4v", "video") == "video/mp4"
+    assert _guess_media_type("a.tiff", "input_reference") == "image/png"
+
+
+def test_build_video_request_single_image_with_video_is_reference(tmp_path):
+    image = tmp_path / "ref.png"
+    image.write_bytes(b"PNGDATA")
+    video = tmp_path / "ref.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"x" * 16)
+    req = commands._build_video_request(Args(
+        prompt="<Picture 1> <Video 1>", image=[str(image)],
+        video=[str(video)], model=None, width=None, height=None,
+        seconds=None, seed=None, speed=None,
+    ))
+    image_item = next(i for i in req["input"] if i["type"] == "input_image")
+    assert image_item["role"] == "reference_image"

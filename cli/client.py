@@ -31,9 +31,25 @@ _IMAGE_TYPES = {
 }
 
 
+_VIDEO_TYPES = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+}
+
+
 def _guess_image_type(filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
     return _IMAGE_TYPES.get(ext, "image/png")
+
+
+def _guess_media_type(filename: str, field: str = "") -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    if field == "video":
+        return _VIDEO_TYPES.get(ext, "video/mp4")
+    return _VIDEO_TYPES.get(ext) or _IMAGE_TYPES.get(ext, "image/png")
 
 
 class ApiError(Exception):
@@ -187,7 +203,7 @@ class ComfyRestClient:
                     f"--{boundary}\r\n"
                     f'Content-Disposition: form-data; name="{file_field}"; '
                     f'filename="{filename}"\r\n'
-                    f"Content-Type: {_guess_image_type(filename)}\r\n\r\n"
+                    f"Content-Type: {_guess_media_type(filename, file_field)}\r\n\r\n"
                 ).encode("utf-8")
             )
             parts.append(file_bytes)

@@ -143,7 +143,9 @@ def build_h3_workflow(
     length: int,
     seed: int,
     first_frame_path: Optional[str] = None,
+    last_frame_path: Optional[str] = None,
     ref_images: Optional[list] = None,
+    ref_videos: Optional[list] = None,
     diffusion_model: str = "minimax_h3_fl2va_pruned_nvfp4.safetensors",
     text_encoder: str = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
     video_vae: str = "minimax_h3_video_vae_fp16.safetensors",
@@ -174,8 +176,8 @@ def build_h3_workflow(
         workflow[nid] = {"class_type": class_type, "inputs": inputs}
         return nid
 
-    is_r2v = bool(ref_images)
-    unet = ref2va_model if is_r2v else diffusion_model
+    is_ref = bool(ref_images or ref_videos)
+    unet = ref2va_model if is_ref else diffusion_model
     add("1", "UNETLoader", {
         "unet_name": unet,
         "weight_dtype": "default",
@@ -196,7 +198,7 @@ def build_h3_workflow(
     })
 
     nid = 6
-    if is_r2v:
+    if is_ref:
         cond_inputs: Dict[str, Any] = {
             "clip": ["2", 0],
             "vae": ["3", 0],
@@ -213,6 +215,18 @@ def build_h3_workflow(
             ref_slots[f"ref_images.ref_image_{i}"] = [str(nid), 0]
             nid += 1
         cond_inputs.update(ref_slots)
+        audio_slots: Dict[str, Any] = {}
+        for i, ref in enumerate(ref_videos or []):
+            load_id = str(nid)
+            add(load_id, "LoadVideo", {"file": ref})
+            nid += 1
+            components_id = str(nid)
+            add(components_id, "GetVideoComponents", {"video": [load_id, 0]})
+            nid += 1
+            ref_slots[f"ref_videos.ref_video_{i}"] = [components_id, 0]
+            audio_slots[f"ref_video_audios.ref_video_audio_{i}"] = [components_id, 1]
+        cond_inputs.update(ref_slots)
+        cond_inputs.update(audio_slots)
         cond_node = str(nid)
         add(cond_node, "MiniMaxH3ReferenceToVideo", cond_inputs)
     else:
@@ -227,6 +241,10 @@ def build_h3_workflow(
         if first_frame_path:
             cond_inputs["first_frame"] = [str(nid), 0]
             add(str(nid), "LoadImage", {"image": first_frame_path})
+            nid += 1
+        if last_frame_path:
+            cond_inputs["last_frame"] = [str(nid), 0]
+            add(str(nid), "LoadImage", {"image": last_frame_path})
             nid += 1
         cond_node = str(nid)
         add(cond_node, "MiniMaxH3ImageToVideo", cond_inputs)
@@ -287,13 +305,13 @@ def build_h3_task(task: Any) -> BuildResult:
     else:
         steps = int(os.environ.get("H3_STEPS") or params.get("steps", 20))
 
-    is_r2v = bool(task.ref_images)
+    is_ref = bool(task.ref_images or task.ref_videos)
     unet = resolve_asset(
         task,
-        "ref2va" if is_r2v else "unet",
-        "H3_REF2VA_MODEL" if is_r2v else "H3_UNET",
+        "ref2va" if is_ref else "unet",
+        "H3_REF2VA_MODEL" if is_ref else "H3_UNET",
         "minimax_h3_ref2va_pruned_nvfp4.safetensors"
-        if is_r2v else "minimax_h3_fl2va_pruned_nvfp4.safetensors",
+        if is_ref else "minimax_h3_fl2va_pruned_nvfp4.safetensors",
     )
     text_encoder = resolve_asset(
         task, "text_encoder", "H3_TEXT_ENCODER",
@@ -327,7 +345,9 @@ def build_h3_task(task: Any) -> BuildResult:
         length=task.length,
         seed=task.seed,
         first_frame_path=task.first_frame,
+        last_frame_path=task.last_frame,
         ref_images=task.ref_images,
+        ref_videos=task.ref_videos,
         diffusion_model=unet,
         text_encoder=text_encoder,
         video_vae=video_vae,

@@ -186,6 +186,9 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
                     files.append(
                         ("input_reference", os.path.basename(path), f.read())
                     )
+            for path in getattr(args, "video", None) or []:
+                with open(path, "rb") as f:
+                    files.append(("video", os.path.basename(path), f.read()))
             task = client.create_video_multipart(payload, files)
         else:
             task = client.create_video(_build_video_request(args))
@@ -206,17 +209,19 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
     """Build a content[]/input[] video request (industry-standard format).
 
     Text goes into an input_text item; uploaded images become input_image
-    items. A single image is a first_frame (I2V); multiple images are
-    reference_image items (R2V) referenced via <Picture N> tags.
+    items. A single image is a first_frame (I2V) unless reference videos are
+    also supplied; multiple images or any video make images reference_image
+    items (R2V) referenced via <Picture N> / <Video N> tags.
     """
     payload = _build_video_payload(args)
     items: list = [{"type": "input_text", "text": args.prompt}]
     images = getattr(args, "image", None) or []
+    videos = getattr(args, "video", None) or []
     if isinstance(images, str):
         images = [images]
     if images:
         model = getattr(args, "model", None)
-        if len(images) > 1 or (model and model.endswith("-r2v")):
+        if len(images) > 1 or (model and model.endswith("-r2v")) or videos:
             role = "reference_image"
         else:
             role = "first_frame"
@@ -230,6 +235,15 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
                 "image_url": f"data:image/{ext};base64,{b64}",
                 "role": role,
             })
+    for vid in videos:
+        with open(vid, "rb") as f:
+            data = f.read()
+        ext = os.path.splitext(vid)[1].lower().lstrip(".") or "mp4"
+        b64 = base64.b64encode(data).decode("ascii")
+        items.append({
+            "type": "input_video",
+            "video_url": f"data:video/{ext};base64,{b64}",
+        })
     payload["input"] = items
     payload.pop("prompt", None)
     return payload
@@ -255,6 +269,13 @@ def cmd_status(client: ComfyRestClient, args: Any) -> int:
     print(f"model:     {task.get('model', '')}")
     print(f"size:      {task.get('size', '')}")
     print(f"seconds:   {task.get('seconds', '')}")
+    for key in ("reference_images", "reference_videos",
+                "first_frame", "last_frame"):
+        if task.get(key):
+            value = task[key]
+            if isinstance(value, list):
+                value = ", ".join(value)
+            print(f"{key + ':':<18} {value}")
     if task.get("error"):
         print(f"error:     {task['error'].get('message', task['error'])}")
     if task.get("view_url"):

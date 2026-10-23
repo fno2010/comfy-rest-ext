@@ -118,3 +118,31 @@ def test_save_different_bytes_distinct_files(fake_fp):
     b = input_assets.save_input_asset(_image_bytes("JPEG"), "ref_image")
     assert a != b
     assert len(os.listdir(fake_fp._input_dir)) == 2
+
+
+def _mp4_bytes(payload=b"x"):
+    return b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 8 + payload
+
+
+def test_save_video_uses_mp4_extension(fake_fp):
+    data = _mp4_bytes()
+    filename = input_assets.save_input_video(data, "ref_video")
+    expected = f"ref_video_{hashlib.sha256(data).hexdigest()[:16]}.mp4"
+    assert filename == expected
+    assert os.path.exists(os.path.join(fake_fp._input_dir, filename))
+
+
+def test_save_video_sniffs_webm_and_avi(fake_fp):
+    webm = input_assets.save_input_video(b"\x1a\x45\xdf\xa3rest", "ref_video")
+    avi = input_assets.save_input_video(b"RIFF\x00\x00\x00\x00AVI rest", "ref_video")
+    assert webm.endswith(".webm")
+    assert avi.endswith(".avi")
+
+
+def test_save_video_dedupes(fake_fp):
+    data = _mp4_bytes(b"same")
+    first = input_assets.save_input_video(data, "ref_video")
+    second = input_assets.save_input_video(data, "ref_video")
+    assert first == second
+    assert len(os.listdir(fake_fp._input_dir)) == 1
+    assert input_assets.save_input_video(b"", "ref_video") is None

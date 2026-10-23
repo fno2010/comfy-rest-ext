@@ -4,7 +4,7 @@ ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 R
 
 ## 功能
 
-- **OpenAI 兼容视频生成 API** — T2V / I2V / R2V 生成、任务持久化、历史查询（MiniMax-H3）
+- **OpenAI 兼容视频生成 API** — T2V / I2V / R2V（图像或视频参考）生成、任务持久化、历史查询（MiniMax-H3）
 - **OpenAI 兼容图片生成 API** — 同步 `/v1/images/generations`、Qwen-Image 2.1 编辑、Anima/Qwen-Image 2.1 模型目录
 - **任务面板** — 单页 Web UI，显示视频/图片任务列表、进度、错误和生成结果，并可直接通过 OpenAI 兼容端点提交图片/视频任务
 - **模型下载** — 从 CivitAI、HuggingFace、直链下载模型到本地
@@ -50,7 +50,7 @@ http://<host>:8188/v2/extension/ui
 - 分页、每页数量、按状态/类型/模型筛选、搜索、排序
 - Models 弹窗直接读取 `/v1/models`，以卡片展示并支持一键筛选，不跳转 JSON
 - `+ Image` / `+ Video` 弹窗直接提交生成任务：图片走 `POST /v1/images/generations` + `Prefer: respond-async`，视频走 `POST /v1/videos`；提交后任务立即进入列表并可跟踪进度
-- 参考图：Qwen-Image 2.1 的 image edit 支持 1–16 张参考图；视频支持 `First frame (I2V)` 单图和 `Reference images (R2V)` 多图。参考视频暂不支持（见 #23）
+- 参考输入：Qwen-Image 2.1 的 image edit 支持 1–16 张参考图；视频支持 `First frame (I2V)` 单图、`Reference images (R2V)` 多图，以及 H3 的参考视频（`reference_video` capability，最多 3 个，prompt 用 `<Video N>`）。
 
 面板只请求扩展自身和 OpenAI 兼容端点：
 
@@ -127,7 +127,7 @@ GET /v2/extension/image/{id}/content?index=N
 | `defaults` | 覆盖模型默认参数（图片：steps/cfg/sampler/scheduler/negative_prompt/n/seed/lora_strength，qwen_image_21 另支持 resolution；视频：width/height/seconds/steps/sampler/scheduler/seed/ref_image_size） |
 | `assets` | 模型文件名；键随 builder 不同（见下） |
 | `size` | 图片模型必需；字段对应 `SizePolicy`，覆盖时与现有策略合并 |
-| `capabilities` | 如 `negative_prompt` / `n` / `seed` / `alpha` / `edit` |
+| `capabilities` | 如 `negative_prompt` / `n` / `seed` / `alpha` / `edit` / `reference_video` |
 | `variant` | `base` 或 `turbo`；仅图片 builder 使用（`h3` 只接受 `base`），显式设置优先于内置 turbo id 回退，否则 `turbo_unet` / `turbo_lora` 不会被使用 |
 | `max_n` / `timeout_s` / `output_mime` / `description` | 请求上限、任务超时、输出 MIME、模型说明 |
 
@@ -183,6 +183,8 @@ comfy-rest-ext-cli videos generate "a cat walking on the moon"
 comfy-rest-ext-cli videos generate "make it cinematic" --image ref.png
 comfy-rest-ext-cli videos generate "Use <Picture 1> as style" \
   --image ref1.png --image ref2.png
+comfy-rest-ext-cli videos generate "Use <Video 1> as motion reference" \
+  --video ref.mp4 --multipart
 comfy-rest-ext-cli videos status video_xxxx
 comfy-rest-ext-cli videos list
 comfy-rest-ext-cli videos wait video_xxxx --timeout 300
