@@ -222,7 +222,7 @@ comfy-rest-ext-cli --timeout 120 models all
 comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
 ```
 
-`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy `--speed` 字符串，不支持 composable `--steps/--turbo/...` 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
+`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy `--speed` 字符串，不支持 composable `--steps/--turbo/...` 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。CLI 的加速参数目前只选择方法并使用内置默认参数；per-method `params` 需要通过 `/v1/videos` 的 JSON `speed` 对象传入（CLI flags 将在 P1.5b 补齐）。
 
 环境变量：`COMFY_REST_EXT_BASE_URL`（默认 `http://127.0.0.1:8188`）、`COMFY_REST_EXT_TIMEOUT`（默认 `60`）。
 

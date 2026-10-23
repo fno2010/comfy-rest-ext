@@ -154,3 +154,115 @@ class TestNodeAvailability:
             assert isinstance(nodes, tuple) and len(nodes) >= 1
             for n in nodes:
                 assert isinstance(n, str) and n
+
+
+class TestMethodRegistry:
+    def test_registry_covers_dimension_options(self):
+        for dimension, options in (
+            ("turbo", accel.TURBO_OPTIONS),
+            ("attention", accel.ATTENTION_OPTIONS),
+            ("block_cache", accel.BLOCK_CACHE_OPTIONS),
+            ("step_cache", accel.STEP_CACHE_OPTIONS),
+        ):
+            assert options[0] == "none"
+            for method_id in options[1:]:
+                method = accel.get_method(method_id)
+                assert method is not None
+                assert method.dimension == dimension
+
+    def test_nested_params_override_defaults(self):
+        cfg = accel.parse_accel_config({
+            "block_cache": {
+                "method": "fbc",
+                "params": {"threshold": 0.2, "start_step": 3},
+            },
+        })
+        assert cfg.block_cache == "fbc"
+        assert cfg.params == {"block_cache": {"threshold": 0.2, "start_step": 3}}
+        wf = build_h3_workflow(
+            prompt="p", width=512, height=512, length=124, seed=0, accel=cfg,
+        )
+        node = wf[_find(wf, "H3FirstBlockCache")]["inputs"]
+        assert node["threshold"] == 0.2
+        assert node["start_step"] == 3
+        # Unspecified parameters keep the registry defaults.
+        assert node["end_dense_steps"] == 2
+        assert cfg.as_dict()["params"]["block_cache"]["threshold"] == 0.2
+
+    def test_nested_none_has_no_params(self):
+        cfg = accel.parse_accel_config({"attention": {"method": "none"}})
+        assert cfg.attention == "none"
+        assert cfg.params == {}
+
+    def test_unknown_param_rejected(self):
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "block_cache": {"method": "fbc", "params": {"bogus": 1}},
+            })
+
+    def test_wrong_dimension_method_rejected(self):
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "attention": {"method": "fbc"},
+            })
+
+    def test_param_type_and_range_rejected(self):
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "block_cache": {"method": "fbc", "params": {"threshold": -1}},
+            })
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "block_cache": {"method": "fbc", "params": {"start_step": 1.5}},
+            })
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "attention": {"method": "sol", "params": {"enabled": "yes"}},
+            })
+
+    def test_unimplemented_method_is_rejected_at_build(self):
+        cfg = accel.parse_accel_config({"block_cache": "cachedit"})
+        assert "not implemented" in accel.check_option_available(
+            "block_cache", "cachedit"
+        )
+        with pytest.raises(ValueError):
+            build_h3_workflow(
+                prompt="p", width=512, height=512, length=124, seed=0,
+                accel=cfg,
+            )
+
+    def test_new_method_registers_without_builder_change(self):
+        import api.accel as api_accel
+
+        saved = dict(api_accel._METHODS)
+        try:
+            def apply(workflow, add, model_out, params, alloc, context):
+                nid = alloc()
+                add(nid, "TestCacheNode", {"model": model_out, **params})
+                return [nid, 0]
+
+            api_accel.register_method(api_accel.AccelMethod(
+                id="test-cache",
+                dimension="step_cache",
+                required_nodes=("TestCacheNode",),
+                params_schema={
+                    "gain": api_accel.ParamSpec(float, 0.5, 0.0, 1.0)
+                },
+                apply=apply,
+            ))
+            cfg = api_accel.parse_accel_config({
+                "step_cache": {
+                    "method": "test-cache",
+                    "params": {"gain": 0.75},
+                },
+            })
+            wf = build_h3_workflow(
+                prompt="p", width=512, height=512, length=124, seed=0,
+                accel=cfg,
+            )
+            node_id = _find(wf, "TestCacheNode")
+            assert wf[node_id]["inputs"]["gain"] == 0.75
+            assert wf["5"]["inputs"]["model"] == [node_id, 0]
+        finally:
+            api_accel._METHODS.clear()
+            api_accel._METHODS.update(saved)
