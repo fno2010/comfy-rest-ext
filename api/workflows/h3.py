@@ -22,6 +22,23 @@ H3_PHASE_WEIGHTS = {
     "save": 0.07,
 }
 
+# DaSiWa's block-stack cache outputs near-silent audio on 56-frame clips
+# (2s request) once any cache hit occurs. 39 frames (1.625s) is the last
+# verified-good length. Remove this guard when the upstream node preserves
+# audio residuals on longer clips.
+DASIWA_MAX_FRAMES = 39
+
+
+def check_task_compat(accel: AccelConfig, length: int) -> Optional[str]:
+    """Return a user-facing error for a known-broken acceleration/length pair."""
+    if accel.block_cache == "dasiwa" and length > DASIWA_MAX_FRAMES:
+        return (
+            "dasiwa cache is disabled for H3 clips longer than 39 frames "
+            "(1.625s): its audio residual collapses to near-silence on longer "
+            "clips; use block_cache=fbc/t8 or a shorter clip"
+        )
+    return None
+
 
 def frames_for_seconds(seconds: float) -> int:
     """Convert seconds to H3 frame count on the 17k+5 grid at 24 fps.
@@ -221,6 +238,9 @@ def _accel_layer_snapshot(accel_cfg, layer: str, **extra: Any) -> Dict[str, Any]
 def build_h3_task(task: Any) -> BuildResult:
     """Build an H3 workflow from a generic GenerationTask."""
     accel_cfg = parse_accel_config(task.speed)
+    compat_error = check_task_compat(accel_cfg, task.length)
+    if compat_error:
+        raise ValueError(compat_error)
     missing_node = check_config_available(accel_cfg)
     if missing_node:
         raise ValueError(missing_node)

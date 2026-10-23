@@ -24,6 +24,7 @@ def _load_module(name, rel_path):
 accel = _load_module("comfy_rest_ext_accel", "api/accel.py")
 
 from api.tasks.video_task import build_h3_workflow  # noqa: E402
+from api.workflows.h3 import check_task_compat  # noqa: E402
 
 
 def _find(wf, class_type):
@@ -170,6 +171,14 @@ class TestAcceleratedWorkflow:
             accel.parse_accel_config({
                 "block_cache": {"method": "dasiwa", "params": {"device": "gpu"}},
             })
+
+    def test_dasiwa_long_clip_guard(self):
+        cfg = accel.parse_accel_config({"block_cache": "dasiwa"})
+        assert check_task_compat(cfg, 39) is None
+        error = check_task_compat(cfg, 56)
+        assert "longer than 39" in error
+        fbc = accel.parse_accel_config({"block_cache": "fbc"})
+        assert check_task_compat(fbc, 56) is None
 
     def test_t8_rejects_bad_device(self):
         with pytest.raises(accel.AccelConfigError):

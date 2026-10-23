@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 
@@ -341,3 +342,17 @@ async def test_video_asset_endpoint_rejects_traversal(monkeypatch, tmp_path):
 
     response = await v1.get_video_asset(Request())
     assert response.status == 404
+
+
+@pytest.mark.asyncio
+async def test_route_rejects_dasiwa_long_clip():
+    import api.openai.v1 as v1
+
+    response = await v1.create_video(_Request({
+        "model": "minimax-h3",
+        "prompt": "a cat",
+        "seconds": 2,
+        "speed": {"block_cache": "dasiwa"},
+    }))
+    assert response.status == 400
+    assert "longer than 39" in json.loads(response.text)["error"]
