@@ -146,3 +146,35 @@ def test_task_summaries_expose_params_and_acceleration():
     summary = _image_task_summary(image)
     assert summary["params"] == {"steps": 8, "cfg": 2.0}
     assert summary["acceleration"] is None
+
+
+def test_video_params_sampler_matches_resolved_acceleration():
+    from api.openai.v1 import _video_response
+    from api.tasks.video_task import GenerationTask
+
+    task = GenerationTask(
+        task_id="v", status="completed", prompt="p", task_type="t2va",
+        width=512, height=512, length=39, seed=1,
+        params={"sampler": "dpmpp_2m", "scheduler": "karras", "steps": 20},
+        acceleration={"steps": 4, "sampler": "euler", "scheduler": "simple"},
+    )
+    params = _video_response(task)["params"]
+    assert params["sampler"] == "euler"
+    assert params["scheduler"] == "simple"
+    assert params["steps"] == 4
+
+
+def test_image_summary_sanitizes_legacy_nonfinite_params():
+    import json
+    from api.openai.images import _image_task_summary
+    from api.tasks.video_task import GenerationTask
+
+    task = GenerationTask(
+        task_id="i", status="completed", prompt="p", task_type="t2i",
+        width=512, height=512, length=1, seed=1,
+        params={"cfg": float("inf"), "nested": {"x": float("nan")}},
+    )
+    summary = _image_task_summary(task)
+    assert summary["params"]["cfg"] is None
+    assert summary["params"]["nested"]["x"] is None
+    json.dumps(summary, allow_nan=False)

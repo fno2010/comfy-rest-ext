@@ -214,3 +214,13 @@ async def test_generations_returns_b64(monkeypatch):
     assert body["size"] == "1024x1024"
     assert base64.b64decode(body["data"][0]["b64_json"]) == png_bytes
 
+
+
+def test_image_float_fields_reject_nonfinite():
+    from api.openai.images import _float_field, BadRequest
+    import pytest
+
+    with pytest.raises(BadRequest):
+        _float_field({"cfg": "nan"}, "cfg", 1.0)
+    with pytest.raises(BadRequest):
+        _float_field({"cfg": 1e400}, "cfg", 1.0)

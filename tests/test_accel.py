@@ -420,3 +420,11 @@ def test_build_task_records_resolved_acceleration(monkeypatch):
     assert accel["turbo"]["method"] == "lightx2v-4step-v1.3"
     assert accel["turbo"]["params"]["lora_name"].endswith(".safetensors")
     assert accel["vae_decode"] == {"method": "default", "applied": False}
+
+
+def test_nonfinite_params_rejected():
+    with pytest.raises(accel.AccelConfigError):
+        accel.parse_accel_config({
+            "turbo": {"method": "turbo-v4",
+                      "params": {"strength": float("nan")}},
+        })

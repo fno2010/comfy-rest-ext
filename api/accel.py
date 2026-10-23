@@ -18,6 +18,7 @@ Dimensions:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
@@ -382,6 +383,8 @@ def _validate_params(method: AccelMethod, params: Mapping[str, Any]) -> None:
             raise AccelConfigError(
                 f"{method.id}.{key} must be {getattr(spec.kind, '__name__', spec.kind)}"
             )
+        if spec.kind is float and not math.isfinite(value):
+            raise AccelConfigError(f"{method.id}.{key} must be finite")
         if spec.choices is not None and value not in spec.choices:
             raise AccelConfigError(
                 f"{method.id}.{key} must be one of {list(spec.choices)}"
