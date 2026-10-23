@@ -176,8 +176,18 @@
   .media .thumbs img { cursor: zoom-in; aspect-ratio: 1; object-fit: cover; }
   .media video { max-height: 300px; }
   .card-foot { margin-top: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .card-foot a { color: var(--accent); text-decoration: none; font-size: 12px; }
-  .card-foot a:hover { text-decoration: underline; }
+  .card-foot a, .card-foot button { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .card-foot button {
+    background: none; border: 0; padding: 0; font: inherit;
+    cursor: pointer;
+  }
+  .card-foot a:hover, .card-foot button:hover { text-decoration: underline; }
+  .runtime-json {
+    margin: 0; max-width: min(760px, 86vw); max-height: 70vh; overflow: auto;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; font-size: 12px; line-height: 1.4;
+    white-space: pre-wrap; word-break: break-word;
+  }
   .empty { color: var(--muted); padding: 26px 4px; text-align: center; }
   .pager {
     display: flex; align-items: center; gap: 8px; justify-content: flex-end;
@@ -463,6 +473,15 @@
   <img id="lightbox-img" alt="">
 </dialog>
 
+<dialog id="runtime-dialog">
+  <div class="dialog-head">
+    <h2 id="runtime-title">Runtime</h2>
+    <div class="spacer"></div>
+    <button id="runtime-close" type="button">Close</button>
+  </div>
+  <pre id="runtime-json" class="runtime-json"></pre>
+</dialog>
+
 <script>
 (() => {
   "use strict";
@@ -706,6 +725,9 @@
       size: task.size || "",
       seconds: task.seconds,
       n: 0,
+      speed: task.speed || null,
+      params: task.params || {},
+      acceleration: task.acceleration || null,
       created_at: task.created_at,
       completed_at: task.completed_at,
       error: task.error,
@@ -744,6 +766,9 @@
       size: task.size || "",
       seconds: null,
       n: task.n || 1,
+      speed: task.speed || null,
+      params: task.params || {},
+      acceleration: task.acceleration || null,
       created_at: task.created_at,
       completed_at: task.completed_at,
       error: task.error,
@@ -794,6 +819,48 @@
     });
   }
 
+  function cacheLabel(cache) {
+    if (!cache || !cache.method || cache.method === "none") return "";
+    const params = cache.params || {};
+    const threshold = params.threshold ?? params.residual_diff_threshold
+      ?? params.reuse_threshold;
+    return threshold == null ? cache.method : `${cache.method} ${threshold}`;
+  }
+
+  function runtimeSummary(task) {
+    const accel = task.acceleration || {};
+    const params = task.params || {};
+    const bits = [];
+    const steps = accel.steps ?? params.steps;
+    if (steps != null) bits.push(`${steps} steps`);
+    if (accel.turbo?.method && accel.turbo.method !== "none") {
+      bits.push(`turbo ${accel.turbo.method}`);
+    }
+    const cache = cacheLabel(accel.block_cache);
+    if (cache) bits.push(`cache ${cache}`);
+    if (accel.attention?.method && accel.attention.method !== "none") {
+      bits.push(`attn ${accel.attention.method}`);
+    }
+    if (params.cfg != null) bits.push(`cfg ${params.cfg}`);
+    return bits.join(" · ");
+  }
+
+  function openRuntime(task) {
+    $("runtime-title").textContent =
+      `${task.kind === "video" ? "Video" : "Image"} ${task.id}`;
+    $("runtime-json").textContent = JSON.stringify({
+      id: task.id,
+      kind: task.kind,
+      model: task.model,
+      status: task.status,
+      speed: task.speed,
+      params: task.params,
+      acceleration: task.acceleration,
+      error: task.error,
+    }, null, 2);
+    $("runtime-dialog").showModal();
+  }
+
   function createCard(task) {
     const el = document.createElement("article");
     el.className = "card";
@@ -811,6 +878,7 @@
       <div class="media" hidden></div>
       <div class="card-foot">
         <a class="json-link" target="_blank" rel="noreferrer">JSON</a>
+        <button class="detail-link" type="button">Runtime</button>
         <a class="open-link" target="_blank" rel="noreferrer" hidden>Open output</a>
       </div>`;
     return {
@@ -875,6 +943,8 @@
     if (task.size) meta.push(`<span>size <b>${esc(task.size)}</b></span>`);
     if (task.seconds) meta.push(`<span>seconds <b>${esc(task.seconds)}</b></span>`);
     if (task.n) meta.push(`<span>n <b>${esc(task.n)}</b></span>`);
+    const runtime = runtimeSummary(task);
+    if (runtime) meta.push(`<span class="runtime">runtime <b>${esc(runtime)}</b></span>`);
     if (task.current_node && ACTIVE.has(task.status)) {
       meta.push(`<span>node <b>${esc(task.current_node)}</b> ${esc(task.node_progress)}%</span>`);
     }
@@ -1525,6 +1595,13 @@
     $("models-dialog").close();
   });
   document.addEventListener("click", (event) => {
+    const runtimeButton = event.target.closest("button.detail-link");
+    if (runtimeButton) {
+      const id = runtimeButton.closest(".card")?.dataset.id;
+      const task = allTasks().find((item) => item.id === id);
+      if (task) openRuntime(task);
+      return;
+    }
     const img = event.target.closest("img[data-full]");
     if (img) {
       event.preventDefault();
@@ -1534,6 +1611,10 @@
   });
   $("lightbox").addEventListener("click", (event) => {
     if (event.target === $("lightbox")) $("lightbox").close();
+  });
+  $("runtime-close").addEventListener("click", () => $("runtime-dialog").close());
+  $("runtime-dialog").addEventListener("click", (event) => {
+    if (event.target === $("runtime-dialog")) $("runtime-dialog").close();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
