@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 import os
 import time
 import uuid
@@ -27,7 +28,7 @@ from ..tasks.video_task import (
     submit_generation_task,
 )
 from ..tasks.video_persistence import get_video_persistence
-from .v1 import _parse_content_items, _resolve_ref_image
+from .v1 import _json_safe, _parse_content_items, _resolve_ref_image
 
 logger = logging.getLogger("comfy-rest-ext.images")
 
@@ -66,9 +67,12 @@ def _float_field(body: Dict[str, Any], key: str, default: float) -> float:
     if body.get(key) is None:
         return default
     try:
-        return float(body[key])
+        value = float(body[key])
     except (TypeError, ValueError):
         raise BadRequest(f"{key} must be a number", key) from None
+    if not math.isfinite(value):
+        raise BadRequest(f"{key} must be a finite number", key)
+    return value
 
 
 def _size_of(task: GenerationTask) -> str:
@@ -81,6 +85,9 @@ def _image_task_summary(task: GenerationTask) -> dict:
         "object": "image.generation",
         "model": task.model_id,
         "prompt": task.prompt,
+        "speed": _json_safe(task.speed),
+        "params": _json_safe(dict(task.params or {})),
+        "acceleration": _json_safe(task.acceleration),
         "status": task.status,
         "progress": int(task.progress * 100),
         "size": _size_of(task),

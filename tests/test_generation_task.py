@@ -85,3 +85,15 @@ async def test_anima_task_completes_and_resolves_output(monkeypatch):
     assert result.output_mime == "image/png"
     assert result.progress == 1.0
     assert result.done.is_set()
+
+
+def test_acceleration_snapshot_persists():
+    from api.tasks.video_task import _record_to_task, _task_to_record
+
+    task = GenerationTask(
+        task_id="t", status="queued", prompt="p", task_type="t2va",
+        width=512, height=512, length=39, seed=1,
+        acceleration={"steps": 4, "turbo": {"method": "x", "params": {}}},
+    )
+    restored = _record_to_task(_task_to_record(task))
+    assert restored.acceleration == task.acceleration

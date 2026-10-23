@@ -1003,11 +1003,31 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
   "completed_at": null,
   "media_type": "video/mp4",
   "file_name": null,
+  "speed": {"turbo": "lightx2v-4step-v1.3"},
+  "params": {"seconds": 4.458333333333333},
+  "acceleration": {
+    "steps": 4,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "shift_video": 6.0,
+    "shift_audio": 3.0,
+    "turbo": {
+      "method": "lightx2v-4step-v1.3",
+      "params": {"lora_name": "minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors", "...": "..."}
+    },
+    "attention": {"method": "none", "params": {}},
+    "block_cache": {"method": "none", "params": {}},
+    "step_cache": {"method": "none", "params": {}},
+    "vae_decode": {"method": "default", "applied": false},
+    "precision": {"values": {}, "applied": false}
+  },
   "inference_time_s": null,
   "error": null
 }
 ```
 `inference_time_s`：任务完成后为 `completed_at - created_at`（秒），否则为 `null`。
+
+`speed` 是原始请求值；`params` 是任务级参数；`acceleration` 是**解析后实际生效的配置**（方法默认值 + 请求覆盖 + 解析出的 LoRA/steps/shift/sampler）。`vae_decode` / `precision` 目前标记为 `applied: false`。图片任务摘要同样返回 `speed` / `params` / `acceleration`。
 
 **加速模式（speed 字段，可选）：**
 

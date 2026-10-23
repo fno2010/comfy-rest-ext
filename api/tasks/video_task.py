@@ -44,6 +44,7 @@ class GenerationTask:
     params: Dict[str, Any] = field(default_factory=dict)
     assets: Dict[str, str] = field(default_factory=dict)
     variant: Optional[str] = None
+    acceleration: Optional[Dict[str, Any]] = None
     first_frame: Optional[str] = None
     last_frame: Optional[str] = None
     ref_images: Optional[list] = None
@@ -143,6 +144,7 @@ def _task_to_record(task: GenerationTask) -> dict:
         "model_id": task.model_id,
         "modality": task.modality,
         "params": dict(task.params or {}),
+        "acceleration": task.acceleration,
         "first_frame": task.first_frame,
         "last_frame": task.last_frame,
         "ref_images": task.ref_images,
@@ -182,6 +184,7 @@ def _record_to_task(record: dict) -> GenerationTask:
         model_id=record.get("model_id", "minimax-h3"),
         modality=record.get("modality", "video"),
         params=dict(record.get("params") or {}),
+        acceleration=record.get("acceleration"),
         first_frame=record.get("first_frame"),
         last_frame=record.get("last_frame"),
         ref_images=record.get("ref_images"),

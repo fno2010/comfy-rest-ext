@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 import os
 import time
 import uuid
@@ -98,6 +99,17 @@ def _infer_task_type(fields: dict) -> str:
     return "t2va"
 
 
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats so responses always emit valid JSON."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _video_response(task: VideoTask) -> dict:
     """OpenAI VideoResource-shaped job record."""
     status = task.status
@@ -110,11 +122,25 @@ def _video_response(task: VideoTask) -> dict:
     if task.started_at:
         base = task.completed_at or time.time()
         elapsed_s = round(base - task.started_at, 2)
+    effective_params = _json_safe(dict(task.params or {}))
+    effective_params.update({
+        "width": task.width,
+        "height": task.height,
+        "seconds": round(task.length / 24, 6),
+    })
+    if task.acceleration:
+        for key in ("steps", "sampler", "scheduler"):
+            if task.acceleration.get(key) is not None:
+                effective_params[key] = task.acceleration[key]
+
     return {
         "id": task.task_id,
         "object": "video",
         "model": task.model_id or _model_for_task(task.task_type),
         "prompt": task.prompt,
+        "speed": _json_safe(task.speed),
+        "params": effective_params,
+        "acceleration": _json_safe(task.acceleration),
         "status": status,
         "progress": int(task.progress * 100),
         "current_node": task.current_node,
