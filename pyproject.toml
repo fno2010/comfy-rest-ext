@@ -1,6 +1,6 @@
 [project]
 name = "comfy-rest-ext"
-version = "0.6.0"
+version = "0.7.0"
 description = "ComfyUI REST API Extension - adds missing REST API endpoints"
 readme = "README.md"
 requires-python = ">=3.10"
