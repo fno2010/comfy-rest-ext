@@ -105,10 +105,6 @@ def _bool(default: bool) -> ParamSpec:
     return ParamSpec(bool, default)
 
 
-def _str(default: str) -> ParamSpec:
-    return ParamSpec(str, default)
-
-
 def _single_node(node_class: str) -> Callable:
     def apply(workflow, add, model_out, params, alloc, context):
         nid = alloc()
