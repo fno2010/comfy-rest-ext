@@ -229,6 +229,10 @@ CLI flags 选择方法并使用内置默认参数；需要 per-method params 时
 ```bash
 comfy-rest-ext-cli videos generate "a cube" \
   --speed-json '{"steps":4,"block_cache":{"method":"fbc","params":{"threshold":0.12}}}'
+
+# 4-step LightX2V Turbo LoRA（默认 4 步、shift 6/3、euler/simple）
+# 需要先将 minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors 放入 models/loras/
+comfy-rest-ext-cli videos generate "a red cube" --turbo lightx2v-4step-v1.3
 ```
 
 `--speed-json` 不能与 `--speed/--steps/--turbo/--block-cache/...` 混用；`--multipart` 模式下 composable 对象仍不支持。

@@ -33,8 +33,9 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--speed", choices=["auto", "none", "te-speed", "sol-stack"],
                         help="acceleration mode (legacy; default auto)")
     parser.add_argument("--steps", type=int, help="sampling steps")
-    parser.add_argument("--turbo", choices=["none", "turbo-v4"],
-                        help="Turbo LoRA step compression (default none)")
+    parser.add_argument("--turbo",
+                        choices=["none", "turbo-v4", "lightx2v-4step-v1.3"],
+                        help="Turbo/step-compression LoRA (default none)")
     parser.add_argument("--block-cache", choices=["none", "te-speed", "fbc", "cachedit"],
                         help="block-level cache (default none)")
     parser.add_argument("--step-cache",

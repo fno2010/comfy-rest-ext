@@ -10,6 +10,9 @@ from ..accel import (
     apply_accel_layers,
     check_config_available,
     parse_accel_config,
+    resolve_method_params,
+    resolve_steps,
+    resolve_turbo_lora,
 )
 from .base import BuildResult, require_asset, resolve_asset
 
@@ -99,10 +102,11 @@ def build_h3_workflow(
 
     model_out = _apply_accel_layers(workflow, add, ["1", 0], accel, turbo_lora)
 
+    turbo_params = resolve_method_params(accel, "turbo")
     add("5", "MiniMaxH3SigmaShift", {
         "model": model_out,
-        "shift_video": 12.0,
-        "shift_audio": 3.0,
+        "shift_video": turbo_params.get("shift_video", 12.0),
+        "shift_audio": turbo_params.get("shift_audio", 3.0),
     })
 
     nid = 6
@@ -207,11 +211,9 @@ def build_h3_task(task: Any) -> BuildResult:
         raise ValueError(missing_node)
 
     params = task.params or {}
-    explicit_steps = isinstance(task.speed, dict) and "steps" in task.speed
-    if explicit_steps:
-        steps = accel_cfg.steps
-    else:
-        steps = int(os.environ.get("H3_STEPS") or params.get("steps", 20))
+    steps = resolve_steps(
+        accel_cfg, task.speed, os.environ.get("H3_STEPS"), params.get("steps")
+    )
 
     is_ref = bool(task.ref_images or task.ref_videos)
     unet = resolve_asset(
@@ -237,6 +239,8 @@ def build_h3_task(task: Any) -> BuildResult:
         task, "turbo_lora", "H3_TURBO_LORA",
         "minimax_h3_turbo_v4_step600_ema.safetensors",
     )
+    turbo_lora = resolve_turbo_lora(accel_cfg, turbo_lora)
+    turbo_params = resolve_method_params(accel_cfg, "turbo")
 
     require_asset("diffusion_models", unet)
     require_asset("text_encoders", text_encoder)
@@ -261,8 +265,18 @@ def build_h3_task(task: Any) -> BuildResult:
         video_vae=video_vae,
         audio_vae=audio_vae,
         ref2va_model=unet,
-        sampler_name=os.environ.get("H3_SAMPLER") or params.get("sampler") or "euler",
-        scheduler=os.environ.get("H3_SCHEDULER") or params.get("scheduler") or "simple",
+        sampler_name=(
+            turbo_params.get("sampler")
+            or os.environ.get("H3_SAMPLER")
+            or params.get("sampler")
+            or "euler"
+        ),
+        scheduler=(
+            turbo_params.get("scheduler")
+            or os.environ.get("H3_SCHEDULER")
+            or params.get("scheduler")
+            or "simple"
+        ),
         steps=steps,
         accel=accel_cfg,
         ref_image_size=(

@@ -295,3 +295,60 @@ class TestParamSchemaConstraints:
         })
         assert cfg.params["block_cache"]["device"] == "gpu"
         assert cfg.params["attention"]["sage_attention"] == "sageattn3"
+
+
+class TestLightX2V:
+    def test_registered_as_turbo_variant(self):
+        assert "lightx2v-4step-v1.3" in accel.TURBO_OPTIONS
+        method = accel.get_method("lightx2v-4step-v1.3")
+        assert method.dimension == "turbo"
+        assert method.params_schema["shift_video"].default == 6.0
+        assert method.params_schema["sampler"].default == "euler"
+
+    def test_build_task_uses_lightx2v_lora_and_shifts(self, monkeypatch):
+        import api.workflows.h3 as h3_mod
+
+        calls = []
+        monkeypatch.setattr(
+            h3_mod, "require_asset",
+            lambda folder, name: calls.append((folder, name)),
+        )
+        task = type("Task", (), {
+            "task_id": "t", "prompt": "p", "width": 512, "height": 512,
+            "length": 39, "seed": 1, "first_frame": None, "last_frame": None,
+            "ref_images": None, "ref_videos": None, "assets": {},
+            "params": {}, "speed": {"steps": 4, "turbo": "lightx2v-4step-v1.3"},
+        })()
+        built = h3_mod.build_h3_task(task)
+        wf = built.workflow
+        turbo_id = _find(wf, "MiniMaxH3TurboLoRA")
+        assert wf[turbo_id]["inputs"]["lora_name"] == (
+            "minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors"
+        )
+        assert wf["5"]["inputs"]["shift_video"] == 6.0
+        assert wf["5"]["inputs"]["shift_audio"] == 3.0
+        sampler = wf[_find(wf, "KSampler")]["inputs"]
+        assert sampler["steps"] == 4
+        assert sampler["sampler_name"] == "euler"
+        assert sampler["scheduler"] == "simple"
+        assert (
+            "loras",
+            "minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors",
+        ) in calls
+
+
+def test_lightx2v_defaults_to_four_steps(monkeypatch):
+    import api.workflows.h3 as h3_mod
+
+    monkeypatch.setattr(h3_mod, "require_asset", lambda *a, **k: None)
+    speed = {"turbo": "lightx2v-4step-v1.3"}
+    cfg = accel.parse_accel_config(speed)
+    assert cfg.steps == 4
+    task = type("Task", (), {
+        "task_id": "t", "prompt": "p", "width": 512, "height": 512,
+        "length": 39, "seed": 1, "first_frame": None, "last_frame": None,
+        "ref_images": None, "ref_videos": None, "assets": {},
+        "params": {}, "speed": speed,
+    })()
+    wf = h3_mod.build_h3_task(task).workflow
+    assert wf[_find(wf, "KSampler")]["inputs"]["steps"] == 4

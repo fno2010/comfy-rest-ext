@@ -1044,7 +1044,8 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 
 | 维度 | 方法 | 参数 |
 |---|---|---|
-| `turbo` | `turbo-v4` | `strength=1.0`, `low_vram=false` |
+| `turbo` | `turbo-v4` | `strength=1.0`, `low_vram=false`, `shift_video=12`, `shift_audio=3` |
+| | `lightx2v-4step-v1.3` | 4-step FL2V LoRA；默认 `lora_name=minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors`、`shift_video=6`、`shift_audio=3`、`sampler=euler`、`scheduler=simple`；未显式传 `steps` 时默认 4 |
 | `attention` | `sol` | `enabled=true`, `tau=1.0`, `thresh_type="diag"` |
 | | `sage` | `sage_attention="auto"` |
 | | `flash` | — |
@@ -1053,7 +1054,9 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 | `step_cache` | `easycache` / `lazycache` | `reuse_threshold=0.2`, `start_percent=0.15`, `end_percent=1.0`, `verbose=false` |
 | | `spectrum` | `enabled=true`, `blend_weight=0.50`, `degree=1`, `ridge_lambda=0.10`, `window_size=2.0`, `flex_window=0.75`, `warmup_steps=1`, `tail_actual_steps=1`, `max_history=4`, `debug=false` |
 
-`cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。
+`cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。`lightx2v-4step-v1.3` 需要把对应 ComfyUI LoRA 放进 `models/loras/`，否则任务会在资产检查阶段失败。
+
+P1.5b 目前接入的是 LightX2V v1.3。TAEH3 是预览解码器，不作为最终 VAE 替换；DaSiWa H3 Cache / T8 以及 FBC 在当前 ComfyUI 0.37 的兼容性需要先完成审计和 A/B，再决定是否加入。
 
 ```bash
 curl -X POST http://host:8188/v1/videos \
