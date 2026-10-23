@@ -1010,17 +1010,64 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 `inference_time_s`：任务完成后为 `completed_at - created_at`（秒），否则为 `null`。
 
 **加速模式（speed 字段，可选）：**
+
+`speed` 支持 legacy 字符串或结构化对象。legacy 值保持兼容：
+
 - `auto`（默认）：跟随服务器环境变量（`H3_TE_SPEED` / `H3_SOL_STACK`）
 - `none`：关闭加速
-- `te-speed`：块级缓存加速（需安装 TE-Speed-MiniMaxH3 节点 + 核心补丁），实测 ~1.6×
-- `sol-stack`：Sol-Attn + FirstBlockCache（需安装 ComfyUI_sol-attn_Blackwell），实测 ~1.35×
+- `te-speed`：TE-Speed block cache
+- `sol-stack`：Sol-Attn + FirstBlockCache
+
+结构化对象按维度选择方法；每个维度可写成字符串，或 `{"method": ..., "params": {...}}`：
+
+```json
+{
+  "model": "minimax-h3",
+  "prompt": "a cube rolling",
+  "seconds": 3,
+  "speed": {
+    "steps": 8,
+    "turbo": "turbo-v4",
+    "attention": "sol",
+    "block_cache": {
+      "method": "fbc",
+      "params": {"threshold": 0.12, "start_step": 3}
+    },
+    "step_cache": "none"
+  }
+}
+```
+
+跨层可叠加；同层只能选一个方法。参数会在方法默认值上覆盖；未知参数、错误类型、越界值，以及节点不支持的 combo 值会在排队前返回 400。参数范围与当前安装节点的 `INPUT_TYPES` 对齐。
+
+当前已注册方法（默认参数）：
+
+| 维度 | 方法 | 参数 |
+|---|---|---|
+| `turbo` | `turbo-v4` | `strength=1.0`, `low_vram=false` |
+| `attention` | `sol` | `enabled=true`, `tau=1.0`, `thresh_type="diag"` |
+| | `sage` | `sage_attention="auto"` |
+| | `flash` | — |
+| `block_cache` | `te-speed` | `processing_control_value=0.12`, `processing_percent_1=0.1`, `processing_percent_2=0.9`, `mcs=2`, `device="auto"`, `cache_depth=0.75` |
+| | `fbc` | `threshold=0.08`, `start_step=2`, `end_dense_steps=2`, `max_consecutive_skips=2` |
+| `step_cache` | `easycache` / `lazycache` | `reuse_threshold=0.2`, `start_percent=0.15`, `end_percent=1.0`, `verbose=false` |
+| | `spectrum` | `enabled=true`, `blend_weight=0.50`, `degree=1`, `ridge_lambda=0.10`, `window_size=2.0`, `flex_window=0.75`, `warmup_steps=1`, `tail_actual_steps=1`, `max_history=4`, `debug=false` |
+
+`cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。
 
 ```bash
 curl -X POST http://host:8188/v1/videos \
-  -F "model=minimax-h3" \
-  -F "prompt=a cube rolling" \
-  -F "seconds=3" \
-  -F "speed=te-speed"
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "minimax-h3",
+    "prompt": "a cube rolling",
+    "seconds": 3,
+    "speed": {
+      "steps": 8,
+      "turbo": "turbo-v4",
+      "block_cache": {"method": "fbc", "params": {"threshold": 0.12}}
+    }
+  }'
 ```
 
 ### GET `/v1/videos/{video_id}` — 轮询任务状态

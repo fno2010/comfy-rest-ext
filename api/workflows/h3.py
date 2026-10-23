@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 from ..accel import (
     AccelConfig,
+    apply_accel_layers,
     check_config_available,
     parse_accel_config,
 )
@@ -35,104 +36,11 @@ def frames_for_seconds(seconds: float) -> int:
 
 
 def _apply_accel_layers(workflow, add, model_ref: list, accel, turbo_lora: str) -> list:
-    """Apply acceleration layers in pipeline order (cross-layer stacking)."""
-    model_out = list(model_ref)
-    seq = iter("bcdefghij")
-
-    if accel.turbo != "none":
-        nid = "1" + next(seq)
-        add(nid, "MiniMaxH3TurboLoRA", {
-            "model": model_out,
-            "lora_name": turbo_lora,
-            "strength": 1.0,
-            "low_vram": False,
-        })
-        model_out = [nid, 0]
-
-    if accel.attention == "sol":
-        nid = "1" + next(seq)
-        add(nid, "SolAttnMiniMaxH3Patcher", {
-            "model": model_out,
-            "enabled": True,
-            "tau": 1.0,
-            "thresh_type": "diag",
-        })
-        model_out = [nid, 0]
-    elif accel.attention == "sage":
-        nid = "1" + next(seq)
-        add(nid, "PathchSageAttentionKJ", {
-            "model": model_out,
-            "sage_attention": "auto",
-        })
-        model_out = [nid, 0]
-    elif accel.attention == "flash":
-        nid = "1" + next(seq)
-        add(nid, "PatchFlashAttentionKJ", {
-            "model": model_out,
-        })
-        model_out = [nid, 0]
-
-    if accel.block_cache == "te-speed":
-        nid = "1" + next(seq)
-        add(nid, "TESpeedMiniMaxH3", {
-            "model": model_out,
-            "processing_control_value": 0.12,
-            "processing_percent_1": 0.1,
-            "processing_percent_2": 0.9,
-            "mcs": 2,
-            "device": "auto",
-            "cache_depth": 0.75,
-        })
-        model_out = [nid, 0]
-    elif accel.block_cache == "fbc":
-        nid = "1" + next(seq)
-        add(nid, "H3FirstBlockCache", {
-            "model": model_out,
-            "threshold": 0.08,
-            "start_step": 2,
-            "end_dense_steps": 2,
-            "max_consecutive_skips": 2,
-        })
-        model_out = [nid, 0]
-
-    if accel.step_cache == "easycache":
-        nid = "1" + next(seq)
-        add(nid, "EasyCache", {
-            "model": model_out,
-            "reuse_threshold": 0.2,
-            "start_percent": 0.15,
-            "end_percent": 1.0,
-            "verbose": False,
-        })
-        model_out = [nid, 0]
-    elif accel.step_cache == "lazycache":
-        nid = "1" + next(seq)
-        add(nid, "LazyCache", {
-            "model": model_out,
-            "reuse_threshold": 0.2,
-            "start_percent": 0.15,
-            "end_percent": 1.0,
-            "verbose": False,
-        })
-        model_out = [nid, 0]
-    elif accel.step_cache == "spectrum":
-        nid = "1" + next(seq)
-        add(nid, "SpectrumApplyMiniMaxH3", {
-            "model": model_out,
-            "enabled": True,
-            "blend_weight": 0.50,
-            "degree": 1,
-            "ridge_lambda": 0.10,
-            "window_size": 2.0,
-            "flex_window": 0.75,
-            "warmup_steps": 1,
-            "tail_actual_steps": 1,
-            "max_history": 4,
-            "debug": False,
-        })
-        model_out = [nid, 0]
-
-    return model_out
+    """Apply acceleration layers in registry/dimension order."""
+    return apply_accel_layers(
+        workflow, add, model_ref, accel,
+        context={"turbo_lora": turbo_lora},
+    )
 
 
 def build_h3_workflow(
