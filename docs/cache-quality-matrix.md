@@ -29,6 +29,18 @@ Prompt：`A glass marble rolls across a wooden table, camera tracks it, soft amb
 | T8 0.18 / gpu | 32.1s | 6/20 | 0.926 | -29.3 dB | -4.18 dB |
 | DaSiWa 0.08 / auto | 25.1s | n/a | 0.896 | **-95.2 dB** | **-45.72 dB** |
 
+## 2 秒瞬态音频（实际 2.33s，seed 52）
+
+Prompt：`A hand claps twice on a wooden table, close-mic clear transients, room reverb`
+
+| 配置 | 耗时 | 视频 SSIM | 音频 RMS | 音频 SI-SDR |
+|---|---:|---:|---:|---:|
+| baseline | 43.1s | 1.000 | -36.1 dB | ref |
+| FBC 0.15 | 24.1s | 0.736 | -44.2 dB | -8.80 dB |
+| T8 0.18 / gpu | 32.1s | 0.786 | -44.2 dB | -8.67 dB |
+
+瞬态/close-mic 内容上 cache 的视频与音频偏差都显著大于 marble prompt；FBC/T8 不是对该类内容透明的。
+
 ## 1 秒参考图（实际 1.625s，seed 51）
 
 参考图取自 2 秒 baseline 的 0.5s 帧，走 I2V，验证 cache 不会破坏首帧/参考图路径：
@@ -57,7 +69,7 @@ DaSiWa 4 秒未跑：2 秒已出现音轨近静音，长度继续增加没有意
 1. **FBC 是当前速度最优的可用 cache**：2 秒 1.78×，4 秒 1.63×；视频 SSIM 约 0.90。
 2. **T8 的视频指标略好**（2 秒 SSIM 0.926），但更慢，且音频 SI-SDR 更差；不是“全面优于 FBC”。
 3. **DaSiWa 在 2 秒片段上音轨接近静音（RMS -95 dB）**，1 秒片段/1 秒参考图则正常。threshold=0（0 次 skip）时音频与 baseline 完全一致，说明是 skip 后 audio residual 的复用导致，不是 wrapper。扩展已加长度保护：`dasiwa` 在 >39 帧（1.625s）时直接返回 400，避免静音视频落盘；等上游修复后再移除。
-4. 三个 cache 的音频都不是透明的：FBC/T8 的 SI-SDR 为负，且 4 秒比 2 秒更差。画面上看 4 秒帧仍接近 baseline，但音轨差异不能忽略。
+4. 三个 cache 的音频都不是透明的：FBC/T8 的 SI-SDR 为负，且 4 秒比 2 秒更差。瞬态/close-mic prompt 上 FBC/T8 的视频 SSIM 降到 0.736/0.786，音频 SI-SDR 约 -8.7 dB；画面上看 4 秒 marble 帧仍接近 baseline，但音轨和瞬态内容差异不能忽略。
 5. 4-step LightX2V 的 first-block ratio 很高，FBC/T8 基本不命中；cache 只适合 20+ step 的普通采样。
 6. 之前的 1 秒红方块测试不能代表这个结论；短片段上 FBC 0.15 的 SSIM 0.925、DaSiWa 音轨也正常，长片段/音频暴露了差异。
 
