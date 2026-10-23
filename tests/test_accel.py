@@ -352,3 +352,49 @@ def test_lightx2v_defaults_to_four_steps(monkeypatch):
     })()
     wf = h3_mod.build_h3_task(task).workflow
     assert wf[_find(wf, "KSampler")]["inputs"]["steps"] == 4
+
+
+class TestLightX2VPrecedence:
+    def test_shift_bounds(self):
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "turbo": {"method": "lightx2v-4step-v1.3",
+                          "params": {"shift_video": 0}},
+            })
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "turbo": {"method": "turbo-v4",
+                          "params": {"shift_audio": 200}},
+            })
+
+    def test_env_lora_override_wins(self, monkeypatch):
+        import api.workflows.h3 as h3_mod
+
+        calls = []
+        monkeypatch.setenv("H3_TURBO_LORA", "custom-turbo.safetensors")
+        monkeypatch.setattr(
+            h3_mod, "require_asset",
+            lambda folder, name: calls.append((folder, name)),
+        )
+        task = type("Task", (), {
+            "task_id": "t", "prompt": "p", "width": 512, "height": 512,
+            "length": 39, "seed": 1, "first_frame": None, "last_frame": None,
+            "ref_images": None, "ref_videos": None, "assets": {},
+            "params": {}, "speed": {"turbo": "lightx2v-4step-v1.3"},
+        })()
+        wf = h3_mod.build_h3_task(task).workflow
+        turbo_id = _find(wf, "MiniMaxH3TurboLoRA")
+        assert wf[turbo_id]["inputs"]["lora_name"] == "custom-turbo.safetensors"
+        assert ("loras", "custom-turbo.safetensors") in calls
+
+    def test_direct_builder_uses_method_steps(self):
+        cfg = accel.parse_accel_config({"turbo": "lightx2v-4step-v1.3"})
+        wf = build_h3_workflow(
+            prompt="p", width=512, height=512, length=39, seed=0, accel=cfg,
+        )
+        assert wf[_find(wf, "KSampler")]["inputs"]["steps"] == 4
+        assert wf["5"]["inputs"]["shift_video"] == 6.0
+        turbo_id = _find(wf, "MiniMaxH3TurboLoRA")
+        assert wf[turbo_id]["inputs"]["lora_name"] == (
+            "minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors"
+        )

@@ -123,7 +123,7 @@ def _apply_turbo(workflow, add, model_out, params, alloc, context):
     nid = alloc()
     inputs: Dict[str, Any] = {
         "model": model_out,
-        "lora_name": params.get("lora_name") or context.get("turbo_lora", ""),
+        "lora_name": context.get("turbo_lora") or params.get("lora_name", ""),
     }
     inputs.update({
         key: value for key, value in params.items()
@@ -141,8 +141,8 @@ register_method(AccelMethod(
     params_schema={
         "strength": _float(1.0, minimum=-10.0, maximum=10.0),
         "low_vram": _bool(False),
-        "shift_video": _float(12.0),
-        "shift_audio": _float(3.0),
+        "shift_video": _float(12.0, minimum=0.01, maximum=100.0),
+        "shift_audio": _float(3.0, minimum=0.01, maximum=100.0),
     },
     apply=_apply_turbo,
 ))
@@ -157,8 +157,8 @@ register_method(AccelMethod(
         "lora_name": ParamSpec(str, LIGHTX2V_4STEP_LORA),
         "strength": _float(1.0, minimum=-10.0, maximum=10.0),
         "low_vram": _bool(False),
-        "shift_video": _float(6.0),
-        "shift_audio": _float(3.0),
+        "shift_video": _float(6.0, minimum=0.01, maximum=100.0),
+        "shift_audio": _float(3.0, minimum=0.01, maximum=100.0),
         "sampler": ParamSpec(str, "euler"),
         "scheduler": ParamSpec(str, "simple"),
     },
@@ -592,12 +592,6 @@ def resolve_steps(
     if method is not None and method.default_steps is not None:
         return method.default_steps
     return int(env_steps or param_steps or 20)
-
-
-def resolve_turbo_lora(cfg: "AccelConfig", default: str) -> str:
-    """Resolve the LoRA filename for the selected turbo method."""
-    params = resolve_method_params(cfg, "turbo")
-    return params.get("lora_name") or default
 
 
 def apply_accel_layers(

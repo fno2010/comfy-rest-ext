@@ -1026,13 +1026,8 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
   "prompt": "a cube rolling",
   "seconds": 3,
   "speed": {
-    "steps": 8,
-    "turbo": "turbo-v4",
+    "turbo": {"method": "lightx2v-4step-v1.3", "params": {"strength": 1.0}},
     "attention": "sol",
-    "block_cache": {
-      "method": "fbc",
-      "params": {"threshold": 0.12, "start_step": 3}
-    },
     "step_cache": "none"
   }
 }
@@ -1056,7 +1051,7 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 
 `cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。`lightx2v-4step-v1.3` 需要把对应 ComfyUI LoRA 放进 `models/loras/`，否则任务会在资产检查阶段失败。
 
-P1.5b 目前接入的是 LightX2V v1.3。TAEH3 是预览解码器，不作为最终 VAE 替换；DaSiWa H3 Cache / T8 以及 FBC 在当前 ComfyUI 0.37 的兼容性需要先完成审计和 A/B，再决定是否加入。
+P1.5b 目前接入的是 LightX2V v1.3。TAEH3 是预览解码器，不作为最终 VAE 替换；DaSiWa H3 Cache / T8 以及 FBC 在当前 ComfyUI 0.37 的兼容性需要先完成审计和 A/B，再决定是否加入。当前 FBC 节点可能触发 `aimdo memory compile error`；涉及 FBC 的示例仅用于说明 schema，实际使用前请先验证。
 
 ```bash
 curl -X POST http://host:8188/v1/videos \
@@ -1068,7 +1063,7 @@ curl -X POST http://host:8188/v1/videos \
     "speed": {
       "steps": 8,
       "turbo": "turbo-v4",
-      "block_cache": {"method": "fbc", "params": {"threshold": 0.12}}
+      "turbo": {"method": "lightx2v-4step-v1.3", "params": {"strength": 1.0}}
     }
   }'
 ```

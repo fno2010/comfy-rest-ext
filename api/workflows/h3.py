@@ -12,7 +12,6 @@ from ..accel import (
     parse_accel_config,
     resolve_method_params,
     resolve_steps,
-    resolve_turbo_lora,
 )
 from .base import BuildResult, require_asset, resolve_asset
 
@@ -64,22 +63,29 @@ def build_h3_workflow(
     ref2va_model: str = "minimax_h3_ref2va_pruned_nvfp4.safetensors",
     sampler_name: str = "euler",
     scheduler: str = "simple",
-    steps: int = 20,
+    steps: Optional[int] = None,
     te_speed: bool = False,
     sol_stack: bool = False,
     accel: Optional[AccelConfig] = None,
     ref_image_size: str = "match",
-    turbo_lora: str = "minimax_h3_turbo_v4_step600_ema.safetensors",
+    turbo_lora: Optional[str] = None,
     filename_prefix: str = "video/comfy-rest-ext",
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V."""
     if accel is None:
-        accel = AccelConfig(steps=steps)
+        accel = AccelConfig(steps=20 if steps is None else steps)
         if te_speed:
             accel.block_cache = "te-speed"
         if sol_stack:
             accel.block_cache = "fbc"
             accel.attention = "sol"
+    if steps is None:
+        steps = accel.steps
+    if turbo_lora is None:
+        turbo_lora = (
+            resolve_method_params(accel, "turbo").get("lora_name")
+            or "minimax_h3_turbo_v4_step600_ema.safetensors"
+        )
 
     workflow: Dict[str, Any] = {}
 
@@ -235,12 +241,12 @@ def build_h3_task(task: Any) -> BuildResult:
         task, "audio_vae", "H3_AUDIO_VAE",
         "minimax_h3_audio_vae_fp32.safetensors",
     )
+    turbo_params = resolve_method_params(accel_cfg, "turbo")
     turbo_lora = resolve_asset(
         task, "turbo_lora", "H3_TURBO_LORA",
-        "minimax_h3_turbo_v4_step600_ema.safetensors",
+        turbo_params.get("lora_name")
+        or "minimax_h3_turbo_v4_step600_ema.safetensors",
     )
-    turbo_lora = resolve_turbo_lora(accel_cfg, turbo_lora)
-    turbo_params = resolve_method_params(accel_cfg, "turbo")
 
     require_asset("diffusion_models", unet)
     require_asset("text_encoders", text_encoder)
