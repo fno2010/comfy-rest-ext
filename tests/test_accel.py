@@ -266,3 +266,32 @@ class TestMethodRegistry:
         finally:
             api_accel._METHODS.clear()
             api_accel._METHODS.update(saved)
+
+
+class TestParamSchemaConstraints:
+    @pytest.mark.parametrize("layer,method,params", [
+        ("block_cache", "fbc", {"threshold": 5.0}),
+        ("block_cache", "fbc", {"max_consecutive_skips": 0}),
+        ("block_cache", "te-speed", {"device": "cuda"}),
+        ("attention", "sol", {"thresh_type": "full"}),
+        ("attention", "sol", {"tau": 0.0}),
+        ("attention", "sage", {"sage_attention": "sageattn_bogus"}),
+        ("turbo", "turbo-v4", {"strength": 100}),
+        ("step_cache", "easycache", {"reuse_threshold": 3.5}),
+        ("step_cache", "spectrum", {"degree": 0}),
+        ("step_cache", "spectrum", {"window_size": 0.5}),
+    ])
+    def test_node_incompatible_values_rejected(self, layer, method, params):
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({layer: {"method": method, "params": params}})
+
+    def test_valid_edge_values_accepted(self):
+        cfg = accel.parse_accel_config({
+            "block_cache": {
+                "method": "te-speed",
+                "params": {"device": "gpu", "mcs": 0, "cache_depth": 0.95},
+            },
+            "attention": {"method": "sage", "params": {"sage_attention": "sageattn3"}},
+        })
+        assert cfg.params["block_cache"]["device"] == "gpu"
+        assert cfg.params["attention"]["sage_attention"] == "sageattn3"

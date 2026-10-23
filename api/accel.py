@@ -136,7 +136,7 @@ register_method(AccelMethod(
     "turbo-v4", "turbo",
     required_nodes=("MiniMaxH3TurboLoRA",),
     params_schema={
-        "strength": _float(1.0),
+        "strength": _float(1.0, minimum=-10.0, maximum=10.0),
         "low_vram": _bool(False),
     },
     apply=_apply_turbo,
@@ -147,15 +147,26 @@ register_method(AccelMethod(
     required_nodes=("SolAttnMiniMaxH3Patcher",),
     params_schema={
         "enabled": _bool(True),
-        "tau": _float(1.0, minimum=0.0),
-        "thresh_type": _str("diag"),
+        "tau": _float(1.0, minimum=0.1, maximum=5.0),
+        "thresh_type": ParamSpec(str, "diag", choices=("diag", "exact")),
     },
     apply=_single_node("SolAttnMiniMaxH3Patcher"),
 ))
 register_method(AccelMethod(
     "sage", "attention",
     required_nodes=("PathchSageAttentionKJ",),
-    params_schema={"sage_attention": _str("auto")},
+    params_schema={
+        "sage_attention": ParamSpec(
+            str, "auto",
+            choices=(
+                "disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda",
+                "sageattn_qk_int8_pv_fp16_triton",
+                "sageattn_qk_int8_pv_fp8_cuda",
+                "sageattn_qk_int8_pv_fp8_cuda++",
+                "sageattn3", "sageattn3_per_block_mean",
+            ),
+        ),
+    },
     apply=_single_node("PathchSageAttentionKJ"),
 ))
 register_method(AccelMethod(
@@ -169,12 +180,12 @@ register_method(AccelMethod(
     "te-speed", "block_cache",
     required_nodes=("TESpeedMiniMaxH3",),
     params_schema={
-        "processing_control_value": _float(0.12),
-        "processing_percent_1": _float(0.1, minimum=0.0, maximum=1.0),
-        "processing_percent_2": _float(0.9, minimum=0.0, maximum=1.0),
-        "mcs": _int(2, minimum=1),
-        "device": _str("auto"),
-        "cache_depth": _float(0.75, minimum=0.0, maximum=1.0),
+        "processing_control_value": _float(0.12, minimum=0.0, maximum=1.0),
+        "processing_percent_1": _float(0.1, minimum=0.0, maximum=0.49),
+        "processing_percent_2": _float(0.9, minimum=0.51, maximum=1.0),
+        "mcs": _int(2, minimum=0, maximum=10),
+        "device": ParamSpec(str, "auto", choices=("auto", "cpu", "gpu")),
+        "cache_depth": _float(0.75, minimum=0.0, maximum=0.95),
     },
     apply=_single_node("TESpeedMiniMaxH3"),
 ))
@@ -182,10 +193,10 @@ register_method(AccelMethod(
     "fbc", "block_cache",
     required_nodes=("H3FirstBlockCache",),
     params_schema={
-        "threshold": _float(0.08, minimum=0.0),
-        "start_step": _int(2, minimum=0),
-        "end_dense_steps": _int(2, minimum=0),
-        "max_consecutive_skips": _int(2, minimum=0),
+        "threshold": _float(0.08, minimum=0.0, maximum=1.0),
+        "start_step": _int(2, minimum=0, maximum=100),
+        "end_dense_steps": _int(2, minimum=0, maximum=100),
+        "max_consecutive_skips": _int(2, minimum=1, maximum=20),
     },
     apply=_single_node("H3FirstBlockCache"),
 ))
@@ -199,7 +210,7 @@ register_method(AccelMethod(
     "easycache", "step_cache",
     required_nodes=("EasyCache",),
     params_schema={
-        "reuse_threshold": _float(0.2, minimum=0.0),
+        "reuse_threshold": _float(0.2, minimum=0.0, maximum=3.0),
         "start_percent": _float(0.15, minimum=0.0, maximum=1.0),
         "end_percent": _float(1.0, minimum=0.0, maximum=1.0),
         "verbose": _bool(False),
@@ -210,7 +221,7 @@ register_method(AccelMethod(
     "lazycache", "step_cache",
     required_nodes=("LazyCache",),
     params_schema={
-        "reuse_threshold": _float(0.2, minimum=0.0),
+        "reuse_threshold": _float(0.2, minimum=0.0, maximum=3.0),
         "start_percent": _float(0.15, minimum=0.0, maximum=1.0),
         "end_percent": _float(1.0, minimum=0.0, maximum=1.0),
         "verbose": _bool(False),
@@ -223,13 +234,13 @@ register_method(AccelMethod(
     params_schema={
         "enabled": _bool(True),
         "blend_weight": _float(0.50, minimum=0.0, maximum=1.0),
-        "degree": _int(1, minimum=0),
-        "ridge_lambda": _float(0.10, minimum=0.0),
-        "window_size": _float(2.0, minimum=0.0),
-        "flex_window": _float(0.75, minimum=0.0),
-        "warmup_steps": _int(1, minimum=0),
-        "tail_actual_steps": _int(1, minimum=0),
-        "max_history": _int(4, minimum=0),
+        "degree": _int(1, minimum=1, maximum=16),
+        "ridge_lambda": _float(0.10, minimum=0.0, maximum=10.0),
+        "window_size": _float(2.0, minimum=1.0, maximum=16.0),
+        "flex_window": _float(0.75, minimum=0.0, maximum=8.0),
+        "warmup_steps": _int(1, minimum=0, maximum=64),
+        "tail_actual_steps": _int(1, minimum=0, maximum=64),
+        "max_history": _int(4, minimum=2, maximum=64),
         "debug": _bool(False),
     },
     apply=_single_node("SpectrumApplyMiniMaxH3"),
