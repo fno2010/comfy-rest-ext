@@ -726,3 +726,47 @@ def test_build_video_request_single_image_with_video_is_reference(tmp_path):
     ))
     image_item = next(i for i in req["input"] if i["type"] == "input_image")
     assert image_item["role"] == "reference_image"
+
+
+def test_build_video_payload_speed_json():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        speed_json='{"steps":4,"block_cache":{"method":"fbc","params":{"threshold":0.12}}}',
+    )
+    payload = commands._build_video_payload(args)
+    assert payload["speed"] == {
+        "steps": 4,
+        "block_cache": {"method": "fbc", "params": {"threshold": 0.12}},
+    }
+
+
+def test_build_video_payload_speed_json_conflict():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=8, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        speed_json='{"steps":4}',
+    )
+    with pytest.raises(commands.ApiError):
+        commands._build_video_payload(args)
+
+
+def test_build_video_payload_speed_json_invalid():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        speed_json='{not-json}',
+    )
+    with pytest.raises(commands.ApiError):
+        commands._build_video_payload(args)
+
+
+def test_parser_accepts_speed_json():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "videos", "generate", "p", "--speed-json", '{"steps":4}',
+    ])
+    assert args.speed_json == '{"steps":4}'
