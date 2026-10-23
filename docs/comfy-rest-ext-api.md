@@ -1040,7 +1040,7 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 | 维度 | 方法 | 参数 |
 |---|---|---|
 | `turbo` | `turbo-v4` | `strength=1.0`, `low_vram=false`, `shift_video=12`, `shift_audio=3` |
-| | `lightx2v-4step-v1.3` | 4-step FL2V LoRA；默认 `lora_name=minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors`、`shift_video=6`、`shift_audio=3`、`sampler=euler`、`scheduler=simple`；未显式传 `steps` 时默认 4 |
+| | `lightx2v-4step-v1.3` | 4-step FL2V LoRA；默认 `lora_name=minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors`、`shift_video=6`、`shift_audio=3`、`sampler=euler`、`scheduler=simple`；未显式传 `steps` 时默认 4。该 LoRA 面向 FL2V，I2V/FL2V 效果最好；复杂 T2V 在 4 steps 下可能出现伪影，建议先 A/B |
 | `attention` | `sol` | `enabled=true`, `tau=1.0`, `thresh_type="diag"` |
 | | `sage` | `sage_attention="auto"` |
 | | `flash` | — |

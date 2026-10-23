@@ -231,6 +231,7 @@ comfy-rest-ext-cli videos generate "a cube" \
   --speed-json '{"turbo":{"method":"lightx2v-4step-v1.3","params":{"strength":1.0}}}'
 
 # 4-step LightX2V Turbo LoRA（默认 4 步、shift 6/3、euler/simple）
+# 面向 FL2V/I2V 效果最好；复杂 T2V 4-step 建议先 A/B
 # 需要先将 minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors 放入 models/loras/
 comfy-rest-ext-cli videos generate "a red cube" --turbo lightx2v-4step-v1.3
 ```
