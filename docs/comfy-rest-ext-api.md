@@ -1026,25 +1026,21 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
   "prompt": "a cube rolling",
   "seconds": 3,
   "speed": {
-    "steps": 8,
-    "turbo": "turbo-v4",
+    "turbo": {"method": "lightx2v-4step-v1.3", "params": {"strength": 1.0}},
     "attention": "sol",
-    "block_cache": {
-      "method": "fbc",
-      "params": {"threshold": 0.12, "start_step": 3}
-    },
     "step_cache": "none"
   }
 }
 ```
 
-跨层可叠加；同层只能选一个方法。参数会在方法默认值上覆盖；未知参数、错误类型、越界值，以及节点不支持的 combo 值会在排队前返回 400。参数范围与当前安装节点的 `INPUT_TYPES` 对齐。
+跨层可叠加；同层只能选一个方法。参数会在方法默认值上覆盖；未知参数、错误类型、越界值，以及节点不支持的 combo 值会在排队前返回 400。参数范围与当前安装节点的 `INPUT_TYPES` 对齐。部署级 `H3_TURBO_LORA` / models.json `assets.turbo_lora` 优先于方法默认的 `lora_name`；请求中显式给出的 `lora_name` 也按方法默认值处理，因此同样会被部署级覆盖。
 
 当前已注册方法（默认参数）：
 
 | 维度 | 方法 | 参数 |
 |---|---|---|
-| `turbo` | `turbo-v4` | `strength=1.0`, `low_vram=false` |
+| `turbo` | `turbo-v4` | `strength=1.0`, `low_vram=false`, `shift_video=12`, `shift_audio=3` |
+| | `lightx2v-4step-v1.3` | 4-step FL2V LoRA；默认 `lora_name=minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors`、`shift_video=6`、`shift_audio=3`、`sampler=euler`、`scheduler=simple`；未显式传 `steps` 时默认 4。该 LoRA 面向 FL2V，I2V/FL2V 效果最好；复杂 T2V 在 4 steps 下可能出现伪影，建议先 A/B |
 | `attention` | `sol` | `enabled=true`, `tau=1.0`, `thresh_type="diag"` |
 | | `sage` | `sage_attention="auto"` |
 | | `flash` | — |
@@ -1053,7 +1049,9 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 | `step_cache` | `easycache` / `lazycache` | `reuse_threshold=0.2`, `start_percent=0.15`, `end_percent=1.0`, `verbose=false` |
 | | `spectrum` | `enabled=true`, `blend_weight=0.50`, `degree=1`, `ridge_lambda=0.10`, `window_size=2.0`, `flex_window=0.75`, `warmup_steps=1`, `tail_actual_steps=1`, `max_history=4`, `debug=false` |
 
-`cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。
+`cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。`lightx2v-4step-v1.3` 需要把对应 ComfyUI LoRA 放进 `models/loras/`，否则任务会在资产检查阶段失败。
+
+P1.5b 目前接入的是 LightX2V v1.3。TAEH3 是预览解码器，不作为最终 VAE 替换；DaSiWa H3 Cache / T8 以及 FBC 在当前 ComfyUI 0.37 的兼容性需要先完成审计和 A/B，再决定是否加入。当前 FBC 节点可能触发 `aimdo memory compile error`；该选项仍保留在 schema 中，但实际使用前请先验证。
 
 ```bash
 curl -X POST http://host:8188/v1/videos \
@@ -1064,8 +1062,7 @@ curl -X POST http://host:8188/v1/videos \
     "seconds": 3,
     "speed": {
       "steps": 8,
-      "turbo": "turbo-v4",
-      "block_cache": {"method": "fbc", "params": {"threshold": 0.12}}
+      "turbo": {"method": "lightx2v-4step-v1.3", "params": {"strength": 1.0}}
     }
   }'
 ```

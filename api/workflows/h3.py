@@ -10,6 +10,8 @@ from ..accel import (
     apply_accel_layers,
     check_config_available,
     parse_accel_config,
+    resolve_method_params,
+    resolve_steps,
 )
 from .base import BuildResult, require_asset, resolve_asset
 
@@ -61,22 +63,29 @@ def build_h3_workflow(
     ref2va_model: str = "minimax_h3_ref2va_pruned_nvfp4.safetensors",
     sampler_name: str = "euler",
     scheduler: str = "simple",
-    steps: int = 20,
+    steps: Optional[int] = None,
     te_speed: bool = False,
     sol_stack: bool = False,
     accel: Optional[AccelConfig] = None,
     ref_image_size: str = "match",
-    turbo_lora: str = "minimax_h3_turbo_v4_step600_ema.safetensors",
+    turbo_lora: Optional[str] = None,
     filename_prefix: str = "video/comfy-rest-ext",
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V."""
     if accel is None:
-        accel = AccelConfig(steps=steps)
+        accel = AccelConfig(steps=20 if steps is None else steps)
         if te_speed:
             accel.block_cache = "te-speed"
         if sol_stack:
             accel.block_cache = "fbc"
             accel.attention = "sol"
+    if steps is None:
+        steps = accel.steps
+    if turbo_lora is None:
+        turbo_lora = (
+            resolve_method_params(accel, "turbo").get("lora_name")
+            or "minimax_h3_turbo_v4_step600_ema.safetensors"
+        )
 
     workflow: Dict[str, Any] = {}
 
@@ -99,10 +108,11 @@ def build_h3_workflow(
 
     model_out = _apply_accel_layers(workflow, add, ["1", 0], accel, turbo_lora)
 
+    turbo_params = resolve_method_params(accel, "turbo")
     add("5", "MiniMaxH3SigmaShift", {
         "model": model_out,
-        "shift_video": 12.0,
-        "shift_audio": 3.0,
+        "shift_video": turbo_params.get("shift_video", 12.0),
+        "shift_audio": turbo_params.get("shift_audio", 3.0),
     })
 
     nid = 6
@@ -207,11 +217,9 @@ def build_h3_task(task: Any) -> BuildResult:
         raise ValueError(missing_node)
 
     params = task.params or {}
-    explicit_steps = isinstance(task.speed, dict) and "steps" in task.speed
-    if explicit_steps:
-        steps = accel_cfg.steps
-    else:
-        steps = int(os.environ.get("H3_STEPS") or params.get("steps", 20))
+    steps = resolve_steps(
+        accel_cfg, task.speed, os.environ.get("H3_STEPS"), params.get("steps")
+    )
 
     is_ref = bool(task.ref_images or task.ref_videos)
     unet = resolve_asset(
@@ -233,9 +241,11 @@ def build_h3_task(task: Any) -> BuildResult:
         task, "audio_vae", "H3_AUDIO_VAE",
         "minimax_h3_audio_vae_fp32.safetensors",
     )
+    turbo_params = resolve_method_params(accel_cfg, "turbo")
     turbo_lora = resolve_asset(
         task, "turbo_lora", "H3_TURBO_LORA",
-        "minimax_h3_turbo_v4_step600_ema.safetensors",
+        turbo_params.get("lora_name")
+        or "minimax_h3_turbo_v4_step600_ema.safetensors",
     )
 
     require_asset("diffusion_models", unet)
@@ -261,8 +271,18 @@ def build_h3_task(task: Any) -> BuildResult:
         video_vae=video_vae,
         audio_vae=audio_vae,
         ref2va_model=unet,
-        sampler_name=os.environ.get("H3_SAMPLER") or params.get("sampler") or "euler",
-        scheduler=os.environ.get("H3_SCHEDULER") or params.get("scheduler") or "simple",
+        sampler_name=(
+            turbo_params.get("sampler")
+            or os.environ.get("H3_SAMPLER")
+            or params.get("sampler")
+            or "euler"
+        ),
+        scheduler=(
+            turbo_params.get("scheduler")
+            or os.environ.get("H3_SCHEDULER")
+            or params.get("scheduler")
+            or "simple"
+        ),
         steps=steps,
         accel=accel_cfg,
         ref_image_size=(

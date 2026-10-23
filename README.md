@@ -222,7 +222,21 @@ comfy-rest-ext-cli --timeout 120 models all
 comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
 ```
 
-`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy `--speed` 字符串，不支持 composable `--steps/--turbo/...` 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。CLI 的加速参数目前只选择方法并使用内置默认参数；per-method `params` 需要通过 `/v1/videos` 的 JSON `speed` 对象传入（CLI flags 将在 P1.5b 补齐）。
+`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy `--speed` 字符串，不支持 composable 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
+
+CLI flags 选择方法并使用内置默认参数；需要 per-method params 时，用 JSON 模式传完整对象：
+
+```bash
+comfy-rest-ext-cli videos generate "a cube" \
+  --speed-json '{"turbo":{"method":"lightx2v-4step-v1.3","params":{"strength":1.0}}}'
+
+# 4-step LightX2V Turbo LoRA（默认 4 步、shift 6/3、euler/simple）
+# 面向 FL2V/I2V 效果最好；复杂 T2V 4-step 建议先 A/B
+# 需要先将 minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors 放入 models/loras/
+comfy-rest-ext-cli videos generate "a red cube" --turbo lightx2v-4step-v1.3
+```
+
+`--speed-json` 不能与 `--speed/--steps/--turbo/--block-cache/...` 混用；`--multipart` 模式下 composable 对象仍不支持。
 
 环境变量：`COMFY_REST_EXT_BASE_URL`（默认 `http://127.0.0.1:8188`）、`COMFY_REST_EXT_TIMEOUT`（默认 `60`）。
 

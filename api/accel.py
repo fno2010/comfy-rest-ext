@@ -59,6 +59,7 @@ class AccelMethod:
     required_nodes: Tuple[str, ...] = ()
     params_schema: Mapping[str, ParamSpec] = field(default_factory=dict)
     implemented: bool = True
+    default_steps: Optional[int] = None
     apply: Optional[Callable] = None
 
     def defaults(self) -> Dict[str, Any]:
@@ -115,13 +116,19 @@ def _single_node(node_class: str) -> Callable:
     return apply
 
 
+_TURBO_BUILDER_KEYS = {"lora_name", "shift_video", "shift_audio", "sampler", "scheduler"}
+
+
 def _apply_turbo(workflow, add, model_out, params, alloc, context):
     nid = alloc()
     inputs: Dict[str, Any] = {
         "model": model_out,
-        "lora_name": context.get("turbo_lora", ""),
+        "lora_name": context.get("turbo_lora") or params.get("lora_name", ""),
     }
-    inputs.update(params)
+    inputs.update({
+        key: value for key, value in params.items()
+        if key not in _TURBO_BUILDER_KEYS
+    })
     add(nid, "MiniMaxH3TurboLoRA", inputs)
     return [nid, 0]
 
@@ -134,7 +141,28 @@ register_method(AccelMethod(
     params_schema={
         "strength": _float(1.0, minimum=-10.0, maximum=10.0),
         "low_vram": _bool(False),
+        "shift_video": _float(12.0, minimum=0.01, maximum=100.0),
+        "shift_audio": _float(3.0, minimum=0.01, maximum=100.0),
     },
+    apply=_apply_turbo,
+))
+
+LIGHTX2V_4STEP_LORA = (
+    "minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors"
+)
+register_method(AccelMethod(
+    "lightx2v-4step-v1.3", "turbo",
+    required_nodes=("MiniMaxH3TurboLoRA",),
+    params_schema={
+        "lora_name": ParamSpec(str, LIGHTX2V_4STEP_LORA),
+        "strength": _float(1.0, minimum=-10.0, maximum=10.0),
+        "low_vram": _bool(False),
+        "shift_video": _float(6.0, minimum=0.01, maximum=100.0),
+        "shift_audio": _float(3.0, minimum=0.01, maximum=100.0),
+        "sampler": ParamSpec(str, "euler"),
+        "scheduler": ParamSpec(str, "simple"),
+    },
+    default_steps=4,
     apply=_apply_turbo,
 ))
 
@@ -493,6 +521,11 @@ def parse_accel_config(raw: Any, default_steps: int = 20) -> AccelConfig:
         _validate_value(f"precision.{key}", value, PRECISION_OPTIONS)
     cfg.precision = dict(precision)
 
+    if "steps" not in raw:
+        method = get_method(cfg.turbo)
+        if method is not None and method.default_steps is not None:
+            cfg.steps = method.default_steps
+
     _validate_combo(cfg)
     return cfg
 
@@ -528,6 +561,37 @@ class _NodeIds:
         if self.index > 25:
             raise AccelConfigError("too many acceleration methods in one pipeline")
         return "1" + chr(ord("a") + self.index)
+
+
+def resolve_method_params(
+    cfg: "AccelConfig", layer: str,
+) -> Dict[str, Any]:
+    """Return merged method params for a selected layer, or {}."""
+    method_id = getattr(cfg, layer, "none")
+    if method_id in (None, "none"):
+        return {}
+    method = get_method(method_id)
+    if method is None:
+        return {}
+    params = method.defaults()
+    params.update((cfg.params or {}).get(layer, {}))
+    return params
+
+
+def resolve_steps(
+    cfg: "AccelConfig", speed: Any, env_steps: Any, param_steps: Any,
+) -> int:
+    """Resolve sampler steps for a task.
+
+    Explicit request steps win; otherwise a turbo method's trained default
+    (e.g. LightX2V 4-step) wins over the server env/request default.
+    """
+    if isinstance(speed, dict) and "steps" in speed:
+        return cfg.steps
+    method = get_method(cfg.turbo)
+    if method is not None and method.default_steps is not None:
+        return method.default_steps
+    return int(env_steps or param_steps or 20)
 
 
 def apply_accel_layers(

@@ -33,8 +33,9 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--speed", choices=["auto", "none", "te-speed", "sol-stack"],
                         help="acceleration mode (legacy; default auto)")
     parser.add_argument("--steps", type=int, help="sampling steps")
-    parser.add_argument("--turbo", choices=["none", "turbo-v4"],
-                        help="Turbo LoRA step compression (default none)")
+    parser.add_argument("--turbo",
+                        choices=["none", "turbo-v4", "lightx2v-4step-v1.3"],
+                        help="Turbo/step-compression LoRA (default none)")
     parser.add_argument("--block-cache", choices=["none", "te-speed", "fbc", "cachedit"],
                         help="block-level cache (default none)")
     parser.add_argument("--step-cache",
@@ -44,6 +45,9 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
                         help="attention kernel (default none)")
     parser.add_argument("--vae-decode", choices=["default", "batched"],
                         help="VAE decode strategy (default default)")
+    parser.add_argument("--speed-json",
+                        help="full speed JSON object, e.g. "
+                             '\'{"steps":4,"block_cache":{"method":"fbc","params":{"threshold":0.12}}}\'')
     parser.add_argument("--multipart", action="store_true",
                         help="upload reference images as multipart instead of base64 content[]")
 
