@@ -244,3 +244,29 @@ async def test_route_wires_last_frame(monkeypatch):
     }))
     assert response.status == 200
     assert manager.task.last_frame == "last.png"
+
+
+@pytest.mark.asyncio
+async def test_route_accepts_ref_video_urls_alias(monkeypatch):
+    import api.openai.v1 as v1
+
+    manager = _Manager()
+
+    async def noop(task):
+        return task
+
+    async def resolve(ref):
+        return "ref.mp4"
+
+    monkeypatch.setattr(v1, "get_video_manager", lambda: manager)
+    monkeypatch.setattr(v1, "submit_video_task", noop)
+    monkeypatch.setattr(v1, "_resolve_ref_video", resolve)
+
+    response = await v1.create_video(_Request({
+        "model": "minimax-h3",
+        "prompt": "p",
+        "task": "r2v",
+        "ref_video_urls": ["https://example.com/ref.mp4"],
+    }))
+    assert response.status == 200
+    assert manager.task.ref_videos == ["ref.mp4"]

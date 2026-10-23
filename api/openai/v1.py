@@ -211,9 +211,8 @@ async def create_video(request: web.Request) -> web.Response:
     if task_type not in spec.tasks:
         return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
-    has_video_refs = bool(
-        fields.get("_ref_videos_data") or fields.get("ref_videos")
-    )
+    video_refs = fields.get("ref_videos") or fields.get("ref_video_urls") or []
+    has_video_refs = bool(fields.get("_ref_videos_data") or video_refs)
     if has_video_refs and "reference_video" not in spec.capabilities:
         return web.json_response(
             {"error": f"model {spec.id!r} does not support reference video"},
@@ -253,7 +252,7 @@ async def create_video(request: web.Request) -> web.Response:
                 await _resolve_ref_image(ref) for ref in fields["ref_images"]
             ]
 
-        raw_videos = fields.get("_ref_videos_data") or fields.get("ref_videos") or []
+        raw_videos = fields.get("_ref_videos_data") or video_refs
         if len(raw_videos) > MAX_REFERENCE_VIDEOS:
             return web.json_response(
                 {"error": f"at most {MAX_REFERENCE_VIDEOS} reference videos are supported"},
@@ -268,9 +267,9 @@ async def create_video(request: web.Request) -> web.Response:
                         {"error": "reference video is empty"}, status=400
                     )
                 ref_videos.append(filename)
-        elif fields.get("ref_videos"):
+        elif video_refs:
             ref_videos = []
-            for ref in fields["ref_videos"]:
+            for ref in video_refs:
                 filename = await _resolve_ref_video(ref)
                 if not filename:
                     return web.json_response(

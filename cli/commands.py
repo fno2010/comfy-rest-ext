@@ -215,11 +215,12 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
     payload = _build_video_payload(args)
     items: list = [{"type": "input_text", "text": args.prompt}]
     images = getattr(args, "image", None) or []
+    videos = getattr(args, "video", None) or []
     if isinstance(images, str):
         images = [images]
     if images:
         model = getattr(args, "model", None)
-        if len(images) > 1 or (model and model.endswith("-r2v")):
+        if len(images) > 1 or (model and model.endswith("-r2v")) or videos:
             role = "reference_image"
         else:
             role = "first_frame"
@@ -233,7 +234,6 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
                 "image_url": f"data:image/{ext};base64,{b64}",
                 "role": role,
             })
-    videos = getattr(args, "video", None) or []
     for vid in videos:
         with open(vid, "rb") as f:
             data = f.read()

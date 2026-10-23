@@ -709,3 +709,19 @@ def test_media_type_guessing():
     assert _guess_media_type("a.mp4") == "video/mp4"
     assert _guess_media_type("a.webm") == "video/webm"
     assert _guess_media_type("a.png") == "image/png"
+    assert _guess_media_type("a.m4v", "video") == "video/mp4"
+    assert _guess_media_type("a.tiff", "input_reference") == "image/png"
+
+
+def test_build_video_request_single_image_with_video_is_reference(tmp_path):
+    image = tmp_path / "ref.png"
+    image.write_bytes(b"PNGDATA")
+    video = tmp_path / "ref.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"x" * 16)
+    req = commands._build_video_request(Args(
+        prompt="<Picture 1> <Video 1>", image=[str(image)],
+        video=[str(video)], model=None, width=None, height=None,
+        seconds=None, seed=None, speed=None,
+    ))
+    image_item = next(i for i in req["input"] if i["type"] == "input_image")
+    assert image_item["role"] == "reference_image"
