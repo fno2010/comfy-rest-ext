@@ -154,6 +154,22 @@ def _build_video_payload(args: Any) -> Dict[str, Any]:
     steps = getattr(args, "steps", None)
     legacy_speed = getattr(args, "speed", None)
     active_layers = {k: v for k, v in layer_opts.items() if v not in (None, "none", "default")}
+    speed_json = getattr(args, "speed_json", None)
+    if speed_json:
+        if legacy_speed or steps or active_layers:
+            raise ApiError(
+                400,
+                "--speed-json cannot be combined with --speed/--steps/"
+                "--turbo/--block-cache/--step-cache/--attention/--vae-decode",
+            )
+        try:
+            parsed_speed = json.loads(speed_json)
+        except json.JSONDecodeError as e:
+            raise ApiError(400, f"--speed-json is not valid JSON: {e}") from e
+        if not isinstance(parsed_speed, dict):
+            raise ApiError(400, "--speed-json must decode to an object")
+        payload["speed"] = parsed_speed
+        return payload
     if legacy_speed and legacy_speed != "auto" and (active_layers or steps):
         raise ApiError(
             400,

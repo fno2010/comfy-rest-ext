@@ -44,6 +44,9 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
                         help="attention kernel (default none)")
     parser.add_argument("--vae-decode", choices=["default", "batched"],
                         help="VAE decode strategy (default default)")
+    parser.add_argument("--speed-json",
+                        help="full speed JSON object, e.g. "
+                             '\'{"steps":4,"block_cache":{"method":"fbc","params":{"threshold":0.12}}}\'')
     parser.add_argument("--multipart", action="store_true",
                         help="upload reference images as multipart instead of base64 content[]")
 
