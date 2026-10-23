@@ -667,6 +667,7 @@ comfy-rest-ext/
 
 - [AGENTS.md](AGENTS.md) — 开发规范和编码指南
 - [PLAN.md](PLAN.md) — 详细实现计划
+- [RELEASING.md](RELEASING.md) — 版本规则与 release 流程
 
 ## API 文档
 
