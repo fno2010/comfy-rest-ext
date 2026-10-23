@@ -240,6 +240,19 @@ register_method(AccelMethod(
     apply=_single_node("MiniMaxH3BlockCacheT8"),
 ))
 register_method(AccelMethod(
+    "dasiwa", "block_cache",
+    required_nodes=("MiniMaxH3Cache",),
+    params_schema={
+        "reuse_threshold": _float(0.05, minimum=0.0, maximum=1.0),
+        "start_percent": _float(0.15, minimum=0.0, maximum=1.0),
+        "end_percent": _float(0.90, minimum=0.0, maximum=1.0),
+        "max_steps": _int(2, minimum=1, maximum=10),
+        "device": ParamSpec(str, "auto", choices=("auto", "cuda", "cpu")),
+        "verbose": _bool(False),
+    },
+    apply=_single_node("MiniMaxH3Cache"),
+))
+register_method(AccelMethod(
     "cachedit", "block_cache",
     required_nodes=("Cachedith3",),
     implemented=False,

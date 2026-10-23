@@ -144,6 +144,33 @@ class TestAcceleratedWorkflow:
         assert node["metric_stride"] == 8
         assert node["verbose"] is False
 
+    def test_dasiwa_lands_with_defaults_and_overrides(self):
+        cfg = accel.parse_accel_config({
+            "block_cache": {
+                "method": "dasiwa",
+                "params": {"reuse_threshold": 0.08, "device": "cuda"},
+            },
+        })
+        wf = build_h3_workflow(
+            prompt="p", width=512, height=512, length=124, seed=0, accel=cfg,
+        )
+        nid = _find(wf, "MiniMaxH3Cache")
+        assert nid is not None
+        node = wf[nid]["inputs"]
+        assert node["model"] == ["1", 0]
+        assert node["reuse_threshold"] == 0.08
+        assert node["device"] == "cuda"
+        assert node["start_percent"] == 0.15
+        assert node["end_percent"] == 0.90
+        assert node["max_steps"] == 2
+        assert node["verbose"] is False
+
+    def test_dasiwa_rejects_bad_device(self):
+        with pytest.raises(accel.AccelConfigError):
+            accel.parse_accel_config({
+                "block_cache": {"method": "dasiwa", "params": {"device": "gpu"}},
+            })
+
     def test_t8_rejects_bad_device(self):
         with pytest.raises(accel.AccelConfigError):
             accel.parse_accel_config({
