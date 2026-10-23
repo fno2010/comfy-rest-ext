@@ -226,6 +226,20 @@ register_method(AccelMethod(
     apply=_single_node("H3FirstBlockCache"),
 ))
 register_method(AccelMethod(
+    "t8", "block_cache",
+    required_nodes=("MiniMaxH3BlockCacheT8",),
+    params_schema={
+        "residual_diff_threshold": _float(0.12, minimum=0.0, maximum=1.0),
+        "start_percent": _float(0.08, minimum=0.0, maximum=1.0),
+        "end_percent": _float(0.95, minimum=0.0, maximum=1.0),
+        "max_consecutive_hits": _int(2, minimum=1, maximum=10),
+        "cache_device": ParamSpec(str, "cpu", choices=("cpu", "gpu")),
+        "metric_stride": _int(8, minimum=1, maximum=32),
+        "verbose": _bool(False),
+    },
+    apply=_single_node("MiniMaxH3BlockCacheT8"),
+))
+register_method(AccelMethod(
     "cachedit", "block_cache",
     required_nodes=("Cachedith3",),
     implemented=False,

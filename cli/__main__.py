@@ -36,7 +36,8 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--turbo",
                         choices=["none", "turbo-v4", "lightx2v-4step-v1.3"],
                         help="Turbo/step-compression LoRA (default none)")
-    parser.add_argument("--block-cache", choices=["none", "te-speed", "fbc", "cachedit"],
+    parser.add_argument("--block-cache",
+                        choices=["none", "te-speed", "fbc", "t8", "cachedit"],
                         help="block-level cache (default none)")
     parser.add_argument("--step-cache",
                         choices=["none", "easycache", "lazycache", "teacache", "spectrum"],

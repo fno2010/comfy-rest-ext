@@ -1066,12 +1066,13 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 | | `flash` | — |
 | `block_cache` | `te-speed` | `processing_control_value=0.12`, `processing_percent_1=0.1`, `processing_percent_2=0.9`, `mcs=2`, `device="auto"`, `cache_depth=0.75` |
 | | `fbc` | `threshold=0.08`, `start_step=2`, `end_dense_steps=2`, `max_consecutive_skips=2` |
+| | `t8` | `residual_diff_threshold=0.12`, `start_percent=0.08`, `end_percent=0.95`, `max_consecutive_hits=2`, `cache_device="cpu"`, `metric_stride=8`, `verbose=false` |
 | `step_cache` | `easycache` / `lazycache` | `reuse_threshold=0.2`, `start_percent=0.15`, `end_percent=1.0`, `verbose=false` |
 | | `spectrum` | `enabled=true`, `blend_weight=0.50`, `degree=1`, `ridge_lambda=0.10`, `window_size=2.0`, `flex_window=0.75`, `warmup_steps=1`, `tail_actual_steps=1`, `max_history=4`, `debug=false` |
 
 `cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。`lightx2v-4step-v1.3` 需要把对应 ComfyUI LoRA 放进 `models/loras/`，否则任务会在资产检查阶段失败。
 
-P1.5b 目前接入的是 LightX2V v1.3。TAEH3 是预览解码器，不作为最终 VAE 替换；DaSiWa H3 Cache / T8 以及 FBC 在当前 ComfyUI 0.37 的兼容性需要先完成审计和 A/B，再决定是否加入。当前 FBC 节点可能触发 `aimdo memory compile error`；该选项仍保留在 schema 中，但实际使用前请先验证。
+P1.5b 目前接入的是 LightX2V v1.3。TAEH3 是预览解码器，不作为最终 VAE 替换。`t8` 需要安装 `T8mars/comfyui-minimax-h3-blockcache-T8`（节点 `MiniMaxH3BlockCacheT8`）；其 1.0.4 在 ComfyUI 0.37 上还需要 prefetch-cleanup 签名补丁（部署仓库 `patch/comfyui/`），否则命中步会报 `cleanup_prefetched_modules() missing 1 required positional argument`。`fbc` 在 ComfyUI 0.37 下必须使用带 malloc-graph 修复的 Sol-Attn 节点；未打补丁的节点会在第一步报 `aimdo memory compile error`。FBC 在 20-step、512×512、1s 的实测中，threshold 0.08 不跳步，0.12 约 1.33×/SSIM 0.976，0.15 约 1.65×/SSIM 0.925；4-step LightX2V 基本不命中。T8 同尺寸 seed 21 的 20-step 实测：0.15/gpu 22.0s、SSIM 0.910，0.18/gpu 21.0s、SSIM 0.912，0.20/gpu 20.0s、SSIM 0.880（baseline 28.0s）；默认 0.12 + CPU 反而 37.1s。该 clip 上 FBC 更合适；T8 的默认阈值/设备需要按模型与分辨率重调。
 
 ```bash
 curl -X POST http://host:8188/v1/videos \
