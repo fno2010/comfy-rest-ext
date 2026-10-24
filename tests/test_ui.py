@@ -178,3 +178,15 @@ def test_image_summary_sanitizes_legacy_nonfinite_params():
     assert summary["params"]["cfg"] is None
     assert summary["params"]["nested"]["x"] is None
     json.dumps(summary, allow_nan=False)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_exposes_schema_driven_acceleration_form():
+    from api.ui import task_dashboard
+
+    html = (await task_dashboard(None)).text
+    assert 'id="gen-speed-preset"' in html
+    assert 'id="gen-accel-fields"' in html
+    assert "/v2/extension/acceleration/schema" in html
+    assert "custom acceleration is only supported for text-only video" in html
+    assert "buildSpeed" in html
