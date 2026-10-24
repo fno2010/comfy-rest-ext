@@ -1331,14 +1331,18 @@
   function updateAccelVisibility() {
     const custom = state.generateMode === "video" && $("gen-speed-preset").value === "custom";
     $("gen-accel-section").hidden = !custom;
-    if (custom) {
-      if (!state.accelSchema) {
-        ensureAccelSchema().catch((error) => {
-          $("gen-accel-hint").textContent = "Schema unavailable: " + error.message;
-        });
-      } else {
-        renderAccelForm();
-      }
+    if (!custom) {
+      // Hidden number controls are still form-associated; leaving an invalid
+      // value here can block native form validation for every mode.
+      $("gen-accel-fields").innerHTML = "";
+      return;
+    }
+    if (!state.accelSchema) {
+      ensureAccelSchema().catch((error) => {
+        $("gen-accel-hint").textContent = "Schema unavailable: " + error.message;
+      });
+    } else {
+      renderAccelForm();
     }
   }
 
@@ -1356,7 +1360,7 @@
       document.querySelectorAll(`.accel-param[data-dim="${dim.id}"]`).forEach((input) => {
         let value;
         if (input.type === "checkbox") value = input.checked;
-        else if (input.type === "number") value = Number(input.value);
+        else if (input.type === "number") value = input.valueAsNumber;
         else value = input.value;
         if (typeof value === "number" && !Number.isFinite(value)) {
           throw new Error("invalid value for " + input.dataset.param);
