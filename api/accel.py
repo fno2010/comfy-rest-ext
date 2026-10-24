@@ -463,6 +463,7 @@ def acceleration_schema() -> Dict[str, Any]:
             "H3_TE_SPEED": os.environ.get("H3_TE_SPEED", "0") == "1",
             "H3_SOL_STACK": os.environ.get("H3_SOL_STACK", "0") == "1",
         },
+        "presets": {key: key for key in _LEGACY_SPEED_MAP},
         "parse_only": {
             "vae_decode": {
                 "options": list(VAE_DECODE_OPTIONS),

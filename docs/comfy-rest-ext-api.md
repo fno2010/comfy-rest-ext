@@ -940,6 +940,7 @@ GET /v2/extension/acceleration/schema
     }
   ],
   "legacy_speed": {"te-speed": {"block_cache": "te-speed", "attention": "none"}},
+  "presets": {"te-speed": "te-speed", "sol-stack": "sol-stack"},
   "parse_only": {
     "vae_decode": {"options": ["default", "batched"], "applied": false, "scope": "request"},
     "precision": {"options": ["default", "int8", "fp8", "bf16"], "applied": false, "scope": "model_load"}

@@ -129,7 +129,139 @@ def cmd_image_edit(client: ComfyRestClient, args: Any) -> int:
     return 0
 
 
-def _build_video_payload(args: Any) -> Dict[str, Any]:
+def _read_json_file(path: str, label: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            parsed = json.load(f)
+    except OSError as e:
+        raise ApiError(400, f"{label}: cannot read {path}: {e.strerror}") from e
+    except UnicodeDecodeError as e:
+        raise ApiError(400, f"{label}: {path} is not valid UTF-8: {e}") from e
+    except json.JSONDecodeError as e:
+        raise ApiError(400, f"{label}: invalid JSON in {path}: {e}") from e
+    if not isinstance(parsed, dict):
+        raise ApiError(400, f"{label}: {path} must contain a JSON object")
+    return parsed
+
+
+def _read_speed_json(value: str) -> Dict[str, Any]:
+    if value.startswith("@"):
+        return _read_json_file(value[1:], "--speed-json")
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as e:
+        raise ApiError(400, f"--speed-json is not valid JSON: {e}") from e
+    if not isinstance(parsed, dict):
+        raise ApiError(400, "--speed-json must decode to an object")
+    return parsed
+
+
+def _schema_method(schema: Dict[str, Any], dim: str, method_id: str) -> Dict[str, Any]:
+    for dimension in schema.get("dimensions", []):
+        if dimension.get("id") != dim:
+            continue
+        for method in dimension.get("methods", []):
+            if method.get("id") == method_id:
+                return method
+    raise ApiError(400, f"method {method_id!r} is not registered for {dim}")
+
+
+def _coerce_accel_param(
+    dim: str, method: Dict[str, Any], key: str, raw: str,
+) -> Any:
+    spec = (method.get("params") or {}).get(key)
+    method_id = method.get("id", "?")
+    if spec is None:
+        available = sorted((method.get("params") or {}).keys())
+        raise ApiError(
+            400,
+            f"{dim}.{key} is not a parameter of {method_id}; "
+            f"expected one of {available}",
+        )
+    kind = spec.get("type")
+    if kind == "bool":
+        lowered = raw.strip().lower()
+        if lowered in ("true", "1", "yes", "on"):
+            value: Any = True
+        elif lowered in ("false", "0", "no", "off"):
+            value = False
+        else:
+            raise ApiError(400, f"{dim}.{key} must be a boolean")
+    elif kind == "int":
+        try:
+            value = int(raw)
+        except ValueError:
+            raise ApiError(400, f"{dim}.{key} must be an integer") from None
+    elif kind == "float":
+        try:
+            value = float(raw)
+        except ValueError:
+            raise ApiError(400, f"{dim}.{key} must be a number") from None
+    else:
+        value = raw
+    choices = spec.get("choices")
+    if choices is not None and value not in choices:
+        raise ApiError(400, f"{dim}.{key} must be one of {choices}")
+    minimum = spec.get("min")
+    maximum = spec.get("max")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if minimum is not None and value < minimum:
+            raise ApiError(400, f"{dim}.{key} must be >= {minimum}")
+        if maximum is not None and value > maximum:
+            raise ApiError(400, f"{dim}.{key} must be <= {maximum}")
+    return value
+
+
+def _build_dotted_speed(
+    schema: Dict[str, Any],
+    layer_opts: Dict[str, Any],
+    entries: Sequence[str],
+    steps: Optional[int],
+) -> Dict[str, Any]:
+    grouped: Dict[str, Dict[str, str]] = {}
+    for entry in entries:
+        if "=" not in entry:
+            raise ApiError(400, f"dot-path parameter {entry!r} must be DIM.KEY=VALUE")
+        path, raw = entry.split("=", 1)
+        if "." not in path:
+            raise ApiError(400, f"dot-path parameter {entry!r} must be DIM.KEY=VALUE")
+        dim, key = path.split(".", 1)
+        dim = dim.replace("-", "_")
+        grouped.setdefault(dim, {})[key] = raw
+
+    speed_obj: Dict[str, Any] = {}
+    for dim, params in grouped.items():
+        method_id = layer_opts.get(dim)
+        if method_id in (None, "none", "default"):
+            raise ApiError(
+                400,
+                f"--{dim.replace('_', '-')} must select a method before setting .{next(iter(params))}",
+            )
+        method = _schema_method(schema, dim, method_id)
+        if not method.get("implemented", True):
+            raise ApiError(400, f"{dim}.{method_id} is not implemented")
+        if method.get("available") is False:
+            missing = method.get("missing_nodes") or []
+            raise ApiError(
+                400,
+                f"{dim}.{method_id} is unavailable; missing nodes: {missing}",
+            )
+        coerced = {
+            key: _coerce_accel_param(dim, method, key, raw)
+            for key, raw in params.items()
+        }
+        speed_obj[dim] = {"method": method_id, "params": coerced}
+
+    for dim, method_id in layer_opts.items():
+        if method_id in (None, "none", "default"):
+            continue
+        speed_obj.setdefault(dim, method_id)
+    if steps:
+        speed_obj["steps"] = steps
+    return speed_obj
+
+
+def _build_video_payload(args: Any, schema: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"prompt": args.prompt}
     if args.model:
         payload["model"] = args.model
@@ -153,22 +285,77 @@ def _build_video_payload(args: Any) -> Dict[str, Any]:
     }
     steps = getattr(args, "steps", None)
     legacy_speed = getattr(args, "speed", None)
-    active_layers = {k: v for k, v in layer_opts.items() if v not in (None, "none", "default")}
+    active_layers = {
+        dim: method_id
+        for dim, method_id in layer_opts.items()
+        if method_id not in (None, "none")
+        and not (dim == "vae_decode" and method_id == "default")
+    }
     speed_json = getattr(args, "speed_json", None)
+    speed_file = getattr(args, "speed_file", None)
+    preset = getattr(args, "preset", None)
+    accel_params = getattr(args, "accel_params", None) or []
+
+    if schema and active_layers:
+        for dim, method_id in active_layers.items():
+            if dim == "vae_decode":
+                continue
+            method = _schema_method(schema, dim, method_id)
+            if not method.get("implemented", True):
+                raise ApiError(400, f"{dim}.{method_id} is not implemented")
+            if method.get("available") is False:
+                missing = method.get("missing_nodes") or []
+                raise ApiError(
+                    400,
+                    f"{dim}.{method_id} is unavailable; missing nodes: {missing}",
+                )
+
+    if speed_json and speed_file:
+        raise ApiError(400, "--speed-json and --speed-file are mutually exclusive")
+    if preset and (legacy_speed or speed_json or speed_file or steps
+                   or active_layers or accel_params):
+        raise ApiError(
+            400,
+            "--preset cannot be combined with other acceleration inputs",
+        )
     if speed_json:
-        if legacy_speed or steps or active_layers:
+        if (legacy_speed or steps or active_layers or speed_file or preset
+                or accel_params):
             raise ApiError(
                 400,
                 "--speed-json cannot be combined with --speed/--steps/"
-                "--turbo/--block-cache/--step-cache/--attention/--vae-decode",
+                "--turbo/--block-cache/--step-cache/--attention/--vae-decode/"
+                "--speed-file/--preset/dot-path params",
             )
-        try:
-            parsed_speed = json.loads(speed_json)
-        except json.JSONDecodeError as e:
-            raise ApiError(400, f"--speed-json is not valid JSON: {e}") from e
-        if not isinstance(parsed_speed, dict):
-            raise ApiError(400, "--speed-json must decode to an object")
-        payload["speed"] = parsed_speed
+        payload["speed"] = _read_speed_json(speed_json)
+        return payload
+    if speed_file:
+        if (legacy_speed or steps or active_layers or preset or accel_params):
+            raise ApiError(
+                400,
+                "--speed-file cannot be combined with other acceleration inputs",
+            )
+        payload["speed"] = _read_json_file(speed_file, "--speed-file")
+        return payload
+    if preset:
+        if not schema:
+            raise ApiError(400, "--preset requires the acceleration schema")
+        presets = schema.get("presets") or {}
+        if preset not in presets:
+            raise ApiError(
+                400,
+                f"unknown preset {preset!r}; expected one of {sorted(presets)}",
+            )
+        payload["speed"] = presets[preset]
+        return payload
+    if accel_params:
+        if legacy_speed:
+            raise ApiError(400, "--speed cannot be combined with dot-path params")
+        if not schema:
+            raise ApiError(400, "dot-path params require the acceleration schema")
+        payload["speed"] = _build_dotted_speed(
+            schema, layer_opts, accel_params, steps,
+        )
         return payload
     if legacy_speed and legacy_speed != "auto" and (active_layers or steps):
         raise ApiError(
@@ -188,8 +375,17 @@ def _build_video_payload(args: Any) -> Dict[str, Any]:
 
 def cmd_generate(client: ComfyRestClient, args: Any) -> int:
     try:
+        schema = None
+        flat_accel = any(
+            getattr(args, name, None) not in (None, "none")
+            for name in ("turbo", "block_cache", "step_cache", "attention")
+        )
+        if (getattr(args, "preset", None)
+                or getattr(args, "accel_params", None)
+                or flat_accel):
+            schema = client.acceleration_schema()
         if getattr(args, "multipart", False):
-            payload = _build_video_payload(args)
+            payload = _build_video_payload(args, schema=schema)
             if isinstance(payload.get("speed"), dict):
                 return _emit_error(
                     "--multipart supports legacy --speed strings only; "
@@ -207,7 +403,7 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
                     files.append(("video", os.path.basename(path), f.read()))
             task = client.create_video_multipart(payload, files)
         else:
-            task = client.create_video(_build_video_request(args))
+            task = client.create_video(_build_video_request(args, schema=schema))
     except OSError as e:
         if isinstance(e, FileNotFoundError):
             return _emit_error(f"image file not found: {e.filename}")
@@ -221,7 +417,7 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
     return 0
 
 
-def _build_video_request(args: Any) -> Dict[str, Any]:
+def _build_video_request(args: Any, schema: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build a content[]/input[] video request (industry-standard format).
 
     Text goes into an input_text item; uploaded images become input_image
@@ -229,7 +425,7 @@ def _build_video_request(args: Any) -> Dict[str, Any]:
     also supplied; multiple images or any video make images reference_image
     items (R2V) referenced via <Picture N> / <Video N> tags.
     """
-    payload = _build_video_payload(args)
+    payload = _build_video_payload(args, schema=schema)
     items: list = [{"type": "input_text", "text": args.prompt}]
     images = getattr(args, "image", None) or []
     videos = getattr(args, "video", None) or []

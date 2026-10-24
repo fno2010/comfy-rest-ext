@@ -222,21 +222,34 @@ comfy-rest-ext-cli --timeout 120 models all
 comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
 ```
 
-`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy `--speed` 字符串，不支持 composable 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
+`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy preset/`--speed` 字符串，不支持 composable 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
 
-CLI flags 选择方法并使用内置默认参数；需要 per-method params 时，用 JSON 模式传完整对象：
+CLI 加速输入有三类：
 
 ```bash
+# 1. 方法选择 + dot-path 参数
+comfy-rest-ext-cli videos generate "a red cube" \
+  --block-cache fbc --block-cache.threshold 0.12 --block-cache.start_step 2
+
+# 2. 完整 JSON / 文件
 comfy-rest-ext-cli videos generate "a cube" \
   --speed-json '{"turbo":{"method":"lightx2v-4step-v1.3","params":{"strength":1.0}}}'
+comfy-rest-ext-cli videos generate "a cube" --speed-file speed.json
+comfy-rest-ext-cli videos generate "a cube" --speed-json @speed.json
 
-# 4-step LightX2V Turbo LoRA（默认 4 步、shift 6/3、euler/simple）
-# 面向 FL2V/I2V 效果最好；复杂 T2V 4-step 建议先 A/B
-# 需要先将 minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors 放入 models/loras/
-comfy-rest-ext-cli videos generate "a red cube" --turbo lightx2v-4step-v1.3
+# 3. schema preset（当前 auto/none/te-speed/sol-stack）
+comfy-rest-ext-cli videos generate "a cube" --preset sol-stack
 ```
 
-`--speed-json` 不能与 `--speed/--steps/--turbo/--block-cache/...` 混用；`--multipart` 模式下 composable 对象仍不支持。
+dot-path 参数会先按 `/v2/extension/acceleration/schema` 校验维度、方法、类型、范围和 choices；flat flag 不再硬编码 method choices，同样由 schema 校验。新增 **method** 不需要改 CLI；新增 **维度** 仍应新增一个正式 CLI flag（以及后端维度登记）。
+
+`--preset` 也从同一 schema 读取，当前值等价于 legacy speed 字符串，并保留 `auto` 的服务端 env 语义。`--speed-json`/`--speed-file`/`--preset` 不能与其它加速输入混用；`--multipart` 模式下 composable 对象仍不支持。
+
+```bash
+# 4-step LightX2V Turbo LoRA（默认 4 步、shift 6/3、euler/simple）
+# 面向 FL2V/I2V 效果最好；复杂 T2V 4-step 建议先 A/B
+comfy-rest-ext-cli videos generate "a red cube" --turbo lightx2v-4step-v1.3
+```
 
 环境变量：`COMFY_REST_EXT_BASE_URL`（默认 `http://127.0.0.1:8188`）、`COMFY_REST_EXT_TIMEOUT`（默认 `60`）。
 

@@ -11,6 +11,7 @@ nodes, pr-cache, health. Legacy flat commands remain as aliases.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from typing import Any, Optional
 
@@ -34,22 +35,24 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
                         help="acceleration mode (legacy; default auto)")
     parser.add_argument("--steps", type=int, help="sampling steps")
     parser.add_argument("--turbo",
-                        choices=["none", "turbo-v4", "lightx2v-4step-v1.3"],
-                        help="Turbo/step-compression LoRA (default none)")
+                        help="Turbo/step-compression LoRA (validated by schema)")
     parser.add_argument("--block-cache",
-                        choices=["none", "te-speed", "fbc", "t8", "dasiwa",
-                                 "cachedit"],
-                        help="block-level cache (default none)")
+                        help="block-level cache method (validated by schema)")
     parser.add_argument("--step-cache",
-                        choices=["none", "easycache", "lazycache", "teacache", "spectrum"],
-                        help="step-level cache (default none)")
-    parser.add_argument("--attention", choices=["none", "sol", "sage", "flash"],
-                        help="attention kernel (default none)")
+                        help="step-level cache method (validated by schema)")
+    parser.add_argument("--attention",
+                        help="attention kernel (validated by schema)")
     parser.add_argument("--vae-decode", choices=["default", "batched"],
                         help="VAE decode strategy (default default)")
     parser.add_argument("--speed-json",
-                        help="full speed JSON object, e.g. "
+                        help="full speed JSON object or @file, e.g. "
                              '\'{"steps":4,"block_cache":{"method":"fbc","params":{"threshold":0.12}}}\'')
+    parser.add_argument("--speed-file",
+                        help="read a full speed JSON object from a file")
+    parser.add_argument("--preset",
+                        help="named acceleration preset from /v2/extension/acceleration/schema")
+    parser.add_argument("--dotted-param", dest="accel_params", action="append",
+                        default=None, help=argparse.SUPPRESS)
     parser.add_argument("--multipart", action="store_true",
                         help="upload reference images as multipart instead of base64 content[]")
 
@@ -313,9 +316,55 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_DOT_PARAM_RE = re.compile(
+    r"^--(?P<dim>[a-z_][a-z0-9_-]*)\."
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_]*)(?:=(?P<value>.*))?$"
+)
+_NUMERIC_VALUE_RE = re.compile(
+    r"^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$"
+)
+
+
+def _rewrite_dot_params(argv: list[str]) -> list[str]:
+    """Rewrite --block-cache.threshold 0.12 into --dotted-param block_cache.threshold=0.12."""
+    out: list[str] = []
+    index = 0
+    while index < len(argv):
+        match = _DOT_PARAM_RE.match(argv[index])
+        if not match:
+            out.append(argv[index])
+            index += 1
+            continue
+        value = match.group("value")
+        if value is None:
+            if index + 1 >= len(argv):
+                raise ValueError(
+                    f"{argv[index]} requires a value"
+                )
+            candidate = argv[index + 1]
+            if candidate.startswith("-") and not _NUMERIC_VALUE_RE.match(candidate):
+                raise ValueError(
+                    f"{argv[index]} requires a value (got option {candidate!r})"
+                )
+            value = candidate
+            index += 2
+        else:
+            index += 1
+        dim = match.group("dim").replace("-", "_")
+        out.extend(["--dotted-param", f"{dim}.{match.group('key')}={value}"])
+    return out
+
+
 def main(argv: Any = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    try:
+        parsed_argv = _rewrite_dot_params(
+            list(sys.argv[1:] if argv is None else argv)
+        )
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    args = parser.parse_args(parsed_argv)
     kwargs: dict = {}
     if args.base_url:
         kwargs["base_url"] = args.base_url
