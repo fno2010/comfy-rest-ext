@@ -891,11 +891,12 @@ GET /v1/videos
 GET /v1/videos/{id}/content
 GET /v2/extension/image
 GET /v2/extension/image/{id}/content?index=N
+GET /v2/extension/acceleration/schema
 ```
 
 不调用 ComfyUI 原生 API、`/view` 或前端 SDK。支持自动刷新（有活跃任务时 2s，否则 5s）、分页、排序、类型/状态/模型筛选、搜索，以及 Models 弹窗（读取 `/v1/models`，不跳转 JSON）。卡片采用增量更新，视频播放不会被轮询刷新打断。
 
-`+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。
+`+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。视频表单的 Acceleration 支持 legacy preset 和 `custom…`；`custom` 会从 `/v2/extension/acceleration/schema` 动态渲染四个维度、method 与参数控件，提交为结构化 `speed` 对象。当前 `custom` 仅支持 `Text only` 视频；带参考图/视频时使用 preset（multipart 的 `speed` 仍是 legacy 字符串）。
 
 参考图：选择 Qwen-Image 2.1 时图片表单显示参考图上传（走 `/v1/images/edits`，prompt 用 `<image1>`…）；视频表单提供 `Text only` / `First frame (I2V)` / `Reference images (R2V)`，后两者走 `/v1/videos` multipart，R2V prompt 用 `<Picture N>`。R2V 下若模型声明 `reference_video` capability，还会显示参考视频上传（最多 3 个，prompt 用 `<Video N>`）。
 

@@ -221,6 +221,23 @@
     display: flex; flex-direction: column; gap: 10px;
     min-width: min(620px, 88vw);
   }
+  .accel-section { display: flex; flex-direction: column; gap: 7px; }
+  .accel-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .accel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+  .accel-dim {
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+    display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  }
+  .accel-dim legend { color: var(--muted); font-size: 11px; padding: 0 4px; }
+  .accel-dim select, .accel-dim input {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font: inherit; width: 100%;
+  }
+  .accel-params { display: flex; flex-direction: column; gap: 5px; }
+  .accel-params label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; }
+  .accel-params label.accel-check { flex-direction: row; align-items: center; }
+  .accel-params label.accel-check input { width: auto; }
   .form-row, .form-grid label {
     display: flex; flex-direction: column; gap: 4px;
     color: var(--muted); font-size: 12px;
@@ -423,14 +440,22 @@
       <label>Seconds
         <input id="gen-seconds" type="number" min="1" step="0.5" value="5">
       </label>
-      <label>Speed
-        <select id="gen-speed">
-          <option value="auto">auto</option>
+      <label>Acceleration
+        <select id="gen-speed-preset">
+          <option value="auto">auto (server default)</option>
           <option value="none">none</option>
           <option value="te-speed">te-speed</option>
           <option value="sol-stack">sol-stack</option>
+          <option value="custom">custom…</option>
         </select>
       </label>
+    </div>
+    <div id="gen-accel-section" class="accel-section" hidden>
+      <div class="accel-head">
+        <span>Acceleration methods</span>
+        <span id="gen-accel-hint" class="hint">Select “custom…” to configure methods.</span>
+      </div>
+      <div id="gen-accel-fields" class="accel-grid"></div>
     </div>
     <label class="form-row" id="gen-video-ref-row" hidden>
       <span id="gen-video-ref-label">Reference image(s)</span>
@@ -505,12 +530,14 @@
     imageRefs: [],
     videoRefs: [],
     referenceVideos: [],
+    accelSchema: null,
   };
 
   const $ = (id) => document.getElementById(id);
   const grid = $("task-grid");
   const cardCache = new Map();
   let catalogPromise = null;
+  let accelSchemaPromise = null;
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -1214,6 +1241,139 @@
     return catalogPromise;
   }
 
+  async function ensureAccelSchema() {
+    if (state.accelSchema) return state.accelSchema;
+    if (!accelSchemaPromise) {
+      accelSchemaPromise = fetchJson("/v2/extension/acceleration/schema")
+        .then((data) => {
+          state.accelSchema = data;
+          renderAccelForm();
+          return data;
+        })
+        .finally(() => { accelSchemaPromise = null; });
+    }
+    return accelSchemaPromise;
+  }
+
+  function renderAccelForm() {
+    const schema = state.accelSchema;
+    const host = $("gen-accel-fields");
+    if (!host) return;
+    if (!schema || !Array.isArray(schema.dimensions)) {
+      host.innerHTML = "";
+      $("gen-accel-hint").textContent = "Acceleration schema unavailable.";
+      return;
+    }
+    host.innerHTML = schema.dimensions.map((dim) => {
+      const options = (dim.methods || []).map((method) => {
+        const unavailable = method.available === false || method.implemented === false;
+        const suffix = method.implemented === false
+          ? " (not implemented)"
+          : (method.available === false
+            ? " (missing" + (method.missing_nodes?.length ? ": " + method.missing_nodes.join(", ") : "") + ")"
+            : "");
+        const title = method.implemented === false
+          ? "Registered but not implemented in the H3 builder"
+          : (method.missing_nodes?.length ? "Missing nodes: " + method.missing_nodes.join(", ") : "");
+        return `<option value="${esc(method.id)}"${unavailable ? " disabled" : ""} title="${esc(title)}">${esc(method.id + suffix)}</option>`;
+      }).join("");
+      return `<fieldset class="accel-dim" data-dim="${esc(dim.id)}">
+        <legend>${esc(dim.id)}</legend>
+        <select class="accel-method" data-dim="${esc(dim.id)}">${options}</select>
+        <div class="accel-params" data-dim="${esc(dim.id)}"></div>
+      </fieldset>`;
+    }).join("");
+    host.querySelectorAll(".accel-method").forEach((select) => {
+      select.addEventListener("change", () => renderAccelParams(select.dataset.dim));
+      renderAccelParams(select.dataset.dim);
+    });
+    const env = schema.env_defaults || {};
+    $("gen-accel-hint").textContent = env.H3_TE_SPEED || env.H3_SOL_STACK
+      ? "Server env defaults affect legacy auto; explicit custom values override them."
+      : "Select methods and parameters; none is the default.";
+  }
+
+  function paramControl(dim, key, spec) {
+    const attrs = `class="accel-param" data-dim="${esc(dim)}" data-param="${esc(key)}"`;
+    if (spec.type === "bool") {
+      return `<label class="accel-check"><input type="checkbox" ${attrs}${spec.default ? " checked" : ""}> ${esc(key)}</label>`;
+    }
+    if (Array.isArray(spec.choices)) {
+      const options = spec.choices.map((choice) =>
+        `<option value="${esc(choice)}"${choice === spec.default ? " selected" : ""}>${esc(choice)}</option>`
+      ).join("");
+      return `<label>${esc(key)}<select ${attrs}>${options}</select></label>`;
+    }
+    const type = spec.type === "int" || spec.type === "float" ? "number" : "text";
+    const extra = type === "number"
+      ? ` step="${spec.type === "int" ? "1" : "any"}"` +
+        (spec.min != null ? ` min="${esc(spec.min)}"` : "") +
+        (spec.max != null ? ` max="${esc(spec.max)}"` : "")
+      : "";
+    return `<label>${esc(key)}<input type="${type}" ${attrs} value="${esc(spec.default)}"${extra}></label>`;
+  }
+
+  function renderAccelParams(dim) {
+    const schema = state.accelSchema;
+    if (!schema) return;
+    const dimension = (schema.dimensions || []).find((item) => item.id === dim);
+    const methodSelect = document.querySelector(`.accel-method[data-dim="${dim}"]`);
+    const paramsHost = document.querySelector(`.accel-params[data-dim="${dim}"]`);
+    if (!dimension || !methodSelect || !paramsHost) return;
+    const method = (dimension.methods || []).find((item) => item.id === methodSelect.value);
+    const params = (method && method.params) || {};
+    const entries = Object.entries(params);
+    paramsHost.innerHTML = entries.length
+      ? entries.map(([key, spec]) => paramControl(dim, key, spec)).join("")
+      : '<span class="hint">No parameters.</span>';
+  }
+
+  function updateAccelVisibility() {
+    const custom = state.generateMode === "video" && $("gen-speed-preset").value === "custom";
+    $("gen-accel-section").hidden = !custom;
+    if (!custom) {
+      // Hidden number controls are still form-associated; leaving an invalid
+      // value here can block native form validation for every mode.
+      $("gen-accel-fields").innerHTML = "";
+      return;
+    }
+    if (!state.accelSchema) {
+      ensureAccelSchema().catch((error) => {
+        $("gen-accel-hint").textContent = "Schema unavailable: " + error.message;
+      });
+    } else {
+      renderAccelForm();
+    }
+  }
+
+  function buildSpeed() {
+    const preset = $("gen-speed-preset").value;
+    if (preset !== "custom") return preset;
+    if (!state.accelSchema) {
+      throw new Error("acceleration schema is still loading; try again");
+    }
+    const speed = {};
+    for (const dim of state.accelSchema.dimensions || []) {
+      const select = document.querySelector(`.accel-method[data-dim="${dim.id}"]`);
+      if (!select || !select.value || select.value === "none") continue;
+      const params = {};
+      document.querySelectorAll(`.accel-param[data-dim="${dim.id}"]`).forEach((input) => {
+        let value;
+        if (input.type === "checkbox") value = input.checked;
+        else if (input.type === "number") value = input.valueAsNumber;
+        else value = input.value;
+        if (typeof value === "number" && !Number.isFinite(value)) {
+          throw new Error("invalid value for " + input.dataset.param);
+        }
+        params[input.dataset.param] = value;
+      });
+      speed[dim.id] = Object.keys(params).length
+        ? { method: select.value, params }
+        : select.value;
+    }
+    return speed;
+  }
+
   async function openModels() {
     const dialog = $("models-dialog");
     dialog.showModal();
@@ -1285,9 +1445,10 @@
       $("gen-width").value = defaults.width || 1344;
       $("gen-height").value = defaults.height || 768;
       $("gen-seconds").value = defaults.seconds || 5;
-      $("gen-speed").value = "auto";
+      $("gen-speed-preset").value = "auto";
     }
     $("gen-seed").value = "0";
+    updateAccelVisibility();
     updateRefControls();
   }
 
@@ -1306,6 +1467,7 @@
     $("video-fields").hidden = mode !== "video";
     $("gen-negative-row").hidden = mode !== "image";
     $("generate-error").hidden = true;
+    updateAccelVisibility();
     renderGenerateModels();
     applyGenerateDefaults();
   }
@@ -1322,6 +1484,11 @@
       applyGenerateDefaults();
     } catch (error) {
       showGenerateError(error.message);
+    }
+    try {
+      await ensureAccelSchema();
+    } catch (error) {
+      $("gen-accel-hint").textContent = "Schema unavailable: " + error.message;
     }
     setTimeout(() => $("gen-prompt").focus(), 30);
   }
@@ -1424,6 +1591,20 @@
         body = JSON.stringify(payload);
       }
     } else {
+      let speed;
+      try {
+        speed = buildSpeed();
+      } catch (error) {
+        showGenerateError(error.message);
+        return;
+      }
+      if (typeof speed === "object" && videoMode !== "t2va") {
+        showGenerateError(
+          "custom acceleration is only supported for text-only video; " +
+          "choose a preset or remove reference inputs"
+        );
+        return;
+      }
       if (videoMode === "r2v" && referenceVideos.length
           && !modelSupportsReferenceVideo(model)) {
         showGenerateError("this model does not support reference video");
@@ -1445,7 +1626,7 @@
         height: String(numberValue("gen-height", 768)),
         seconds: String(numberValue("gen-seconds", 5)),
         seed: String(numberValue("gen-seed", 0)),
-        speed: $("gen-speed").value,
+        speed,
         task: videoMode,
       };
       if (videoMode !== "t2va") {
@@ -1471,7 +1652,7 @@
           height: numberValue("gen-height", 768),
           seconds: numberValue("gen-seconds", 5),
           seed: numberValue("gen-seed", 0),
-          speed: $("gen-speed").value,
+          speed,
           task: videoMode,
         };
         url = "/v1/videos";
@@ -1580,6 +1761,7 @@
     setReferenceVideos(event.target.files);
   });
   $("gen-video-mode").addEventListener("change", updateRefControls);
+  $("gen-speed-preset").addEventListener("change", updateAccelVisibility);
   $("generate-form").addEventListener("submit", submitGenerate);
   $("generate-close").addEventListener("click", () => $("generate-dialog").close());
   $("generate-cancel").addEventListener("click", () => $("generate-dialog").close());

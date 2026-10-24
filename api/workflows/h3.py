@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, Optional
 
 from ..accel import (
+    DASIWA_MAX_FRAMES,
     AccelConfig,
     apply_accel_layers,
     check_config_available,
@@ -22,20 +23,15 @@ H3_PHASE_WEIGHTS = {
     "save": 0.07,
 }
 
-# DaSiWa's block-stack cache outputs near-silent audio on 56-frame clips
-# (2s request) once any cache hit occurs. 39 frames (1.625s) is the last
-# verified-good length. Remove this guard when the upstream node preserves
-# audio residuals on longer clips.
-DASIWA_MAX_FRAMES = 39
-
-
 def check_task_compat(accel: AccelConfig, length: int) -> Optional[str]:
     """Return a user-facing error for a known-broken acceleration/length pair."""
     if accel.block_cache == "dasiwa" and length > DASIWA_MAX_FRAMES:
+        seconds = DASIWA_MAX_FRAMES / 24
         return (
-            "dasiwa cache is disabled for H3 clips longer than 39 frames "
-            "(1.625s): its audio residual collapses to near-silence on longer "
-            "clips; use block_cache=fbc/t8 or a shorter clip"
+            f"dasiwa cache is disabled for H3 clips longer than "
+            f"{DASIWA_MAX_FRAMES} frames ({seconds:.3f}s): its audio residual "
+            "collapses to near-silence on longer clips; use block_cache=fbc/t8 "
+            "or a shorter clip"
         )
     return None
 
