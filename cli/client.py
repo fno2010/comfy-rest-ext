@@ -423,3 +423,6 @@ class ComfyRestClient:
     # -- health ----------------------------------------------------------
     def health(self) -> Dict[str, Any]:
         return self._get("/v2/extension/health")
+
+    def acceleration_schema(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/acceleration/schema")

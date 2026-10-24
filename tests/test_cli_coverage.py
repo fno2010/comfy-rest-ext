@@ -7,7 +7,7 @@ import json
 import pytest
 
 from cli import commands
-from cli.__main__ import _build_parser
+from cli.__main__ import _build_parser, _rewrite_dot_params
 from cli.client import ComfyRestClient
 
 
@@ -17,9 +17,38 @@ class Args:
             setattr(self, key, value)
 
 
+_SCHEMA = {
+    "dimensions": [
+        {
+            "id": "block_cache",
+            "exclusive": True,
+            "methods": [
+                {"id": "none", "implemented": True, "available": True, "params": {}},
+                {
+                    "id": "fbc",
+                    "implemented": True,
+                    "available": True,
+                    "required_nodes": ["H3FirstBlockCache"],
+                    "missing_nodes": [],
+                    "params": {
+                        "threshold": {"type": "float", "default": 0.08, "min": 0, "max": 1},
+                        "start_step": {"type": "int", "default": 2, "min": 0, "max": 100},
+                    },
+                },
+            ],
+        },
+    ],
+    "presets": {"auto": "auto", "sol-stack": "sol-stack"},
+}
+
+
 class FakeClient:
     def __init__(self) -> None:
         self.calls = []
+
+    def acceleration_schema(self):
+        self.calls.append(("schema",))
+        return _SCHEMA
 
     def create_video(self, payload):
         self.calls.append(("video-json", payload))
@@ -772,3 +801,195 @@ def test_parser_accepts_speed_json():
         "videos", "generate", "p", "--speed-json", '{"steps":4}',
     ])
     assert args.speed_json == '{"steps":4}'
+
+
+def test_rewrite_dot_params():
+    assert _rewrite_dot_params([
+        "--block-cache.threshold", "0.12",
+        "--turbo.strength=0.8",
+        "--width", "512",
+    ]) == [
+        "--dotted-param", "block_cache.threshold=0.12",
+        "--dotted-param", "turbo.strength=0.8",
+        "--width", "512",
+    ]
+
+
+def test_build_video_payload_dot_params():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=8, turbo=None, block_cache="fbc",
+        step_cache=None, attention=None, vae_decode=None,
+        accel_params=["block_cache.threshold=0.12", "block_cache.start_step=3"],
+    )
+    payload = commands._build_video_payload(args, schema=_SCHEMA)
+    assert payload["speed"] == {
+        "steps": 8,
+        "block_cache": {
+            "method": "fbc",
+            "params": {"threshold": 0.12, "start_step": 3},
+        },
+    }
+
+
+def test_build_video_payload_dot_param_requires_method():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        accel_params=["block_cache.threshold=0.12"],
+    )
+    with pytest.raises(commands.ApiError, match="must select a method"):
+        commands._build_video_payload(args, schema=_SCHEMA)
+
+
+def test_build_video_payload_speed_file(tmp_path):
+    path = tmp_path / "speed.json"
+    path.write_text('{"steps": 4, "block_cache": "fbc"}')
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        speed_file=str(path),
+    )
+    payload = commands._build_video_payload(args)
+    assert payload["speed"] == {"steps": 4, "block_cache": "fbc"}
+
+
+def test_build_video_payload_speed_json_at_file(tmp_path):
+    path = tmp_path / "speed.json"
+    path.write_text('{"attention": "sol"}')
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        speed_json="@" + str(path),
+    )
+    payload = commands._build_video_payload(args)
+    assert payload["speed"] == {"attention": "sol"}
+
+
+def test_build_video_payload_preset():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        preset="sol-stack",
+    )
+    payload = commands._build_video_payload(args, schema=_SCHEMA)
+    assert payload["speed"] == "sol-stack"
+
+
+def test_cmd_generate_fetches_schema_for_preset():
+    client = FakeClient()
+    args = Args(
+        json=True, prompt="p", image=None, video=None, model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+        steps=None, turbo=None, block_cache=None, step_cache=None,
+        attention=None, vae_decode=None, preset="auto", multipart=False,
+    )
+    assert commands.cmd_generate(client, args) == 0
+    assert ("schema",) in client.calls
+    kind, payload = client.calls[-1]
+    assert kind == "video-json"
+    assert payload["speed"] == "auto"
+
+
+def test_parser_accepts_rewritten_dot_params():
+    parser = _build_parser()
+    args = parser.parse_args(_rewrite_dot_params([
+        "videos", "generate", "p",
+        "--block-cache", "fbc",
+        "--block-cache.threshold", "0.15",
+    ]))
+    assert args.accel_params == ["block_cache.threshold=0.15"]
+
+
+def test_rewrite_rejects_option_as_value():
+    with pytest.raises(ValueError, match="requires a value"):
+        _rewrite_dot_params([
+            "videos", "generate", "p",
+            "--turbo.sampler", "--width", "512",
+        ])
+
+
+def test_rewrite_accepts_negative_numeric_value():
+    assert _rewrite_dot_params([
+        "videos", "generate", "p",
+        "--turbo.strength", "-0.5",
+    ])[-1] == "turbo.strength=-0.5"
+
+
+def test_speed_file_rejects_non_utf8(tmp_path):
+    path = tmp_path / "speed.json"
+    path.write_bytes(b"\xff\xfe\x00")
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo=None, block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+        speed_file=str(path),
+    )
+    with pytest.raises(commands.ApiError, match="not valid UTF-8"):
+        commands._build_video_payload(args)
+
+
+def test_coerce_accel_param_types_ranges_choices():
+    method = {
+        "id": "demo",
+        "params": {
+            "mode": {"type": "str", "choices": ["a", "b"]},
+            "count": {"type": "int", "min": 1, "max": 2},
+            "ratio": {"type": "float", "min": 0, "max": 1},
+            "flag": {"type": "bool"},
+        },
+    }
+    assert commands._coerce_accel_param("x", method, "mode", "a") == "a"
+    assert commands._coerce_accel_param("x", method, "count", "2") == 2
+    assert commands._coerce_accel_param("x", method, "ratio", "0.5") == 0.5
+    assert commands._coerce_accel_param("x", method, "flag", "yes") is True
+    with pytest.raises(commands.ApiError, match="must be one of"):
+        commands._coerce_accel_param("x", method, "mode", "c")
+    with pytest.raises(commands.ApiError, match="must be >= 1"):
+        commands._coerce_accel_param("x", method, "count", "0")
+    with pytest.raises(commands.ApiError, match="must be <= 1"):
+        commands._coerce_accel_param("x", method, "ratio", "2")
+    with pytest.raises(commands.ApiError, match="must be a boolean"):
+        commands._coerce_accel_param("x", method, "flag", "maybe")
+    with pytest.raises(commands.ApiError, match="not a parameter"):
+        commands._coerce_accel_param("x", method, "missing", "1")
+
+
+def test_flat_method_is_schema_validated_not_argparse_choice():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "videos", "generate", "p", "--block-cache", "future-method",
+    ])
+    assert args.block_cache == "future-method"
+    with pytest.raises(commands.ApiError, match="not registered"):
+        commands._build_video_payload(args, schema=_SCHEMA)
+
+
+def test_flat_default_is_schema_rejected():
+    args = Args(
+        prompt="p", model=None, width=None, height=None, seconds=None,
+        seed=None, speed=None, steps=None, turbo="default", block_cache=None,
+        step_cache=None, attention=None, vae_decode=None,
+    )
+    with pytest.raises(commands.ApiError, match="not registered"):
+        commands._build_video_payload(args, schema=_SCHEMA)
+
+
+def test_vae_decode_does_not_fetch_schema():
+    client = FakeClient()
+    client.calls.clear()
+    args = Args(
+        json=True, prompt="p", image=None, video=None, model=None,
+        width=None, height=None, seconds=None, seed=None, speed=None,
+        steps=None, turbo=None, block_cache=None, step_cache=None,
+        attention=None, vae_decode="batched", preset=None, multipart=False,
+    )
+    assert commands.cmd_generate(client, args) == 0
+    assert ("schema",) not in client.calls
+    kind, payload = client.calls[-1]
+    assert kind == "video-json"
+    assert payload["speed"] == {"vae_decode": "batched"}
