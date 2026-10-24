@@ -708,6 +708,7 @@ ws.addEventListener('message', (event) => {
 | POST | `/v2/extension/snapshot/import` | 导入快照 |
 | GET | `/v2/extension/snapshot/diff` | 对比快照差异 |
 | GET | `/v2/extension/snapshot/list` | 列出快照 |
+| GET | `/v2/extension/acceleration/schema` | 加速维度/方法/参数/可用性 schema |
 
 | POST | `/v2/extension/video/generate` | 提交视频生成任务 |
 | GET | `/v2/extension/video/{task_id}` | 查询视频生成状态 |
@@ -727,7 +728,7 @@ ws.addEventListener('message', (event) => {
 | GET | `/v1/videos` | 列出视频任务（OpenAI 兼容） |
 | DELETE | `/v1/videos/{video_id}` | 删除视频任务（OpenAI 兼容） |
 
-**总计：45 个端点**
+**总计：46 个端点**
 
 ---
 
@@ -899,6 +900,54 @@ GET /v2/extension/image/{id}/content?index=N
 参考图：选择 Qwen-Image 2.1 时图片表单显示参考图上传（走 `/v1/images/edits`，prompt 用 `<image1>`…）；视频表单提供 `Text only` / `First frame (I2V)` / `Reference images (R2V)`，后两者走 `/v1/videos` multipart，R2V prompt 用 `<Picture N>`。R2V 下若模型声明 `reference_video` capability，还会显示参考视频上传（最多 3 个，prompt 用 `<Video N>`）。
 
 ---
+
+## 加速 schema
+
+### GET `/v2/extension/acceleration/schema` — 加速 schema
+
+只读端点，供 dashboard、CLI 和文档消费。返回当前注册的维度、方法、参数 schema、legacy `speed` 映射、节点可用性与已知约束；不执行任务。
+
+```json
+{
+  "version": 1,
+  "dimensions": [
+    {
+      "id": "block_cache",
+      "exclusive": true,
+      "methods": [
+        {"id": "none", "available": true, "params": {}},
+        {
+          "id": "fbc",
+          "implemented": true,
+          "available": true,
+          "required_nodes": ["H3FirstBlockCache"],
+          "missing_nodes": [],
+          "params": {
+            "threshold": {"type": "float", "default": 0.08, "min": 0.0, "max": 1.0}
+          }
+        },
+        {
+          "id": "dasiwa",
+          "implemented": true,
+          "available": true,
+          "required_nodes": ["MiniMaxH3Cache"],
+          "missing_nodes": [],
+          "params": {"reuse_threshold": {"type": "float", "default": 0.05, "min": 0.0, "max": 1.0}},
+          "constraints": {"max_frames": 39, "reason": "audio residual collapses to near-silence on longer clips"}
+        }
+      ]
+    }
+  ],
+  "legacy_speed": {"te-speed": {"block_cache": "te-speed", "attention": "none"}},
+  "parse_only": {
+    "vae_decode": {"options": ["default", "batched"], "applied": false, "scope": "request"},
+    "precision": {"options": ["default", "int8", "fp8", "bf16"], "applied": false, "scope": "model_load"}
+  },
+  "rules": [{"type": "incompatible", "dimensions": ["turbo", "step_cache"]}]
+}
+```
+
+`available` 为 `null` 表示当前进程无法判断节点可用性（例如非 ComfyUI 测试环境）；已加载节点时为布尔值，`missing_nodes` 给出缺失节点。`cachedit` 当前 `implemented=false`。`parse_only` 中的选项暂未生效，UI 不应把它们当成可用加速。
 
 ## OpenAI 兼容 API
 

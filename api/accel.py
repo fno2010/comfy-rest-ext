@@ -19,11 +19,13 @@ Dimensions:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 ACCEL_DIMENSIONS = ("turbo", "attention", "block_cache", "step_cache")
 PRECISION_OPTIONS = ("default", "int8", "fp8", "bf16")
+DASIWA_MAX_FRAMES = 39
 VAE_DECODE_OPTIONS = ("default", "batched")
 
 # Legacy speed string -> equivalent config (backward compatibility).
@@ -61,6 +63,7 @@ class AccelMethod:
     params_schema: Mapping[str, ParamSpec] = field(default_factory=dict)
     implemented: bool = True
     default_steps: Optional[int] = None
+    constraints: Mapping[str, Any] = field(default_factory=dict)
     apply: Optional[Callable] = None
 
     def defaults(self) -> Dict[str, Any]:
@@ -250,6 +253,10 @@ register_method(AccelMethod(
         "device": ParamSpec(str, "auto", choices=("auto", "cuda", "cpu")),
         "verbose": _bool(False),
     },
+    constraints={
+        "max_frames": DASIWA_MAX_FRAMES,
+        "reason": "audio residual collapses to near-silence on longer clips",
+    },
     apply=_single_node("MiniMaxH3Cache"),
 ))
 register_method(AccelMethod(
@@ -371,6 +378,112 @@ def check_config_available(cfg: "AccelConfig") -> Optional[str]:
         if err:
             return err
     return None
+
+
+SCHEMA_VERSION = 1
+
+
+def _param_schema(spec: ParamSpec) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "type": spec.kind.__name__,
+        "default": spec.default,
+    }
+    if spec.minimum is not None:
+        result["min"] = spec.minimum
+    if spec.maximum is not None:
+        result["max"] = spec.maximum
+    if spec.choices is not None:
+        result["choices"] = list(spec.choices)
+    return result
+
+
+def _method_schema(
+    method: AccelMethod, available_nodes: set,
+) -> Dict[str, Any]:
+    known = bool(available_nodes)
+    missing = [
+        node for node in method.required_nodes
+        if known and node not in available_nodes
+    ]
+    result: Dict[str, Any] = {
+        "id": method.id,
+        "implemented": method.implemented,
+        "available": (
+            None if not known
+            else method.implemented and not missing
+        ),
+        "required_nodes": list(method.required_nodes),
+        "missing_nodes": missing,
+        "params": {
+            key: _param_schema(spec)
+            for key, spec in method.params_schema.items()
+        },
+    }
+    if method.default_steps is not None:
+        result["default_steps"] = method.default_steps
+    if method.constraints:
+        result["constraints"] = dict(method.constraints)
+    return result
+
+
+def acceleration_schema() -> Dict[str, Any]:
+    """Machine-readable catalog of acceleration dimensions/methods/params."""
+    available_nodes = _available_nodes()
+    dimensions = []
+    for dimension in ACCEL_DIMENSIONS:
+        methods = [{
+            "id": "none",
+            "implemented": True,
+            "available": True,
+            "required_nodes": [],
+            "missing_nodes": [],
+            "params": {},
+        }]
+        methods.extend(
+            _method_schema(method, available_nodes)
+            for method in methods_for_dimension(dimension)
+        )
+        dimensions.append({
+            "id": dimension,
+            "exclusive": True,
+            "methods": methods,
+        })
+    return {
+        "version": SCHEMA_VERSION,
+        "dimensions": dimensions,
+        "steps": {"type": "int", "default": 20, "min": 1},
+        "legacy_speed": {
+            key: dict(value) for key, value in _LEGACY_SPEED_MAP.items()
+        },
+        "legacy_speed_note": (
+            "static aliases; auto is resolved with H3_TE_SPEED / "
+            "H3_SOL_STACK at request time"
+        ),
+        "env_defaults": {
+            "H3_TE_SPEED": os.environ.get("H3_TE_SPEED", "0") == "1",
+            "H3_SOL_STACK": os.environ.get("H3_SOL_STACK", "0") == "1",
+        },
+        "parse_only": {
+            "vae_decode": {
+                "options": list(VAE_DECODE_OPTIONS),
+                "applied": False,
+                "scope": "request",
+            },
+            "precision": {
+                "options": list(PRECISION_OPTIONS),
+                "applied": False,
+                "scope": "model_load",
+                "keys": ["unet", "text_encoder", "vae"],
+            },
+        },
+        "rules": [
+            {
+                "type": "incompatible",
+                "dimensions": ["turbo", "step_cache"],
+                "reason": "step-cache warmup dominates at low step counts",
+            },
+        ],
+    }
 
 
 class AccelConfigError(ValueError):
@@ -571,8 +684,6 @@ def parse_accel_config(raw: Any, default_steps: int = 20) -> AccelConfig:
 
 def _apply_env_defaults(cfg: AccelConfig) -> AccelConfig:
     """Apply H3_* env overrides for legacy/auto configs."""
-    import os
-
     if cfg.block_cache == "none" and os.environ.get("H3_TE_SPEED", "0") == "1":
         cfg.block_cache = "te-speed"
     if cfg.attention == "none" and os.environ.get("H3_SOL_STACK", "0") == "1":
