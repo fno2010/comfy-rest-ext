@@ -22,6 +22,7 @@ from aiohttp import web, MultipartReader
 from server import PromptServer
 
 from ..schemas.requests import VideoGenerateRequest
+from ..workflows.h3 import check_task_compat
 from ..tasks.video_task import (
     VideoTask,
     frames_for_seconds,
@@ -345,6 +346,9 @@ async def create_video(request: web.Request) -> web.Response:
 
     task_id = f"video_{uuid.uuid4().hex}"
     length = frames_for_seconds(seconds)
+    compat_error = check_task_compat(accel_cfg, length)
+    if compat_error:
+        return web.json_response({"error": compat_error}, status=400)
 
     task = VideoTask(
         task_id=task_id,
