@@ -6,7 +6,6 @@ import os
 from typing import Any, Dict, Optional
 
 from ..accel import (
-    DASIWA_MAX_FRAMES,
     AccelConfig,
     apply_accel_layers,
     check_config_available,
