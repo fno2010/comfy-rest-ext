@@ -491,3 +491,45 @@ def test_huge_integer_float_param_rejected():
             "turbo": {"method": "turbo-v4",
                       "params": {"strength": 10 ** 400}},
         })
+
+
+class TestAccelerationSchema:
+    def test_schema_exposes_methods_params_and_constraints(self):
+        import json
+
+        schema = accel.acceleration_schema()
+        json.dumps(schema)  # must be JSON-serializable (no apply callables)
+
+        dimensions = {item["id"]: item for item in schema["dimensions"]}
+        assert set(dimensions) == set(accel.ACCEL_DIMENSIONS)
+        assert dimensions["block_cache"]["exclusive"] is True
+
+        methods = {item["id"]: item for item in dimensions["block_cache"]["methods"]}
+        assert methods["none"]["available"] is True
+        assert methods["fbc"]["params"]["threshold"]["type"] == "float"
+        assert methods["fbc"]["params"]["threshold"]["default"] == 0.08
+        assert methods["dasiwa"]["constraints"]["max_frames"] == accel.DASIWA_MAX_FRAMES
+        assert methods["cachedit"]["implemented"] is False
+
+        assert schema["legacy_speed"]["sol-stack"] == {
+            "block_cache": "fbc", "attention": "sol",
+        }
+        assert schema["parse_only"]["vae_decode"]["applied"] is False
+        assert schema["parse_only"]["precision"]["applied"] is False
+
+    def test_schema_availability_uses_installed_nodes(self, monkeypatch):
+        saved = accel._node_cache
+        try:
+            accel._node_cache = {"H3FirstBlockCache"}
+            schema = accel.acceleration_schema()
+            methods = {
+                item["id"]: item
+                for item in next(
+                    d for d in schema["dimensions"] if d["id"] == "block_cache"
+                )["methods"]
+            }
+            assert methods["fbc"]["available"] is True
+            assert methods["t8"]["available"] is False
+            assert methods["t8"]["missing_nodes"] == ["MiniMaxH3BlockCacheT8"]
+        finally:
+            accel._node_cache = saved

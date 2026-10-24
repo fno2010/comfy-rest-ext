@@ -464,6 +464,8 @@ COVERED_ROUTES = {
 
 EXCLUDED_ROUTES = {
     ("GET", "/ui"),
+    # Consumed by the dashboard/CLI schema work; no CLI command yet.
+    ("GET", "/v2/extension/acceleration/schema"),
     ("GET", "/v2/extension/ui"),
     ("GET", "/v2/extension/video"),
     ("POST", "/v2/extension/video/generate"),
