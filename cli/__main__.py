@@ -42,8 +42,6 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
                         help="step-level cache method (validated by schema)")
     parser.add_argument("--attention",
                         help="attention kernel (validated by schema)")
-    parser.add_argument("--vae-decode", choices=["default", "batched"],
-                        help="VAE decode strategy (default default)")
     parser.add_argument("--speed-json",
                         help="full speed JSON object or @file, e.g. "
                              '\'{"steps":4,"block_cache":{"method":"fbc","params":{"threshold":0.12}}}\'')

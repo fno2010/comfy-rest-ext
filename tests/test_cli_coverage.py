@@ -980,19 +980,3 @@ def test_flat_default_is_schema_rejected():
     )
     with pytest.raises(commands.ApiError, match="not registered"):
         commands._build_video_payload(args, schema=_SCHEMA)
-
-
-def test_vae_decode_does_not_fetch_schema():
-    client = FakeClient()
-    client.calls.clear()
-    args = Args(
-        json=True, prompt="p", image=None, video=None, model=None,
-        width=None, height=None, seconds=None, seed=None, speed=None,
-        steps=None, turbo=None, block_cache=None, step_cache=None,
-        attention=None, vae_decode="batched", preset=None, multipart=False,
-    )
-    assert commands.cmd_generate(client, args) == 0
-    assert ("schema",) not in client.calls
-    kind, payload = client.calls[-1]
-    assert kind == "video-json"
-    assert payload["speed"] == {"vae_decode": "batched"}

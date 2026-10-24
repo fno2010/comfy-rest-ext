@@ -51,13 +51,12 @@ class TestParseAccelConfig:
             "turbo": "turbo-v4",
             "block_cache": "fbc",
             "attention": "sol",
-            "vae_decode": "batched",
         })
         assert cfg.steps == 8
         assert cfg.turbo == "turbo-v4"
         assert cfg.block_cache == "fbc"
         assert cfg.attention == "sol"
-        assert cfg.vae_decode == "batched"
+        assert cfg.vae_decode == "default"
 
     def test_invalid_layer_value_rejected(self):
         with pytest.raises(accel.AccelConfigError):
@@ -70,6 +69,14 @@ class TestParseAccelConfig:
     def test_invalid_precision_key_rejected(self):
         with pytest.raises(accel.AccelConfigError):
             accel.parse_accel_config({"precision": {"bogus": "int8"}})
+
+    def test_vae_decode_process_level_rejected(self):
+        with pytest.raises(accel.AccelConfigError, match="process-level"):
+            accel.parse_accel_config({"vae_decode": "batched"})
+
+    def test_precision_override_rejected(self):
+        with pytest.raises(accel.AccelConfigError, match="not supported"):
+            accel.parse_accel_config({"precision": {"unet": "fp8"}})
 
     def test_turbo_step_cache_combo_rejected(self):
         with pytest.raises(accel.AccelConfigError):
@@ -524,7 +531,10 @@ class TestAccelerationSchema:
             "block_cache": "fbc", "attention": "sol",
         }
         assert schema["parse_only"]["vae_decode"]["applied"] is False
+        assert schema["parse_only"]["vae_decode"]["supported"] is False
+        assert schema["parse_only"]["vae_decode"]["options"] == ["default"]
         assert schema["parse_only"]["precision"]["applied"] is False
+        assert schema["parse_only"]["precision"]["supported"] is False
         assert schema["rules"][0]["dimensions"] == ["turbo", "step_cache"]
         assert "legacy_speed_note" in schema
         assert set(schema["env_defaults"]) == {"H3_TE_SPEED", "H3_SOL_STACK"}
