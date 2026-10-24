@@ -985,8 +985,14 @@ GET /v2/extension/acceleration/schema
   "legacy_speed": {"te-speed": {"block_cache": "te-speed", "attention": "none"}},
   "presets": {"te-speed": "te-speed", "sol-stack": "sol-stack"},
   "parse_only": {
-    "vae_decode": {"options": ["default", "batched"], "applied": false, "scope": "request"},
-    "precision": {"options": ["default", "int8", "fp8", "bf16"], "applied": false, "scope": "model_load"}
+    "vae_decode": {
+      "options": ["default"], "applied": false, "supported": false,
+      "scope": "process", "reason": "set H3_VAE_BATCHED before startup"
+    },
+    "precision": {
+      "options": ["default"], "applied": false, "supported": false,
+      "scope": "model_load", "reason": "H3 checkpoints are pre-quantized"
+    }
   },
   "rules": [{"type": "incompatible", "dimensions": ["turbo", "step_cache"]}]
 }
@@ -1121,7 +1127,7 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 ```
 `inference_time_s`：任务完成后为 `completed_at - created_at`（秒），否则为 `null`。
 
-`speed` 是原始请求值；`params` 是任务级参数；`acceleration` 是**解析后实际生效的配置**（方法默认值 + 请求覆盖 + 解析出的 LoRA/steps/shift/sampler）。`vae_decode` / `precision` 目前标记为 `applied: false`。图片任务摘要同样返回 `speed` / `params` / `acceleration`。
+`speed` 是原始请求值；`params` 是任务级参数；`acceleration` 是**解析后实际生效的配置**（方法默认值 + 请求覆盖 + 解析出的 LoRA/steps/shift/sampler）。`vae_decode` / `precision` 不接受非 `default` 值；请求里出现会返回 400。VAE batched 是进程级 `H3_VAE_BATCHED`（需重启），precision 对预量化 H3 权重没有可用 loader 映射。图片任务摘要同样返回 `speed` / `params` / `acceleration`。
 
 **加速模式（speed 字段，可选）：**
 
@@ -1165,7 +1171,7 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 | `step_cache` | `easycache` / `lazycache` | `reuse_threshold=0.2`, `start_percent=0.15`, `end_percent=1.0`, `verbose=false` |
 | | `spectrum` | `enabled=true`, `blend_weight=0.50`, `degree=1`, `ridge_lambda=0.10`, `window_size=2.0`, `flex_window=0.75`, `warmup_steps=1`, `tail_actual_steps=1`, `max_history=4`, `debug=false` |
 
-`cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 仍只做解析，尚未接入 H3 workflow（P1.5b/P2）。`lightx2v-4step-v1.3` 需要把对应 ComfyUI LoRA 放进 `models/loras/`，否则任务会在资产检查阶段失败。
+`cachedit` / `teacache` 已注册但当前 H3 builder 未实现，运行时返回 400；`vae_decode` / `precision` 的非 `default` 请求现在直接返回 400，不再静默忽略。`lightx2v-4step-v1.3` 需要把对应 ComfyUI LoRA 放进 `models/loras/`，否则任务会在资产检查阶段失败。
 
 P1.5b 目前接入的是 LightX2V v1.3。TAEH3 是预览解码器，不作为最终 VAE 替换。`t8` 需要安装 `T8mars/comfyui-minimax-h3-blockcache-T8`（节点 `MiniMaxH3BlockCacheT8`）；其 1.0.4 在 ComfyUI 0.37 上还需要 prefetch-cleanup 签名补丁（部署仓库 `patch/comfyui/`），否则命中步会报 `cleanup_prefetched_modules() missing 1 required positional argument`。`fbc` 在 ComfyUI 0.37 下必须使用带 malloc-graph 修复的 Sol-Attn 节点；未打补丁的节点会在第一步报 `aimdo memory compile error`。FBC 在 20-step、512×512、1s 的实测中，threshold 0.08 不跳步，0.12 约 1.33×/SSIM 0.976，0.15 约 1.65×/SSIM 0.925；4-step LightX2V 基本不命中。T8 同尺寸 seed 21 的 20-step 实测：0.15/gpu 22.0s、SSIM 0.910，0.18/gpu 21.0s、SSIM 0.912，0.20/gpu 20.0s、SSIM 0.880（baseline 28.0s）；默认 0.12 + CPU 反而 37.1s。`dasiwa` 需要 `MiniMaxH3Cache` 节点（完整 DaSiWa 节点包）；同尺寸 seed 31 的 20-step 实测：0.05/auto 23.1s、SSIM 0.898，0.08/auto 16.0s、SSIM 0.896（10/20 skipped），baseline 28.1s。该短 clip 上 FBC 的速度/质量仍最好；DaSiWa 0.08 的速度接近 FBC，但 fidelity 更低。三个 cache 的阈值/设备都必须按模型和分辨率重调。 `dasiwa` 在 H3 >39 帧（1.625s）时直接返回 400：当前节点一旦 cache hit 会把长片段音频压到近静音（1s/参考图正常），这是避免坏视频落盘的保护，待上游修复后再移除。
 

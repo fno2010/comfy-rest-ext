@@ -281,7 +281,6 @@ def _build_video_payload(args: Any, schema: Optional[Dict[str, Any]] = None) -> 
         "block_cache": getattr(args, "block_cache", None),
         "step_cache": getattr(args, "step_cache", None),
         "attention": getattr(args, "attention", None),
-        "vae_decode": getattr(args, "vae_decode", None),
     }
     steps = getattr(args, "steps", None)
     legacy_speed = getattr(args, "speed", None)
@@ -289,7 +288,6 @@ def _build_video_payload(args: Any, schema: Optional[Dict[str, Any]] = None) -> 
         dim: method_id
         for dim, method_id in layer_opts.items()
         if method_id not in (None, "none")
-        and not (dim == "vae_decode" and method_id == "default")
     }
     speed_json = getattr(args, "speed_json", None)
     speed_file = getattr(args, "speed_file", None)
@@ -298,8 +296,6 @@ def _build_video_payload(args: Any, schema: Optional[Dict[str, Any]] = None) -> 
 
     if schema and active_layers:
         for dim, method_id in active_layers.items():
-            if dim == "vae_decode":
-                continue
             method = _schema_method(schema, dim, method_id)
             if not method.get("implemented", True):
                 raise ApiError(400, f"{dim}.{method_id} is not implemented")
@@ -324,7 +320,7 @@ def _build_video_payload(args: Any, schema: Optional[Dict[str, Any]] = None) -> 
             raise ApiError(
                 400,
                 "--speed-json cannot be combined with --speed/--steps/"
-                "--turbo/--block-cache/--step-cache/--attention/--vae-decode/"
+                "--turbo/--block-cache/--step-cache/--attention/"
                 "--speed-file/--preset/dot-path params",
             )
         payload["speed"] = _read_speed_json(speed_json)
@@ -361,7 +357,7 @@ def _build_video_payload(args: Any, schema: Optional[Dict[str, Any]] = None) -> 
         raise ApiError(
             400,
             "--speed conflicts with --steps/--turbo/--block-cache/--step-cache/"
-            "--attention/--vae-decode; use one or the other",
+            "--attention; use one or the other",
         )
     if active_layers or steps:
         speed_obj: Dict[str, Any] = {k: v for k, v in layer_opts.items() if v is not None}
@@ -390,7 +386,7 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
                 return _emit_error(
                     "--multipart supports legacy --speed strings only; "
                     "omit --steps/--turbo/--block-cache/--step-cache/"
-                    "--attention/--vae-decode or use JSON mode"
+                    "--attention or use JSON mode"
                 )
             files = []
             for path in getattr(args, "image", None) or []:

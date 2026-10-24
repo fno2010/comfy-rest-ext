@@ -24,9 +24,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 ACCEL_DIMENSIONS = ("turbo", "attention", "block_cache", "step_cache")
-PRECISION_OPTIONS = ("default", "int8", "fp8", "bf16")
+PRECISION_OPTIONS = ("default",)
 DASIWA_MAX_FRAMES = 39
-VAE_DECODE_OPTIONS = ("default", "batched")
+VAE_DECODE_OPTIONS = ("default",)
 
 # Legacy speed string -> equivalent config (backward compatibility).
 _LEGACY_SPEED_MAP = {
@@ -466,15 +466,19 @@ def acceleration_schema() -> Dict[str, Any]:
         "presets": {key: key for key in _LEGACY_SPEED_MAP},
         "parse_only": {
             "vae_decode": {
-                "options": list(VAE_DECODE_OPTIONS),
+                "options": ["default"],
                 "applied": False,
-                "scope": "request",
+                "supported": False,
+                "scope": "process",
+                "reason": "set H3_VAE_BATCHED before startup",
             },
             "precision": {
-                "options": list(PRECISION_OPTIONS),
+                "options": ["default"],
                 "applied": False,
+                "supported": False,
                 "scope": "model_load",
                 "keys": ["unet", "text_encoder", "vae"],
+                "reason": "H3 checkpoints are pre-quantized",
             },
         },
         "rules": [
@@ -662,7 +666,12 @@ def parse_accel_config(raw: Any, default_steps: int = 20) -> AccelConfig:
             cfg.params[layer] = params
 
     vae_decode = raw.get("vae_decode", "default")
-    _validate_value("vae_decode", vae_decode, VAE_DECODE_OPTIONS)
+    if vae_decode not in VAE_DECODE_OPTIONS:
+        raise AccelConfigError(
+            "vae_decode must be 'default'; batched VAE is process-level. "
+            "Set H3_VAE_BATCHED before startup and inspect it via "
+            "/v2/extension/config"
+        )
     cfg.vae_decode = vae_decode
 
     precision = raw.get("precision", {})
@@ -671,7 +680,12 @@ def parse_accel_config(raw: Any, default_steps: int = 20) -> AccelConfig:
     for key, value in precision.items():
         if key not in ("unet", "text_encoder", "vae"):
             raise AccelConfigError(f"unknown precision key {key!r}")
-        _validate_value(f"precision.{key}", value, PRECISION_OPTIONS)
+        if value not in PRECISION_OPTIONS:
+            raise AccelConfigError(
+                "precision overrides are not supported for the pre-quantized "
+                "H3 loaders; only 'default' is accepted. Use the model "
+                "file/assets instead"
+            )
     cfg.precision = dict(precision)
 
     if "steps" not in raw:
