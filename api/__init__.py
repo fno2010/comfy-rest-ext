@@ -28,4 +28,5 @@ from .models import video  # noqa: F401
 from .openai import v1  # noqa: F401
 from .openai import images  # noqa: F401
 from . import acceleration  # noqa: F401
+from . import config  # noqa: F401
 from . import ui  # noqa: F401

@@ -34,6 +34,47 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
 
 ---
 
+## 进程级配置
+
+### GET `/v2/extension/config` — 查看配置与可变性
+
+返回白名单设置、当前值、默认值、来源（`env` / `default`）、类型，以及 `restart_required` / `editable` 标记。
+
+```json
+{
+  "settings": {
+    "H3_STEPS": {
+      "type": "int", "default": 20, "min": 1, "max": 200,
+      "restart_required": false, "editable": true,
+      "value": 20, "source": "default"
+    },
+    "H3_VAE_BATCHED": {
+      "type": "bool", "default": true,
+      "restart_required": true, "editable": false,
+      "value": true, "source": "env"
+    }
+  }
+}
+```
+
+### POST `/v2/extension/config` — 更新进程配置
+
+```json
+{"settings": {"H3_STEPS": 12, "H3_TE_SPEED": true}}
+```
+
+写入的是进程环境变量，因此对**后续请求**生效；显式请求参数仍然优先。白名单：
+
+| key | 生效时机 |
+|---|---|
+| `H3_STEPS`, `H3_SAMPLER`, `H3_SCHEDULER`, `H3_REF_SIZE` | 请求时 |
+| `H3_TE_SPEED`, `H3_SOL_STACK`, `COMFY_REST_UNLOAD_ON_FAMILY_SWITCH` | 请求时 |
+| `H3_VAE_BATCHED` | import 时；POST 返回 409，需重启 |
+
+未知 key、错误类型、越界值，或批量里包含 `restart_required` 配置时，整个更新会被拒绝，不会部分生效。
+
+---
+
 ## 模型下载
 
 ### POST `/v2/extension/model/download` — 创建下载任务
@@ -684,6 +725,8 @@ ws.addEventListener('message', (event) => {
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/v2/extension/health` | 健康检查 |
+| GET | `/v2/extension/config` | 进程级配置与可变性 |
+| POST | `/v2/extension/config` | 更新请求时读取的进程配置 |
 | POST | `/v2/extension/model/download` | 创建下载任务 |
 | GET | `/v2/extension/model/download/{task_id}` | 查询下载状态 |
 | DELETE | `/v2/extension/model/download/{task_id}` | 取消下载任务 |
@@ -728,7 +771,7 @@ ws.addEventListener('message', (event) => {
 | GET | `/v1/videos` | 列出视频任务（OpenAI 兼容） |
 | DELETE | `/v1/videos/{video_id}` | 删除视频任务（OpenAI 兼容） |
 
-**总计：46 个端点**
+**总计：48 个端点**
 
 ---
 
