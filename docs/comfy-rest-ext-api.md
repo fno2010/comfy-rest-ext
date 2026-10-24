@@ -901,6 +901,54 @@ GET /v2/extension/image/{id}/content?index=N
 
 ---
 
+## 加速 schema
+
+### GET `/v2/extension/acceleration/schema` — 加速 schema
+
+只读端点，供 dashboard、CLI 和文档消费。返回当前注册的维度、方法、参数 schema、legacy `speed` 映射、节点可用性与已知约束；不执行任务。
+
+```json
+{
+  "version": 1,
+  "dimensions": [
+    {
+      "id": "block_cache",
+      "exclusive": true,
+      "methods": [
+        {"id": "none", "available": true, "params": {}},
+        {
+          "id": "fbc",
+          "implemented": true,
+          "available": true,
+          "required_nodes": ["H3FirstBlockCache"],
+          "missing_nodes": [],
+          "params": {
+            "threshold": {"type": "float", "default": 0.08, "min": 0.0, "max": 1.0}
+          }
+        },
+        {
+          "id": "dasiwa",
+          "implemented": true,
+          "available": true,
+          "required_nodes": ["MiniMaxH3Cache"],
+          "missing_nodes": [],
+          "params": {"reuse_threshold": {"type": "float", "default": 0.05, "min": 0.0, "max": 1.0}},
+          "constraints": {"max_frames": 39, "reason": "audio residual collapses to near-silence on longer clips"}
+        }
+      ]
+    }
+  ],
+  "legacy_speed": {"te-speed": {"block_cache": "te-speed", "attention": "none"}},
+  "parse_only": {
+    "vae_decode": {"options": ["default", "batched"], "applied": false, "scope": "request"},
+    "precision": {"options": ["default", "int8", "fp8", "bf16"], "applied": false, "scope": "model_load"}
+  },
+  "rules": [{"type": "incompatible", "dimensions": ["turbo", "step_cache"]}]
+}
+```
+
+`available` 为 `null` 表示当前进程无法判断节点可用性（例如非 ComfyUI 测试环境）；已加载节点时为布尔值，`missing_nodes` 给出缺失节点。`cachedit` 当前 `implemented=false`。`parse_only` 中的选项暂未生效，UI 不应把它们当成可用加速。
+
 ## OpenAI 兼容 API
 
 通过 Custom Node 机制注册 OpenAI 风格的 `/v1/*` 端点，使 AI agent 可直接用官方 OpenAI SDK（`base_url="http://host:8188/v1"`）调用。
@@ -1029,52 +1077,6 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 `inference_time_s`：任务完成后为 `completed_at - created_at`（秒），否则为 `null`。
 
 `speed` 是原始请求值；`params` 是任务级参数；`acceleration` 是**解析后实际生效的配置**（方法默认值 + 请求覆盖 + 解析出的 LoRA/steps/shift/sampler）。`vae_decode` / `precision` 目前标记为 `applied: false`。图片任务摘要同样返回 `speed` / `params` / `acceleration`。
-
-### GET `/v2/extension/acceleration/schema` — 加速 schema
-
-只读端点，供 dashboard、CLI 和文档消费。返回当前注册的维度、方法、参数 schema、legacy `speed` 映射、节点可用性与已知约束；不执行任务。
-
-```json
-{
-  "version": 1,
-  "dimensions": [
-    {
-      "id": "block_cache",
-      "exclusive": true,
-      "methods": [
-        {"id": "none", "available": true, "params": {}},
-        {
-          "id": "fbc",
-          "implemented": true,
-          "available": true,
-          "required_nodes": ["H3FirstBlockCache"],
-          "missing_nodes": [],
-          "params": {
-            "threshold": {"type": "float", "default": 0.08, "min": 0.0, "max": 1.0}
-          }
-        },
-        {
-          "id": "dasiwa",
-          "implemented": true,
-          "available": true,
-          "required_nodes": ["MiniMaxH3Cache"],
-          "missing_nodes": [],
-          "params": {"reuse_threshold": {"type": "float", "default": 0.05, "min": 0.0, "max": 1.0}},
-          "constraints": {"max_frames": 39, "reason": "audio residual collapses to near-silence on longer clips"}
-        }
-      ]
-    }
-  ],
-  "legacy_speed": {"te-speed": {"block_cache": "te-speed", "attention": "none"}},
-  "parse_only": {
-    "vae_decode": {"options": ["default", "batched"], "applied": false, "scope": "request"},
-    "precision": {"options": ["default", "int8", "fp8", "bf16"], "applied": false, "scope": "model_load"}
-  },
-  "rules": [{"type": "incompatible", "methods": ["turbo", "step_cache"]}]
-}
-```
-
-`available` 为 `null` 表示当前进程无法判断节点可用性（例如非 ComfyUI 测试环境）；已加载节点时为布尔值，`missing_nodes` 给出缺失节点。`cachedit` 当前 `implemented=false`。`parse_only` 中的选项暂未生效，UI 不应把它们当成可用加速。
 
 **加速模式（speed 字段，可选）：**
 

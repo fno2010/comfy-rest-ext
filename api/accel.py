@@ -19,6 +19,7 @@ Dimensions:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
@@ -454,6 +455,14 @@ def acceleration_schema() -> Dict[str, Any]:
         "legacy_speed": {
             key: dict(value) for key, value in _LEGACY_SPEED_MAP.items()
         },
+        "legacy_speed_note": (
+            "static aliases; auto is resolved with H3_TE_SPEED / "
+            "H3_SOL_STACK at request time"
+        ),
+        "env_defaults": {
+            "H3_TE_SPEED": os.environ.get("H3_TE_SPEED", "0") == "1",
+            "H3_SOL_STACK": os.environ.get("H3_SOL_STACK", "0") == "1",
+        },
         "parse_only": {
             "vae_decode": {
                 "options": list(VAE_DECODE_OPTIONS),
@@ -470,7 +479,7 @@ def acceleration_schema() -> Dict[str, Any]:
         "rules": [
             {
                 "type": "incompatible",
-                "methods": ["turbo", "step_cache"],
+                "dimensions": ["turbo", "step_cache"],
                 "reason": "step-cache warmup dominates at low step counts",
             },
         ],
@@ -675,8 +684,6 @@ def parse_accel_config(raw: Any, default_steps: int = 20) -> AccelConfig:
 
 def _apply_env_defaults(cfg: AccelConfig) -> AccelConfig:
     """Apply H3_* env overrides for legacy/auto configs."""
-    import os
-
     if cfg.block_cache == "none" and os.environ.get("H3_TE_SPEED", "0") == "1":
         cfg.block_cache = "te-speed"
     if cfg.attention == "none" and os.environ.get("H3_SOL_STACK", "0") == "1":

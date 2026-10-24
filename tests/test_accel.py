@@ -516,6 +516,9 @@ class TestAccelerationSchema:
         }
         assert schema["parse_only"]["vae_decode"]["applied"] is False
         assert schema["parse_only"]["precision"]["applied"] is False
+        assert schema["rules"][0]["dimensions"] == ["turbo", "step_cache"]
+        assert "legacy_speed_note" in schema
+        assert set(schema["env_defaults"]) == {"H3_TE_SPEED", "H3_SOL_STACK"}
 
     def test_schema_availability_uses_installed_nodes(self, monkeypatch):
         saved = accel._node_cache
