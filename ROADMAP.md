@@ -3,6 +3,16 @@
 Current release: **v0.7.0**  
 Next milestone: **[v0.8.0 — deployment-agnostic server + agent harness](https://github.com/fno2010/comfy-rest-ext/milestone/1)**
 
+## Status
+
+- [x] #47 package boundaries — merged in PR #55 (`5990844`)
+- [ ] #48 deployment-agnostic adapters/capability discovery
+- [ ] #49 capability provisioning
+- [ ] #50 standalone CLI distribution
+- [ ] #51 agent skill / harness
+- [ ] #52 clean-environment acceptance
+
+
 ## Product shape
 
 `comfy-rest-ext` is two explicitly separated products with one HTTP contract:
