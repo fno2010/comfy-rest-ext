@@ -430,3 +430,24 @@ class ComfyRestClient:
 
     def acceleration_schema(self) -> Dict[str, Any]:
         return self._get("/v2/extension/acceleration/schema")
+
+    def capabilities(
+        self,
+        model: Optional[str] = None,
+        capability: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        params = {}
+        if model:
+            params["model"] = model
+        if capability:
+            params["capability"] = capability
+        return self._get("/v2/extension/capabilities", params or None)
+
+    def provision(
+        self, capabilities: list, authorized: bool = False,
+    ) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v2/extension/provision",
+            {"capabilities": capabilities, "authorized": authorized},
+        )

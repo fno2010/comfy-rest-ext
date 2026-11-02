@@ -114,6 +114,18 @@ def _build_parser() -> argparse.ArgumentParser:
                              "(default: COMFY_REST_EXT_TIMEOUT or 60)")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # -- capabilities / provisioning ------------------------------------
+    p = sub.add_parser("capabilities", help="show operational capability status")
+    p.add_argument("--model", help="filter by model id")
+    p.add_argument("--capability", help="filter by capability id, e.g. attention.flash")
+    p.set_defaults(func=commands.cmd_capabilities)
+    p = sub.add_parser("doctor", help="health and capability diagnostics")
+    p.set_defaults(func=commands.cmd_doctor)
+    p = sub.add_parser("provision", help="install selected capabilities")
+    p.add_argument("capability", nargs="+", help="capability id(s), e.g. attention.flash")
+    p.add_argument("--yes", action="store_true", help="explicitly authorize installation")
+    p.set_defaults(func=commands.cmd_provision)
+
     # -- models ---------------------------------------------------------
     p = sub.add_parser("models", help="list / inspect / manage models")
     p.set_defaults(func=commands.cmd_models)

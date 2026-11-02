@@ -78,6 +78,7 @@ class AccelMethod:
     dimension: str
     required_nodes: Tuple[str, ...] = ()
     required_packages: Tuple[Tuple[str, ...], ...] = ()
+    install_spec: Optional[Dict[str, Any]] = None
     params_schema: Mapping[str, ParamSpec] = field(default_factory=dict)
     implemented: bool = True
     default_steps: Optional[int] = None
@@ -219,6 +220,13 @@ register_method(AccelMethod(
     "flash", "attention",
     required_nodes=("PatchFlashAttentionKJ",),
     required_packages=(("flash_attn", "flash_attn_interface"),),
+    install_spec={
+        "kind": "python_package",
+        "package": "flash-attn",
+        "source": "pypi",
+        "pinned": False,
+        "requires_restart": False,
+    },
     params_schema={},
     apply=_single_node("PatchFlashAttentionKJ"),
 ))
@@ -495,6 +503,7 @@ def _method_schema(
         "required_packages": [list(group) for group in method.required_packages],
         "missing_nodes": missing,
         "missing_packages": missing_packages,
+        "install_spec": dict(method.install_spec or {}),
         "params": {
             key: _param_schema(spec)
             for key, spec in method.params_schema.items()
