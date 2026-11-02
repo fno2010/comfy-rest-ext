@@ -22,6 +22,7 @@ from aiohttp import web, MultipartReader
 from server import PromptServer
 
 from ..schemas.requests import VideoGenerateRequest
+from ..accel import DEFAULT_R2V_PROFILE
 from ..workflows.h3 import check_task_compat
 from ..tasks.video_task import (
     VideoTask,
@@ -271,7 +272,11 @@ async def create_video(request: web.Request) -> web.Response:
             {"error": "reference videos require task 'r2v'"}, status=400
         )
 
-    speed = fields.get("speed", "auto")
+    speed = fields.get("speed")
+    if speed is None:
+        speed = "auto"
+    if speed == "auto" and task_type == "r2v":
+        speed = DEFAULT_R2V_PROFILE
     try:
         from ..accel import check_config_available, parse_accel_config
         accel_cfg = parse_accel_config(speed)

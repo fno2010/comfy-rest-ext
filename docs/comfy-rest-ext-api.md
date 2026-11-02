@@ -1135,8 +1135,12 @@ H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` �
 
 - `auto`（默认）：跟随服务器环境变量（`H3_TE_SPEED` / `H3_SOL_STACK`）
 - `none`：关闭加速
+- `quality`：强制无加速、20 steps（显式回退基线，不受 `H3_*` env 影响）
+- `r2v-balanced`：R2V 默认 profile；SageAttention + EasyCache + 15 steps
 - `te-speed`：TE-Speed block cache
 - `sol-stack`：Sol-Attn + FirstBlockCache
+
+R2V 请求未显式提供 `speed`（或传 `auto`）时，服务端解析为 `r2v-balanced`；T2V/I2V 仍保持 `auto`。`/v2/extension/acceleration/schema` 的 `default_profiles` 字段暴露该映射，`presets` 包含 `r2v-balanced` / `quality`。任务响应的 `acceleration.profile` 记录实际生效的 profile。
 
 结构化对象按维度选择方法；每个维度可写成字符串，或 `{"method": ..., "params": {...}}`：
 

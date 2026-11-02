@@ -86,6 +86,47 @@ class TestParseAccelConfig:
         with pytest.raises(accel.AccelConfigError):
             accel.parse_accel_config(42)
 
+    def test_r2v_balanced_profile(self):
+        cfg = accel.parse_accel_config("r2v-balanced")
+        assert cfg.steps == 15
+        assert cfg.steps_explicit is True
+        assert cfg.attention == "sage"
+        assert cfg.step_cache == "easycache"
+        assert cfg.block_cache == "none"
+
+    def test_quality_profile_reproduces_baseline(self, monkeypatch):
+        monkeypatch.setenv("H3_TE_SPEED", "1")
+        monkeypatch.setenv("H3_SOL_STACK", "1")
+        cfg = accel.parse_accel_config("quality")
+        assert cfg.steps == 20
+        assert cfg.steps_explicit is True
+        assert cfg.turbo == cfg.block_cache == cfg.step_cache == cfg.attention == "none"
+
+    def test_profile_steps_override_env(self):
+        cfg = accel.parse_accel_config("r2v-balanced")
+        assert accel.resolve_steps(cfg, "r2v-balanced", "20", None) == 15
+
+    def test_auto_keeps_env_steps(self):
+        cfg = accel.parse_accel_config("auto")
+        assert accel.resolve_steps(cfg, "auto", "30", None) == 30
+
+    def test_r2v_default_profile_is_effective_only_for_refs(self):
+        from types import SimpleNamespace
+        from api.workflows.h3 import effective_speed
+
+        assert effective_speed(SimpleNamespace(
+            task_type="r2v", speed=None, ref_images=["a"], ref_videos=None,
+        )) == "r2v-balanced"
+        assert effective_speed(SimpleNamespace(
+            task_type="r2v", speed="auto", ref_images=None, ref_videos=["v"],
+        )) == "r2v-balanced"
+        assert effective_speed(SimpleNamespace(
+            task_type="t2va", speed=None, ref_images=None, ref_videos=None,
+        )) == "auto"
+        assert effective_speed(SimpleNamespace(
+            task_type="r2v", speed="quality", ref_images=["a"], ref_videos=None,
+        )) == "quality"
+
 
 class TestAcceleratedWorkflow:
     def test_te_speed_lands_on_1b(self):
@@ -509,6 +550,23 @@ def test_huge_integer_float_param_rejected():
         })
 
 
+def test_build_h3_task_defaults_r2v_to_balanced():
+    import api.workflows.h3 as h3_mod
+
+    task = type("Task", (), {
+        "task_id": "r2v_default", "prompt": "p", "width": 512,
+        "height": 512, "length": 124, "seed": 1, "first_frame": None,
+        "last_frame": None, "ref_images": ["ref.png"], "ref_videos": None,
+        "assets": {}, "params": {}, "speed": None, "task_type": "r2v",
+    })()
+    h3_mod.build_h3_task(task)
+    assert task.speed == "r2v-balanced"
+    assert task.acceleration["profile"] == "r2v-balanced"
+    assert task.acceleration["steps"] == 15
+    assert task.acceleration["attention"]["method"] == "sage"
+    assert task.acceleration["step_cache"]["method"] == "easycache"
+
+
 class TestAccelerationSchema:
     def test_schema_exposes_methods_params_and_constraints(self):
         import json
@@ -538,6 +596,9 @@ class TestAccelerationSchema:
         assert schema["rules"][0]["dimensions"] == ["turbo", "step_cache"]
         assert "legacy_speed_note" in schema
         assert set(schema["env_defaults"]) == {"H3_TE_SPEED", "H3_SOL_STACK"}
+        assert schema["default_profiles"] == {"r2v": "r2v-balanced"}
+        assert schema["presets"]["r2v-balanced"] == "r2v-balanced"
+        assert schema["presets"]["quality"] == "quality"
 
     def test_schema_availability_uses_installed_nodes(self, monkeypatch):
         saved = accel._node_cache
