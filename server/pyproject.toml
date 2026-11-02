@@ -1,0 +1,24 @@
+[project]
+name = "comfy-rest-ext-server"
+version = "0.7.0"
+description = "ComfyUI custom-node server extension for comfy-rest-ext"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.9",
+    "pydantic>=2",
+    "httpx>=0.25.0",
+    "pathspec>=0.11.0",
+    "huggingface-hub>=0.19.0",
+    "PyYAML>=6",
+]
+
+[tool.setuptools]
+packages = ["api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib --rootdir=tests"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

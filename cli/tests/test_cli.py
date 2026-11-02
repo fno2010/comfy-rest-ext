@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cli import commands
+from comfy_rest_ext_cli import commands
 
 
 class FakeClient:
@@ -307,8 +307,8 @@ def test_cmd_download_status_text(capsys):
 
 
 def test_multipart_body_has_crlf_between_file_parts():
-    import cli.client as client_mod
-    from cli.client import ComfyRestClient
+    import comfy_rest_ext_cli.client as client_mod
+    from comfy_rest_ext_cli.client import ComfyRestClient
 
     client = ComfyRestClient(base_url="http://127.0.0.1:1")
 
@@ -348,7 +348,7 @@ def test_multipart_body_has_crlf_between_file_parts():
 
 def test_build_video_request_single_image_first_frame():
     import os, tempfile
-    from cli import commands
+    from comfy_rest_ext_cli import commands
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         f.write(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
         path = f.name
@@ -367,7 +367,7 @@ def test_build_video_request_single_image_first_frame():
 
 def test_build_video_request_multi_image_reference():
     import os, tempfile
-    from cli import commands
+    from comfy_rest_ext_cli import commands
     paths = []
     try:
         for _ in range(2):
