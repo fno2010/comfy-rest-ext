@@ -120,7 +120,7 @@ GET /v2/extension/image/{id}/content?index=N
 
 | 字段 | 说明 |
 |---|---|
-| `builder` | `h3` / `anima` / `qwen_image_21`；新模型必填，覆盖时可省略 |
+| `builder` | 内置：`h3` / `anima` / `qwen_image_21`；也可用 `module:function` 从配置加载新 builder（如 `my_pkg.builder:build_task`）。动态 builder 必须同时声明 `modality` 和 `tasks`；其 `defaults`/`assets` 不做内置白名单校验。models.json 是受信任的本地配置，导入模块等同于执行本地代码 |
 | `modality` | `video` 或 `image` |
 | `tasks` | 如 `["t2va","fl2va","r2v"]` 或 `["t2i","edit"]` |
 | `aliases` / `alias_tasks` | 兼容别名及别名对应 task；提供 `aliases` 时会替换旧列表，未显式给出的 `alias_tasks` 会按新 aliases 过滤 |
@@ -131,7 +131,7 @@ GET /v2/extension/image/{id}/content?index=N
 | `variant` | `base` 或 `turbo`；仅图片 builder 使用（`h3` 只接受 `base`），显式设置优先于内置 turbo id 回退，否则 `turbo_unet` / `turbo_lora` 不会被使用 |
 | `max_n` / `timeout_s` / `output_mime` / `description` | 请求上限、任务超时、输出 MIME、模型说明 |
 
-校验规则：`builder` 与 `modality` 必须匹配（`h3`→video，`anima`/`qwen_image_21`→image）；`tasks` 必须是该 builder 支持的集合；新图片模型必须提供正数 `defaults.steps` 与 `size`；未知字段、类型错误、别名冲突、空 model id 都会让整份配置被拒绝并回滚。
+校验规则：内置 `builder` 与 `modality` 必须匹配（`h3`→video，`anima`/`qwen_image_21`→image）；`tasks` 必须是该 builder 支持的集合。动态 `module:function` builder 由配置声明 `modality`/`tasks`，其 `defaults`/`assets` 键不做内置白名单校验。新图片模型必须提供正数 `defaults.steps` 与 `size`；未知字段、类型错误、别名冲突、空 model id、builder 导入失败都会让整份配置被拒绝并回滚（动态 builder 注册也会回滚）。
 
 `assets` 键：
 
