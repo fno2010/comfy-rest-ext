@@ -752,6 +752,67 @@ def cmd_download_cancel(client: ComfyRestClient, args: Any) -> int:
 # Health
 # ---------------------------------------------------------------------------
 
+def cmd_capabilities(client: ComfyRestClient, args: Any) -> int:
+    try:
+        result = client.capabilities(
+            model=getattr(args, "model", None),
+            capability=getattr(args, "capability", None),
+        )
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(result, True)
+    summary = result.get("summary") or {}
+    print("capabilities: " + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
+    for item in result.get("capabilities") or []:
+        print(f"{item['status']:<24} {item['id']}")
+        if item.get("missing_packages"):
+            print(f"  missing packages: {item['missing_packages']}")
+        if item.get("missing_nodes"):
+            print(f"  missing nodes: {item['missing_nodes']}")
+        for action in item.get("actions") or []:
+            print(f"  action: {action}")
+    return 0
+
+
+def cmd_doctor(client: ComfyRestClient, args: Any) -> int:
+    try:
+        health = client.health()
+        caps = client.capabilities()
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit({"health": health, "capabilities": caps}, True)
+    print(f"health: {health.get('status', '')}")
+    summary = caps.get("summary") or {}
+    print("capabilities: " + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
+    missing = [
+        item["id"] for item in caps.get("capabilities") or []
+        if item.get("status") not in ("available",)
+    ]
+    if missing:
+        print("needs attention: " + ", ".join(missing))
+    return 0
+
+
+def cmd_provision(client: ComfyRestClient, args: Any) -> int:
+    try:
+        result = client.provision(
+            list(args.capability),
+            authorized=bool(getattr(args, "yes", False)),
+        )
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(result, True)
+    print(f"status: {result.get('status', '')}")
+    for action in result.get("actions") or []:
+        print(f"installed: {action}")
+    if result.get("restart_required"):
+        print("restart required")
+    return 0
+
+
 def cmd_health(client: ComfyRestClient, args: Any) -> int:
     try:
         result = client.health()

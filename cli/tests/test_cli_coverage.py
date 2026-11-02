@@ -451,6 +451,13 @@ def test_parser_accepts_all_groups():
         assert callable(args.func), argv
 
 
+def test_parser_has_capability_commands():
+    parser = _build_parser()
+    for argv in (["capabilities"], ["doctor"], ["provision", "attention.flash", "--yes"]):
+        args = parser.parse_args(argv)
+        assert callable(args.func)
+
+
 def test_cmd_generate_multipart(tmp_path, capsys):
     client = FakeClient()
     image = tmp_path / "ref.png"

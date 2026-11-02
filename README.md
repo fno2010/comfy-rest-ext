@@ -186,6 +186,9 @@ python3 -m cli --help
 ```bash
 # 健康检查 / 模型
 comfy-rest-ext-cli health
+comfy-rest-ext-cli capabilities --model minimax-h3
+comfy-rest-ext-cli doctor
+comfy-rest-ext-cli provision attention.flash --yes
 comfy-rest-ext-cli models
 comfy-rest-ext-cli models get anima-base
 comfy-rest-ext-cli models all --folder diffusion_models
