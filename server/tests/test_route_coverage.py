@@ -14,6 +14,7 @@ COVERED_ROUTES = {
     ("GET", "/v1/videos/{video_id}"),
     ("DELETE", "/v1/videos/{video_id}"),
     ("GET", "/v1/videos/{video_id}/content"),
+    ("POST", "/v1/videos/{video_id}/retry"),
     ("POST", "/v1/images/generations"),
     ("POST", "/v1/images/edits"),
     ("GET", "/v2/extension/image"),

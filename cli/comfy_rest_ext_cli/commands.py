@@ -692,6 +692,17 @@ def cmd_video_content(client: ComfyRestClient, args: Any) -> int:
         return _emit_error(f"cannot write {out}: {e}")
 
 
+def cmd_video_retry(client: ComfyRestClient, args: Any) -> int:
+    try:
+        task = client.retry_video(args.video_id)
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(task, True)
+    print(f"{task.get('id')} {task.get('status')}")
+    return 0
+
+
 def cmd_video_delete(client: ComfyRestClient, args: Any) -> int:
     try:
         result = client.delete_video(args.video_id)

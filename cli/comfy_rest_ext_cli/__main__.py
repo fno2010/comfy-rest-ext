@@ -172,6 +172,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = videos_sub.add_parser("delete", help="delete a video task record")
     sp.add_argument("video_id")
     sp.set_defaults(func=commands.cmd_video_delete)
+    sp = videos_sub.add_parser("retry", help="retry a provisioning-blocked video")
+    sp.add_argument("video_id")
+    sp.set_defaults(func=commands.cmd_video_retry)
 
     # -- images ---------------------------------------------------------
     p = sub.add_parser("images", help="generate / inspect image tasks")

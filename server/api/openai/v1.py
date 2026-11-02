@@ -25,9 +25,12 @@ from server import PromptServer
 from ..schemas.requests import VideoGenerateRequest
 from ..accel import (
     DEFAULT_R2V_PROFILE,
+    check_config_available,
     check_model_allowed,
     model_supports_profile,
+    parse_accel_config,
 )
+from ..capabilities import capability_report
 from ..workflows.h3 import check_task_compat
 from ..tasks.video_task import (
     VideoTask,
@@ -84,6 +87,14 @@ def _task_type_from_model(model: Optional[str]) -> Optional[str]:
     return alias_task_type(model)
 
 
+def _capability_ids(accel_cfg) -> list:
+    return [
+        f"{layer}.{getattr(accel_cfg, layer)}"
+        for layer in ("turbo", "attention", "block_cache", "step_cache")
+        if getattr(accel_cfg, layer) not in (None, "none")
+    ]
+
+
 def _json_safe(value: Any) -> Any:
     """Replace non-finite floats so responses always emit valid JSON."""
     if isinstance(value, float):
@@ -126,6 +137,7 @@ def _video_response(task: VideoTask) -> dict:
         "speed": _json_safe(task.speed),
         "params": effective_params,
         "acceleration": _json_safe(task.acceleration),
+        "capability_plan": _json_safe(task.capability_plan),
         "status": status,
         "progress": int(task.progress * 100),
         "current_node": task.current_node,
@@ -270,13 +282,10 @@ async def create_video(request: web.Request) -> web.Response:
     ):
         speed = DEFAULT_R2V_PROFILE
     try:
-        from ..accel import check_config_available, parse_accel_config
         accel_cfg = parse_accel_config(speed)
     except ValueError as e:
         return web.json_response({"error": f"invalid speed: {e}"}, status=400)
-    missing_node = check_config_available(accel_cfg)
-    if missing_node:
-        return web.json_response({"error": f"invalid speed: {missing_node}"}, status=400)
+    missing_capability = check_config_available(accel_cfg)
     model_error = check_model_allowed(spec.accel_methods, accel_cfg)
     if model_error:
         return web.json_response({"error": model_error}, status=400)
@@ -352,7 +361,9 @@ async def create_video(request: web.Request) -> web.Response:
 
     task = VideoTask(
         task_id=task_id,
-        status="queued",
+        status=(
+            "blocked_on_provisioning" if missing_capability else "queued"
+        ),
         prompt=prompt,
         task_type=task_type,
         width=width,
@@ -367,9 +378,25 @@ async def create_video(request: web.Request) -> web.Response:
         ref_images=ref_images,
         ref_videos=ref_videos,
         speed=speed,
+        error=missing_capability,
+        capability_plan=(
+            capability_report(
+                capability_ids=_capability_ids(accel_cfg),
+            )
+            if missing_capability else None
+        ),
         created_at=time.time(),
     )
     get_video_manager().create(task)
+    if missing_capability:
+        return web.json_response(
+            {
+                "error": missing_capability,
+                "task": _video_response(task),
+                "plan": task.capability_plan,
+            },
+            status=409,
+        )
     asyncio.create_task(submit_video_task(task))
 
     return web.json_response(_video_response(task))
@@ -643,6 +670,62 @@ async def retrieve_video(request: web.Request) -> web.Response:
     task = _get_task_or_restore(video_id)
     if not task or task.modality != "video":
         return web.json_response({"error": "Video not found"}, status=404)
+    return web.json_response(_video_response(task))
+
+
+@routes.post("/v1/videos/{video_id}/retry")
+async def retry_video(request: web.Request) -> web.Response:
+    """Retry a task blocked by a missing provisioning capability."""
+    video_id = request.match_info["video_id"]
+    task = _get_task_or_restore(video_id)
+    if task is None or task.modality != "video":
+        return web.json_response({"error": "Video not found"}, status=404)
+    if task.status != "blocked_on_provisioning":
+        return web.json_response(
+            {"error": "task is not blocked on provisioning"}, status=409
+        )
+    try:
+        accel_cfg = parse_accel_config(task.speed)
+    except ValueError as e:
+        return web.json_response({"error": f"invalid speed: {e}"}, status=400)
+    missing = check_config_available(accel_cfg)
+    if missing:
+        task.capability_plan = capability_report(
+            capability_ids=_capability_ids(accel_cfg)
+        )
+        task.error = missing
+        get_video_manager().update(
+            task.task_id,
+            error=task.error,
+            capability_plan=task.capability_plan,
+        )
+        return web.json_response(
+            {"error": missing, "task": _video_response(task),
+             "plan": task.capability_plan},
+            status=409,
+        )
+    task.status = "queued"
+    task.error = None
+    task.capability_plan = None
+    task.progress = 0.0
+    task.node_progress = 0.0
+    task.current_node = None
+    task.eta = None
+    task.started_at = None
+    task.completed_at = None
+    get_video_manager().update(
+        task.task_id,
+        status="queued",
+        error=None,
+        capability_plan=None,
+        progress=0.0,
+        node_progress=0.0,
+        current_node=None,
+        eta=None,
+        started_at=None,
+        completed_at=None,
+    )
+    asyncio.create_task(submit_video_task(task))
     return web.json_response(_video_response(task))
 
 

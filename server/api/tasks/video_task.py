@@ -27,7 +27,10 @@ class GenerationTask:
     """State shared by video and image generation jobs."""
 
     task_id: str
-    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    status: Literal[
+        "queued", "running", "completed", "failed", "cancelled",
+        "blocked_on_provisioning",
+    ]
     prompt: str
     task_type: str  # t2va | fl2va | r2v | t2i | edit
     width: int
@@ -46,6 +49,7 @@ class GenerationTask:
     ref_videos: Optional[list] = None
     speed: Optional[Any] = None  # legacy str or AccelConfig dict
     accel_methods: Optional[frozenset] = None  # model allowlist; None = unknown
+    capability_plan: Optional[Dict[str, Any]] = None
     prompt_id: Optional[str] = None
     progress: float = 0.0
     current_node: Optional[str] = None
@@ -149,6 +153,7 @@ def _task_to_record(task: GenerationTask) -> dict:
         "accel_methods": (
             sorted(task.accel_methods) if task.accel_methods is not None else None
         ),
+        "capability_plan": task.capability_plan,
         "prompt_id": task.prompt_id,
         "progress": task.progress,
         "current_node": task.current_node,
@@ -193,6 +198,7 @@ def _record_to_task(record: dict) -> GenerationTask:
             frozenset(record["accel_methods"])
             if record.get("accel_methods") is not None else None
         ),
+        capability_plan=record.get("capability_plan"),
         prompt_id=record.get("prompt_id"),
         progress=record.get("progress", 0.0),
         current_node=record.get("current_node"),

@@ -206,6 +206,7 @@ comfy-rest-ext-cli videos list
 comfy-rest-ext-cli videos wait video_xxxx --timeout 300
 comfy-rest-ext-cli videos content video_xxxx --out out.mp4
 comfy-rest-ext-cli videos delete video_xxxx
+comfy-rest-ext-cli videos retry video_xxxx
 
 # 图片
 comfy-rest-ext-cli images generate "a red fox" --model anima-turbo --size 1024x1024
