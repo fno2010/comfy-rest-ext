@@ -161,6 +161,13 @@ def _apply_turbo(workflow, add, model_out, params, alloc, context):
 register_method(AccelMethod(
     "turbo-v4", "turbo",
     required_nodes=("MiniMaxH3TurboLoRA",),
+    install_spec={
+        "kind": "custom_node",
+        "repo": "https://github.com/Larryvrh/ComfyUI-MiniMax-H3-Turbo.git",
+        "commit": "546b5028f4934f5129eb6c7142c2f3e461dfddbf",
+        "target": "ComfyUI-MiniMax-H3-Turbo",
+        "requires_restart": True,
+    },
     params_schema={
         "strength": _float(1.0, minimum=-10.0, maximum=10.0),
         "low_vram": _bool(False),
@@ -176,6 +183,13 @@ LIGHTX2V_4STEP_LORA = (
 register_method(AccelMethod(
     "lightx2v-4step-v1.3", "turbo",
     required_nodes=("MiniMaxH3TurboLoRA",),
+    install_spec={
+        "kind": "custom_node",
+        "repo": "https://github.com/Larryvrh/ComfyUI-MiniMax-H3-Turbo.git",
+        "commit": "546b5028f4934f5129eb6c7142c2f3e461dfddbf",
+        "target": "ComfyUI-MiniMax-H3-Turbo",
+        "requires_restart": True,
+    },
     params_schema={
         "lora_name": ParamSpec(str, LIGHTX2V_4STEP_LORA),
         "strength": _float(1.0, minimum=-10.0, maximum=10.0),
@@ -317,6 +331,13 @@ register_method(AccelMethod(
 register_method(AccelMethod(
     "spectrum", "step_cache",
     required_nodes=("SpectrumApplyMiniMaxH3",),
+    install_spec={
+        "kind": "custom_node",
+        "repo": "https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3.git",
+        "commit": "0ada18b3830b33cb6635f7e142831fcf779959fc",
+        "target": "ComfyUI-Spectrum-MiniMax-H3",
+        "requires_restart": True,
+    },
     params_schema={
         "enabled": _bool(True),
         "blend_weight": _float(0.50, minimum=0.0, maximum=1.0),

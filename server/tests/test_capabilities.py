@@ -23,6 +23,9 @@ def test_capability_report_exposes_install_plan():
     assert cachedit["status"] == "unsupported"
     assert cachedit["implemented"] is False
     assert "summary" in report
+    spectrum = _find(report, "step_cache.spectrum")
+    assert spectrum["install_spec"]["kind"] == "custom_node"
+    assert len(spectrum["install_spec"]["commit"]) == 40
 
 
 @pytest.mark.asyncio
@@ -82,6 +85,25 @@ async def test_provision_authorized_installs_declared_package(monkeypatch):
     )
     assert calls and calls[0]["package"] == "flash-attn"
     assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_custom_node_installer_rejects_unpinned_source(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMFYUI_CUSTOM_NODES", str(tmp_path))
+    with pytest.raises(provisioning.ProvisionError, match="pinned GitHub"):
+        await provisioning._install_custom_node({
+            "kind": "custom_node",
+            "repo": "https://example.com/untrusted.git",
+            "commit": "0" * 40,
+            "target": "x",
+        })
+    with pytest.raises(provisioning.ProvisionError, match="40-character"):
+        await provisioning._install_custom_node({
+            "kind": "custom_node",
+            "repo": "https://github.com/a/b.git",
+            "commit": "main",
+            "target": "x",
+        })
 
 
 def test_unsupported_capability_has_no_silent_fallback():
