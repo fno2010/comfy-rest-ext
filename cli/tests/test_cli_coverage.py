@@ -453,7 +453,12 @@ def test_parser_accepts_all_groups():
 
 def test_parser_has_capability_commands():
     parser = _build_parser()
-    for argv in (["capabilities"], ["doctor"], ["provision", "attention.flash", "--yes"]):
+    for argv in (
+        ["capabilities"],
+        ["doctor"],
+        ["provision", "attention.flash", "--yes", "--retry-task", "video_x"],
+        ["wait-reconnect", "--retry-task", "video_x"],
+    ):
         args = parser.parse_args(argv)
         assert callable(args.func)
 

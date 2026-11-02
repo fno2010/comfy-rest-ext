@@ -811,6 +811,7 @@ def cmd_provision(client: ComfyRestClient, args: Any) -> int:
         result = client.provision(
             list(args.capability),
             authorized=bool(getattr(args, "yes", False)),
+            retry_task_id=getattr(args, "retry_task", None),
         )
     except ApiError as e:
         return _emit_error(str(e))
@@ -819,8 +820,36 @@ def cmd_provision(client: ComfyRestClient, args: Any) -> int:
     print(f"status: {result.get('status', '')}")
     for action in result.get("actions") or []:
         print(f"installed: {action}")
+    if result.get("retry_task"):
+        print(f"retry: {result['retry_task']['id']} {result['retry_task']['status']}")
     if result.get("restart_required"):
-        print("restart required")
+        print("restart required; run wait-reconnect after restart")
+    return 0
+
+
+def cmd_wait_reconnect(client: ComfyRestClient, args: Any) -> int:
+    import time
+    deadline = time.time() + args.timeout if args.timeout else None
+    while True:
+        try:
+            client.health()
+            break
+        except Exception:
+            if deadline is not None and time.time() >= deadline:
+                return _emit_error("server did not reconnect before timeout")
+            time.sleep(args.interval)
+    if args.retry_task:
+        try:
+            task = client.retry_video(args.retry_task)
+        except ApiError as e:
+            return _emit_error(str(e))
+        if args.json:
+            return _emit(task, True)
+        print(f"{task.get('id')} {task.get('status')}")
+        return 0
+    if args.json:
+        return _emit({"status": "connected"}, True)
+    print("connected")
     return 0
 
 

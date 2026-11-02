@@ -449,10 +449,12 @@ class ComfyRestClient:
         return self._get("/v2/extension/capabilities", params or None)
 
     def provision(
-        self, capabilities: list, authorized: bool = False,
+        self,
+        capabilities: list,
+        authorized: bool = False,
+        retry_task_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return self._request(
-            "POST",
-            "/v2/extension/provision",
-            {"capabilities": capabilities, "authorized": authorized},
-        )
+        payload = {"capabilities": capabilities, "authorized": authorized}
+        if retry_task_id:
+            payload["retry_task_id"] = retry_task_id
+        return self._request("POST", "/v2/extension/provision", payload)

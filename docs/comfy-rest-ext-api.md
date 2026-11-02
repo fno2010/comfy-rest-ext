@@ -753,7 +753,7 @@ ws.addEventListener('message', (event) => {
 | GET | `/v2/extension/snapshot/list` | 列出快照 |
 | GET | `/v2/extension/acceleration/schema` | 加速维度/方法/参数/可用性 schema |
 | GET | `/v2/extension/capabilities` | 结构化 capability 状态与安装动作 |
-| POST | `/v2/extension/provision` | 按策略/授权执行 capability 安装 |
+| POST | `/v2/extension/provision` | 按策略/授权执行 capability 安装；可带 `retry_task_id` |
 | POST | `/v1/videos/{video_id}/retry` | 重试 provisioning-blocked 视频任务 |
 
 | POST | `/v2/extension/video/generate` | 提交视频生成任务 |
