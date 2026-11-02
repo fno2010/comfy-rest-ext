@@ -40,6 +40,22 @@ def get_video_task(video_id: str):
     return task, manager
 
 
+def record_provisioning(
+    video_id: str,
+    actions: list,
+    restart_required: bool = False,
+) -> None:
+    task, manager = get_video_task(video_id)
+    if task is None:
+        raise ResumeError(404, "Video not found")
+    task.provisioning_actions = list(actions) + [{
+        "restart_required": bool(restart_required),
+    }]
+    manager.update(
+        video_id, provisioning_actions=task.provisioning_actions,
+    )
+
+
 async def resume_blocked_video_task(video_id: str) -> Any:
     task, manager = get_video_task(video_id)
     if task is None:
