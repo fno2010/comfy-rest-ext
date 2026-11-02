@@ -124,7 +124,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("provision", help="install selected capabilities")
     p.add_argument("capability", nargs="+", help="capability id(s), e.g. attention.flash")
     p.add_argument("--yes", action="store_true", help="explicitly authorize installation")
+    p.add_argument("--retry-task", help="resume this blocked video task after install")
     p.set_defaults(func=commands.cmd_provision)
+    p = sub.add_parser("wait-reconnect", help="wait for a restarted server and optionally retry")
+    p.add_argument("--retry-task", help="blocked video task to retry after reconnect")
+    p.add_argument("--timeout", type=float, default=300.0)
+    p.add_argument("--interval", type=float, default=5.0)
+    p.set_defaults(func=commands.cmd_wait_reconnect)
 
     # -- models ---------------------------------------------------------
     p = sub.add_parser("models", help="list / inspect / manage models")

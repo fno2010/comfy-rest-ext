@@ -139,9 +139,14 @@ async def test_video_task_blocks_and_retries_after_provisioning(monkeypatch):
         submitted.append(task)
         return task
 
-    monkeypatch.setattr(v1, "get_video_manager", lambda: Manager())
+    import api.tasks.resume as resume_mod
+    manager = Manager()
+    monkeypatch.setattr(v1, "get_video_manager", lambda: manager)
     monkeypatch.setattr(v1, "submit_video_task", fake_submit)
     monkeypatch.setattr(v1, "check_config_available", lambda cfg: "missing capability")
+    monkeypatch.setattr(resume_mod, "get_video_manager", lambda: manager)
+    monkeypatch.setattr(resume_mod, "submit_video_task", fake_submit)
+    monkeypatch.setattr(resume_mod, "check_config_available", lambda cfg: "missing capability")
 
     class Request:
         headers = {}
@@ -164,6 +169,7 @@ async def test_video_task_blocks_and_retries_after_provisioning(monkeypatch):
 
     # After provisioning succeeds, retry resumes the original task.
     monkeypatch.setattr(v1, "check_config_available", lambda cfg: None)
+    monkeypatch.setattr(resume_mod, "check_config_available", lambda cfg: None)
 
     class RetryRequest:
         match_info = {"video_id": created["task"].task_id}

@@ -175,6 +175,7 @@ def _select_capabilities(ids: Optional[List[str]]) -> List[dict]:
 async def provision_capabilities(
     ids: Optional[List[str]] = None,
     authorized: bool = False,
+    retry_task_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Provision selected capabilities or return a structured plan.
 
@@ -198,7 +199,21 @@ async def provision_capabilities(
 
     installable = [item for item in selected if item["status"] == "installable"]
     if not installable:
-        return {"status": "completed", "capabilities": selected, "actions": []}
+        result = {"status": "completed", "capabilities": selected, "actions": []}
+        if retry_task_id:
+            from .tasks.resume import ResumeError, resume_blocked_video_task
+            try:
+                task = await resume_blocked_video_task(retry_task_id)
+            except ResumeError as e:
+                raise ProvisionError(
+                    e.status, e.message,
+                    {"resume_plan": e.plan, "task_id": retry_task_id},
+                ) from e
+            result.update({
+                "retry_status": "queued",
+                "retry_task": {"id": task.task_id, "status": task.status},
+            })
+        return result
 
     install_ids = [item["id"] for item in installable]
     if not _authorized(install_ids, authorized):
@@ -227,14 +242,36 @@ async def provision_capabilities(
             )
 
     after = _select_capabilities(ids)
-    return {
+    restart_required = any(
+        spec.get("requires_restart")
+        for item in installable
+        for spec in [item.get("install_spec") or {}]
+    )
+    result = {
         "status": "completed",
         "actions": actions,
         "capabilities": after,
-        "restart_required": any(
-            item.get("requires_restart") for item in after
-        ),
+        "restart_required": bool(restart_required),
+        "retry_task_id": retry_task_id,
     }
+    if retry_task_id:
+        if restart_required:
+            result["retry_status"] = "waiting_for_restart"
+        else:
+            from .tasks.resume import ResumeError, resume_blocked_video_task
+            try:
+                task = await resume_blocked_video_task(retry_task_id)
+            except ResumeError as e:
+                raise ProvisionError(
+                    e.status, e.message,
+                    {"resume_plan": e.plan, "task_id": retry_task_id},
+                ) from e
+            result["retry_status"] = "queued"
+            result["retry_task"] = {
+                "id": task.task_id,
+                "status": task.status,
+            }
+    return result
 
 
 @routes.post("/v2/extension/provision")
@@ -245,6 +282,11 @@ async def provision(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "invalid JSON body"}, status=400)
     ids = body.get("capabilities")
+    retry_task_id = body.get("retry_task_id")
+    if retry_task_id is not None and not isinstance(retry_task_id, str):
+        return web.json_response(
+            {"error": "retry_task_id must be a string"}, status=400
+        )
     if ids is not None and (
         not isinstance(ids, list)
         or not all(isinstance(item, str) and item for item in ids)
@@ -254,7 +296,9 @@ async def provision(request: web.Request) -> web.Response:
         )
     try:
         result = await provision_capabilities(
-            ids, authorized=bool(body.get("authorized", False))
+            ids,
+            authorized=bool(body.get("authorized", False)),
+            retry_task_id=retry_task_id,
         )
     except ProvisionError as e:
         return web.json_response(

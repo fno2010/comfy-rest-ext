@@ -31,6 +31,7 @@ from ..accel import (
     parse_accel_config,
 )
 from ..capabilities import capability_report
+from ..tasks.resume import ResumeError, resume_blocked_video_task
 from ..workflows.h3 import check_task_compat
 from ..tasks.video_task import (
     VideoTask,
@@ -677,55 +678,12 @@ async def retrieve_video(request: web.Request) -> web.Response:
 async def retry_video(request: web.Request) -> web.Response:
     """Retry a task blocked by a missing provisioning capability."""
     video_id = request.match_info["video_id"]
-    task = _get_task_or_restore(video_id)
-    if task is None or task.modality != "video":
-        return web.json_response({"error": "Video not found"}, status=404)
-    if task.status != "blocked_on_provisioning":
-        return web.json_response(
-            {"error": "task is not blocked on provisioning"}, status=409
-        )
     try:
-        accel_cfg = parse_accel_config(task.speed)
-    except ValueError as e:
-        return web.json_response({"error": f"invalid speed: {e}"}, status=400)
-    missing = check_config_available(accel_cfg)
-    if missing:
-        task.capability_plan = capability_report(
-            capability_ids=_capability_ids(accel_cfg)
-        )
-        task.error = missing
-        get_video_manager().update(
-            task.task_id,
-            error=task.error,
-            capability_plan=task.capability_plan,
-        )
+        task = await resume_blocked_video_task(video_id)
+    except ResumeError as e:
         return web.json_response(
-            {"error": missing, "task": _video_response(task),
-             "plan": task.capability_plan},
-            status=409,
+            {"error": e.message, "plan": e.plan}, status=e.status
         )
-    task.status = "queued"
-    task.error = None
-    task.capability_plan = None
-    task.progress = 0.0
-    task.node_progress = 0.0
-    task.current_node = None
-    task.eta = None
-    task.started_at = None
-    task.completed_at = None
-    get_video_manager().update(
-        task.task_id,
-        status="queued",
-        error=None,
-        capability_plan=None,
-        progress=0.0,
-        node_progress=0.0,
-        current_node=None,
-        eta=None,
-        started_at=None,
-        completed_at=None,
-    )
-    asyncio.create_task(submit_video_task(task))
     return web.json_response(_video_response(task))
 
 
