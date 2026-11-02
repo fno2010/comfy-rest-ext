@@ -18,6 +18,7 @@ Dimensions:
 
 from __future__ import annotations
 
+import importlib.util
 import math
 import os
 from dataclasses import dataclass, field
@@ -76,6 +77,7 @@ class AccelMethod:
     id: str
     dimension: str
     required_nodes: Tuple[str, ...] = ()
+    required_packages: Tuple[Tuple[str, ...], ...] = ()
     params_schema: Mapping[str, ParamSpec] = field(default_factory=dict)
     implemented: bool = True
     default_steps: Optional[int] = None
@@ -216,6 +218,7 @@ register_method(AccelMethod(
 register_method(AccelMethod(
     "flash", "attention",
     required_nodes=("PatchFlashAttentionKJ",),
+    required_packages=(("flash_attn", "flash_attn_interface"),),
     params_schema={},
     apply=_single_node("PatchFlashAttentionKJ"),
 ))
@@ -358,6 +361,17 @@ def _available_nodes() -> set:
     return _node_cache
 
 
+def _missing_package_groups(method: AccelMethod) -> list:
+    """Return required import groups with no importable member."""
+    missing = []
+    for group in method.required_packages:
+        if not any(
+            importlib.util.find_spec(name) is not None for name in group
+        ):
+            missing.append(list(group))
+    return missing
+
+
 def check_option_available(layer: str, value: str) -> Optional[str]:
     """Return an error message if (layer, value) cannot be used."""
     if value in ("none", "default"):
@@ -374,6 +388,12 @@ def check_option_available(layer: str, value: str) -> Optional[str]:
         return (
             f"{layer}={value} is registered but not implemented in the "
             f"H3 workflow builder yet"
+        )
+    missing_packages = _missing_package_groups(method)
+    if missing_packages:
+        return (
+            f"{layer}={value} requires Python package(s) "
+            f"{missing_packages}; install them or choose another value"
         )
     available = _available_nodes()
     if not available:
@@ -463,15 +483,18 @@ def _method_schema(
         node for node in method.required_nodes
         if known and node not in available_nodes
     ]
+    missing_packages = _missing_package_groups(method)
     result: Dict[str, Any] = {
         "id": method.id,
         "implemented": method.implemented,
         "available": (
             None if not known
-            else method.implemented and not missing
+            else method.implemented and not missing and not missing_packages
         ),
         "required_nodes": list(method.required_nodes),
+        "required_packages": [list(group) for group in method.required_packages],
         "missing_nodes": missing,
+        "missing_packages": missing_packages,
         "params": {
             key: _param_schema(spec)
             for key, spec in method.params_schema.items()
