@@ -197,6 +197,26 @@ def test_dynamic_builder_requires_declared_capabilities(tmp_path):
         catalog.load_model_config(path)
 
 
+def test_acceleration_allowlist_can_be_configured(tmp_path):
+    path = _write(tmp_path, {
+        "minimax-h3": {"acceleration": ["sage", "easycache"]},
+    })
+    catalog.load_model_config(path)
+    spec = catalog.get_model("minimax-h3")
+    assert spec.accel_methods == frozenset({"sage", "easycache"})
+
+
+def test_invalid_acceleration_allowlist_rejected(tmp_path):
+    with pytest.raises(catalog.ModelConfigError, match="acceleration"):
+        catalog.load_model_config(_write(tmp_path, {
+            "minimax-h3": {"acceleration": 42},
+        }))
+    with pytest.raises(catalog.ModelConfigError, match="acceleration"):
+        catalog.load_model_config(_write(tmp_path, {
+            "minimax-h3": {"acceleration": [""]},
+        }))
+
+
 def test_alias_collision_rejected(tmp_path):
     path = _write(tmp_path, {
         "new-model": {

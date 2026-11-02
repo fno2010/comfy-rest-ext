@@ -399,6 +399,48 @@ def check_config_available(cfg: "AccelConfig") -> Optional[str]:
 SCHEMA_VERSION = 1
 
 
+def _profile_methods(profile_name: str) -> set:
+    profile = _LEGACY_SPEED_MAP.get(profile_name, {})
+    return {
+        profile[layer] for layer in ACCEL_DIMENSIONS
+        if isinstance(profile.get(layer), str)
+        and profile[layer] not in ("none", "default")
+    }
+
+
+def model_supports_profile(accel_methods: Any, profile_name: str) -> bool:
+    """Return whether a model's acceleration allowlist permits a profile."""
+    allowed = set(accel_methods or ())
+    if "*" in allowed:
+        return True
+    return _profile_methods(profile_name) <= allowed
+
+
+def check_model_allowed(accel_methods: Any, cfg: AccelConfig) -> Optional[str]:
+    """Reject acceleration methods not declared by the model."""
+    active = [
+        (layer, getattr(cfg, layer))
+        for layer in ACCEL_DIMENSIONS
+        if getattr(cfg, layer) not in (None, "none")
+    ]
+    if not active:
+        return None
+    allowed = set(accel_methods or ())
+    if "*" in allowed:
+        return None
+    unsupported = [
+        f"{layer}={method}"
+        for layer, method in active
+        if method not in allowed
+    ]
+    if unsupported:
+        return (
+            "model does not support acceleration method(s): "
+            + ", ".join(unsupported)
+        )
+    return None
+
+
 def _param_schema(spec: ParamSpec) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "type": spec.kind.__name__,
@@ -442,8 +484,30 @@ def _method_schema(
     return result
 
 
-def acceleration_schema() -> Dict[str, Any]:
-    """Machine-readable catalog of acceleration dimensions/methods/params."""
+def acceleration_schema(
+    model_id: Optional[str] = None,
+    accel_methods: Any = None,
+) -> Dict[str, Any]:
+    """Machine-readable catalog of acceleration dimensions/methods/params.
+
+    ``accel_methods`` is the model's resolved allowlist. With it, methods are
+    filtered; without it (and without ``model_id``), the global catalog is
+    returned for backward compatibility. Catalog lookups stay in the route
+    layer so the acceleration registry does not import the model registry.
+    """
+    allowed = (
+        None
+        if accel_methods is None and model_id is None
+        else frozenset(accel_methods or ())
+    )
+
+    def allowed_method(method_id: str) -> bool:
+        return (
+            allowed is None
+            or "*" in allowed
+            or method_id in allowed
+        )
+
     available_nodes = _available_nodes()
     dimensions = []
     for dimension in ACCEL_DIMENSIONS:
@@ -458,14 +522,29 @@ def acceleration_schema() -> Dict[str, Any]:
         methods.extend(
             _method_schema(method, available_nodes)
             for method in methods_for_dimension(dimension)
+            if allowed_method(method.id)
         )
         dimensions.append({
             "id": dimension,
             "exclusive": True,
             "methods": methods,
         })
+
+    presets = {
+        key: key for key in _LEGACY_SPEED_MAP
+        if allowed is None or model_supports_profile(allowed, key)
+    }
+    default_profiles = (
+        {"r2v": DEFAULT_R2V_PROFILE}
+        if allowed is None or model_supports_profile(allowed, DEFAULT_R2V_PROFILE)
+        else {}
+    )
     return {
         "version": SCHEMA_VERSION,
+        "model": model_id,
+        "acceleration_methods": (
+            None if allowed is None else sorted(allowed)
+        ),
         "dimensions": dimensions,
         "steps": {"type": "int", "default": 20, "min": 1},
         "legacy_speed": {
@@ -479,8 +558,8 @@ def acceleration_schema() -> Dict[str, Any]:
             "H3_TE_SPEED": os.environ.get("H3_TE_SPEED", "0") == "1",
             "H3_SOL_STACK": os.environ.get("H3_SOL_STACK", "0") == "1",
         },
-        "presets": {key: key for key in _LEGACY_SPEED_MAP},
-        "default_profiles": {"r2v": DEFAULT_R2V_PROFILE},
+        "presets": presets,
+        "default_profiles": default_profiles,
         "profile_note": (
             "R2V defaults to r2v-balanced when speed is omitted. "
             "quality/none reproduce the unaccelerated baseline."

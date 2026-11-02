@@ -11,6 +11,7 @@ from ..accel import (
     AccelConfig,
     apply_accel_layers,
     check_config_available,
+    model_supports_profile,
     parse_accel_config,
     resolve_method_params,
     resolve_steps,
@@ -239,8 +240,14 @@ def effective_speed(task: Any) -> Optional[str]:
     a speed. T2V/I2V keep the historical ``auto`` behavior.
     """
     speed = getattr(task, "speed", None)
+    allowed = getattr(task, "accel_methods", None)
+    profile_allowed = (
+        allowed is None
+        or model_supports_profile(allowed, DEFAULT_R2V_PROFILE)
+    )
     if (
         speed in (None, "auto")
+        and profile_allowed
         and getattr(task, "task_type", None) == "r2v"
         and (getattr(task, "ref_images", None) or getattr(task, "ref_videos", None))
     ):

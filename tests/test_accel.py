@@ -600,6 +600,27 @@ class TestAccelerationSchema:
         assert schema["presets"]["r2v-balanced"] == "r2v-balanced"
         assert schema["presets"]["quality"] == "quality"
 
+    def test_schema_filters_methods_by_model(self):
+        h3 = accel.acceleration_schema("minimax-h3", frozenset({"*"}))
+        image = accel.acceleration_schema("anima-base", frozenset())
+        assert h3["acceleration_methods"] == ["*"]
+        assert image["acceleration_methods"] == []
+        assert all(
+            [m["id"] for m in dim["methods"]] == ["none"]
+            for dim in image["dimensions"]
+        )
+        assert image["default_profiles"] == {}
+        assert "r2v-balanced" not in image["presets"]
+
+    def test_model_allowlist_rejects_unlisted_method(self):
+        cfg = accel.parse_accel_config({"attention": "sage"})
+        assert accel.check_model_allowed(frozenset(), cfg)
+        assert accel.check_model_allowed(frozenset({"sage"}), cfg) is None
+        assert accel.check_model_allowed(frozenset({"*"}), cfg) is None
+        assert accel.check_model_allowed(
+            frozenset(), accel.parse_accel_config("none")
+        ) is None
+
     def test_schema_availability_uses_installed_nodes(self, monkeypatch):
         saved = accel._node_cache
         try:

@@ -131,6 +131,7 @@ class ModelSpec:
     aliases: Tuple[str, ...] = ()
     alias_tasks: Tuple[Tuple[str, str], ...] = ()
     capabilities: frozenset = frozenset()
+    accel_methods: frozenset = frozenset()
     size: Optional[SizePolicy] = None
     max_n: int = 1
     variant: str = "base"
@@ -222,6 +223,7 @@ H3_SPEC = register(ModelSpec(
         ("minimax-h3-r2v", "r2v"),
     ),
     capabilities=frozenset({"negative_prompt", "seed", "accel", "reference_video"}),
+    accel_methods=frozenset({"*"}),
     max_n=1,
     output_mime="video/mp4",
     timeout_s=3600,
@@ -406,7 +408,7 @@ BUILDER_ASSET_KEYS = {
 
 _MODEL_KEYS = {
     "builder", "modality", "tasks", "aliases", "alias_tasks",
-    "defaults", "capabilities", "size", "variant", "assets",
+    "defaults", "capabilities", "acceleration", "size", "variant", "assets",
     "max_n", "output_mime", "timeout_s", "description",
 }
 
@@ -730,6 +732,20 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     ):
         raise ModelConfigError(f"{model_id}.capabilities must be a string list")
 
+    acceleration_value = entry.get(
+        "acceleration", existing.accel_methods if existing else frozenset()
+    )
+    if acceleration_value == "*":
+        accel_methods = frozenset({"*"})
+    elif isinstance(acceleration_value, (list, tuple, set, frozenset)) and all(
+        isinstance(item, str) and item for item in acceleration_value
+    ):
+        accel_methods = frozenset(acceleration_value)
+    else:
+        raise ModelConfigError(
+            f"{model_id}.acceleration must be '*' or a list of method ids"
+        )
+
     variant = entry.get("variant", existing.variant if existing else "base")
     if variant not in ("base", "turbo"):
         raise ModelConfigError(
@@ -789,6 +805,7 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
         aliases=aliases,
         alias_tasks=tuple(alias_tasks_value.items()),
         capabilities=frozenset(capabilities_value),
+        accel_methods=accel_methods,
         size=size,
         max_n=max_n,
         variant=variant,

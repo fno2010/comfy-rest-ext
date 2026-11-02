@@ -128,6 +128,7 @@ GET /v2/extension/image/{id}/content?index=N
 | `assets` | 模型文件名；键随 builder 不同（见下） |
 | `size` | 图片模型必需；字段对应 `SizePolicy`，覆盖时与现有策略合并 |
 | `capabilities` | 如 `negative_prompt` / `n` / `seed` / `alpha` / `edit` / `reference_video` |
+| `acceleration` | 模型可用的加速方法白名单：`"*"` 或方法 id 列表；省略表示不支持 acceleration。只影响 `/v1/videos` 的 speed 校验和 schema 过滤 |
 | `variant` | `base` 或 `turbo`；仅图片 builder 使用（`h3` 只接受 `base`），显式设置优先于内置 turbo id 回退，否则 `turbo_unet` / `turbo_lora` 不会被使用 |
 | `max_n` / `timeout_s` / `output_mime` / `description` | 请求上限、任务超时、输出 MIME、模型说明 |
 
@@ -222,7 +223,7 @@ comfy-rest-ext-cli --timeout 120 models all
 comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
 ```
 
-`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；该模式目前只支持 legacy preset/`--speed` 字符串，不支持 composable 对象。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
+`videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；结构化 speed 会序列化为 JSON 字段，与 JSON 模式的 acceleration 语义一致。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
 
 CLI 加速输入有三类：
 
@@ -243,7 +244,7 @@ comfy-rest-ext-cli videos generate "a cube" --preset sol-stack
 
 dot-path 参数会先按 `/v2/extension/acceleration/schema` 校验维度、方法、类型、范围和 choices；flat flag 不再硬编码 method choices，同样由 schema 校验。新增 **method** 不需要改 CLI；新增 **维度** 仍应新增一个正式 CLI flag（以及后端维度登记）。
 
-`--preset` 也从同一 schema 读取，当前值等价于 legacy speed 字符串，并保留 `auto` 的服务端 env 语义。`--speed-json`/`--speed-file`/`--preset` 不能与其它加速输入混用；`--multipart` 模式下 composable 对象仍不支持。
+`--preset` 也从同一 schema 读取，当前值等价于 legacy speed 字符串，并保留 `auto` 的服务端 env 语义。`--speed-json`/`--speed-file`/`--preset` 不能与其它加速输入混用；multipart 下 composable 对象同样可用。
 
 ```bash
 # 4-step LightX2V Turbo LoRA（默认 4 步、shift 6/3、euler/simple）

@@ -382,12 +382,6 @@ def cmd_generate(client: ComfyRestClient, args: Any) -> int:
             schema = client.acceleration_schema()
         if getattr(args, "multipart", False):
             payload = _build_video_payload(args, schema=schema)
-            if isinstance(payload.get("speed"), dict):
-                return _emit_error(
-                    "--multipart supports legacy --speed strings only; "
-                    "omit --steps/--turbo/--block-cache/--step-cache/"
-                    "--attention or use JSON mode"
-                )
             files = []
             for path in getattr(args, "image", None) or []:
                 with open(path, "rb") as f:

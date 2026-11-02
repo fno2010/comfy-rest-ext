@@ -444,6 +444,8 @@
         <select id="gen-speed-preset">
           <option value="auto">auto (server default)</option>
           <option value="none">none</option>
+          <option value="r2v-balanced">r2v-balanced (R2V default)</option>
+          <option value="quality">quality (unaccelerated)</option>
           <option value="te-speed">te-speed</option>
           <option value="sol-stack">sol-stack</option>
           <option value="custom">custom…</option>
@@ -531,6 +533,7 @@
     videoRefs: [],
     referenceVideos: [],
     accelSchema: null,
+    accelModel: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -1242,11 +1245,17 @@
   }
 
   async function ensureAccelSchema() {
-    if (state.accelSchema) return state.accelSchema;
+    const modelId = $("gen-model").value;
+    if (state.accelSchema && state.accelModel === modelId) {
+      return state.accelSchema;
+    }
     if (!accelSchemaPromise) {
-      accelSchemaPromise = fetchJson("/v2/extension/acceleration/schema")
+      accelSchemaPromise = fetchJson(
+        "/v2/extension/acceleration/schema?model=" + encodeURIComponent(modelId)
+      )
         .then((data) => {
           state.accelSchema = data;
+          state.accelModel = modelId;
           renderAccelForm();
           return data;
         })
@@ -1448,6 +1457,11 @@
       $("gen-speed-preset").value = "auto";
     }
     $("gen-seed").value = "0";
+    const modelId = $("gen-model").value;
+    if (state.accelModel !== modelId) {
+      state.accelSchema = null;
+      state.accelModel = modelId;
+    }
     updateAccelVisibility();
     updateRefControls();
   }
@@ -1598,13 +1612,6 @@
         showGenerateError(error.message);
         return;
       }
-      if (typeof speed === "object" && videoMode !== "t2va") {
-        showGenerateError(
-          "custom acceleration is only supported for text-only video; " +
-          "choose a preset or remove reference inputs"
-        );
-        return;
-      }
       if (videoMode === "r2v" && referenceVideos.length
           && !modelSupportsReferenceVideo(model)) {
         showGenerateError("this model does not support reference video");
@@ -1632,7 +1639,10 @@
       if (videoMode !== "t2va") {
         const form = new FormData();
         for (const [key, value] of Object.entries(fields)) {
-          form.append(key, value);
+          form.append(
+            key,
+            typeof value === "object" ? JSON.stringify(value) : value
+          );
         }
         videoRefs.forEach((file, index) => {
           form.append("image", file, file.name || `ref_${index + 1}.png`);
