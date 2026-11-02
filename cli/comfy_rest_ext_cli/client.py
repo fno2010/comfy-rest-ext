@@ -224,6 +224,11 @@ class ComfyRestClient:
     def get_video(self, video_id: str) -> Dict[str, Any]:
         return self._request("GET", f"/v1/videos/{urllib.parse.quote(video_id)}")
 
+    def retry_video(self, video_id: str) -> Dict[str, Any]:
+        return self._request(
+            "POST", f"/v1/videos/{urllib.parse.quote(video_id)}/retry"
+        )
+
     def list_videos(self) -> list:
         data = self._request("GET", "/v1/videos")
         return data.get("data", []) if isinstance(data, dict) else []

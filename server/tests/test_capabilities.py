@@ -89,3 +89,66 @@ def test_unsupported_capability_has_no_silent_fallback():
     item = report["capabilities"][0]
     assert item["status"] == "unsupported"
     assert item["actions"] == []
+
+
+@pytest.mark.asyncio
+async def test_video_task_blocks_and_retries_after_provisioning(monkeypatch):
+    import asyncio
+    import json
+    import api.openai.v1 as v1
+
+    created = {}
+
+    class Manager:
+        def create(self, task):
+            created["task"] = task
+
+        def get(self, task_id):
+            return created.get("task")
+
+        def update(self, task_id, **kwargs):
+            for key, value in kwargs.items():
+                setattr(created["task"], key, value)
+            return True
+
+    submitted = []
+
+    async def fake_submit(task):
+        submitted.append(task)
+        return task
+
+    monkeypatch.setattr(v1, "get_video_manager", lambda: Manager())
+    monkeypatch.setattr(v1, "submit_video_task", fake_submit)
+    monkeypatch.setattr(v1, "check_config_available", lambda cfg: "missing capability")
+
+    class Request:
+        headers = {}
+
+        async def json(self):
+            return {
+                "model": "minimax-h3",
+                "prompt": "p",
+                "seconds": 1,
+                "speed": {"attention": "flash"},
+            }
+
+    response = await v1.create_video(Request())
+    assert response.status == 409
+    body = json.loads(response.text)
+    assert body["task"]["status"] == "blocked_on_provisioning"
+    assert body["plan"]["capabilities"]
+    assert created["task"].status == "blocked_on_provisioning"
+    assert not submitted
+
+    # After provisioning succeeds, retry resumes the original task.
+    monkeypatch.setattr(v1, "check_config_available", lambda cfg: None)
+
+    class RetryRequest:
+        match_info = {"video_id": created["task"].task_id}
+
+    response = await v1.retry_video(RetryRequest())
+    await asyncio.sleep(0)
+    assert response.status == 200
+    assert created["task"].status == "queued"
+    assert created["task"].capability_plan is None
+    assert submitted == [created["task"]]
