@@ -12,7 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from aiohttp import web
@@ -52,6 +55,84 @@ def _authorized(ids: Iterable[str], explicit: bool) -> bool:
     if mode == "ask":
         return explicit
     return False
+
+
+def _custom_nodes_dir() -> Path:
+    override = os.environ.get("COMFYUI_CUSTOM_NODES")
+    if override:
+        return Path(override).expanduser()
+    try:
+        import folder_paths
+        paths = folder_paths.get_folder_paths("custom_nodes")
+        if paths:
+            return Path(paths[0])
+    except Exception:
+        pass
+    raise ProvisionError(500, "cannot resolve ComfyUI custom_nodes directory")
+
+
+async def _install_custom_node(spec: Dict[str, Any]) -> Dict[str, Any]:
+    repo = spec.get("repo")
+    commit = spec.get("commit")
+    target_name = spec.get("target")
+    if not isinstance(repo, str) or not re.fullmatch(
+        r"https://github\.com/[^/]+/[^/]+(?:\.git)?", repo
+    ):
+        raise ProvisionError(400, "custom node repo must be a pinned GitHub URL")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ProvisionError(400, "custom node commit must be a 40-character SHA")
+    if not isinstance(target_name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", target_name):
+        raise ProvisionError(400, "custom node target is invalid")
+
+    root = _custom_nodes_dir()
+    target = root / target_name
+    if target.exists():
+        try:
+            current = subprocess.check_output(
+                ["git", "-C", str(target), "rev-parse", "HEAD"],
+                text=True,
+            ).strip()
+        except Exception:
+            raise ProvisionError(
+                409, f"custom node target exists but is not a git checkout: {target}"
+            )
+        if current != commit:
+            raise ProvisionError(
+                409,
+                f"custom node target is at {current}, expected {commit}",
+            )
+        return {"kind": "custom_node", "target": str(target), "skipped": True}
+
+    root.mkdir(parents=True, exist_ok=True)
+    cmd = ["git", "clone", "--no-checkout", repo, str(target)]
+    logger.info("Provisioning custom node: %s @ %s", repo, commit)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    output = []
+    if proc.stdout is not None:
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            output.append(line.decode("utf-8", errors="replace"))
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProvisionError(
+            502, f"git clone failed for {repo}",
+            {"output_tail": "".join(output[-20:])},
+        )
+    proc = await asyncio.create_subprocess_exec(
+        "git", "-C", str(target), "checkout", commit,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProvisionError(502, f"git checkout failed for {commit}")
+    return {"kind": "custom_node", "target": str(target), "commit": commit}
 
 
 async def _install_python_package(spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,13 +215,16 @@ async def provision_capabilities(
     actions = []
     for item in installable:
         spec = item.get("install_spec") or {}
-        if spec.get("kind") != "python_package":
+        if spec.get("kind") == "python_package":
+            actions.append(await _install_python_package(spec))
+        elif spec.get("kind") == "custom_node":
+            actions.append(await _install_custom_node(spec))
+        else:
             raise ProvisionError(
                 409,
                 f"no automatic installer for {item['id']}",
                 {"capability": item},
             )
-        actions.append(await _install_python_package(spec))
 
     after = _select_capabilities(ids)
     return {
