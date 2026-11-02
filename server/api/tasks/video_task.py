@@ -18,11 +18,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from .video_persistence import get_video_persistence
 from ..catalog import get_model
-from ..workflows.h3 import (
-    H3_PHASE_WEIGHTS,
-    build_h3_workflow,
-    frames_for_seconds,
-)
 
 logger = logging.getLogger("comfy-rest-ext.video")
 
@@ -39,7 +34,7 @@ class GenerationTask:
     height: int
     length: int
     seed: int
-    model_id: str = "minimax-h3"
+    model_id: Optional[str] = None
     modality: str = "video"
     params: Dict[str, Any] = field(default_factory=dict)
     assets: Dict[str, str] = field(default_factory=dict)
@@ -185,7 +180,7 @@ def _record_to_task(record: dict) -> GenerationTask:
         height=record.get("height", 768),
         length=record.get("length", 101),
         seed=record.get("seed", 0),
-        model_id=record.get("model_id", "minimax-h3"),
+        model_id=record.get("model_id"),
         modality=record.get("modality", "video"),
         params=dict(record.get("params") or {}),
         acceleration=record.get("acceleration"),
@@ -287,10 +282,16 @@ def _collect_output_paths(outputs: dict) -> List[str]:
 
 # Weighted total-progress model. Only the sampler reports step-level
 # progress; conditioning/decode/save phases are modeled with fixed weights.
-COND_PHASE_WEIGHT = H3_PHASE_WEIGHTS["cond"]
-KSAMPLER_PHASE_WEIGHT = H3_PHASE_WEIGHTS["step"]
-DECODE_PHASE_WEIGHT = H3_PHASE_WEIGHTS["decode"]
-SAVE_PHASE_WEIGHT = H3_PHASE_WEIGHTS["save"]
+DEFAULT_PHASE_WEIGHTS = {
+    "cond": 0.05,
+    "step": 0.80,
+    "decode": 0.08,
+    "save": 0.07,
+}
+COND_PHASE_WEIGHT = DEFAULT_PHASE_WEIGHTS["cond"]
+KSAMPLER_PHASE_WEIGHT = DEFAULT_PHASE_WEIGHTS["step"]
+DECODE_PHASE_WEIGHT = DEFAULT_PHASE_WEIGHTS["decode"]
+SAVE_PHASE_WEIGHT = DEFAULT_PHASE_WEIGHTS["save"]
 DECODE_SAVE_TAIL_ESTIMATE = 60.0  # seconds, empirical for H3 video
 IMAGE_DECODE_SAVE_TAIL_ESTIMATE = 10.0
 
@@ -341,7 +342,7 @@ def _read_progress(
     node_progress = (value / max_value) if max_value else 0.0
     class_type = _class_type_of(workflow, node_id) or node_id
 
-    weights = phase_weights or H3_PHASE_WEIGHTS
+    weights = phase_weights or DEFAULT_PHASE_WEIGHTS
     cond = weights.get("cond", 0.0)
     step = weights.get("step", 0.0)
     decode = weights.get("decode", 0.0)

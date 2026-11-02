@@ -38,6 +38,25 @@ def check_task_compat(accel: AccelConfig, length: int) -> Optional[str]:
     return None
 
 
+def infer_task_type(fields: dict) -> str:
+    """Infer the H3 task type from request content (video/image refs)."""
+    videos = (
+        fields.get("_ref_videos_data")
+        or fields.get("ref_videos")
+        or fields.get("ref_video_urls")
+        or []
+    )
+    if videos:
+        return "r2v"
+    images = fields.get("_ref_images_data") or fields.get("ref_images") or []
+    if len(images) > 1:
+        return "r2v"
+    if (images or fields.get("_first_frame_data") or fields.get("input_reference")
+            or fields.get("first_frame_url")):
+        return "fl2va"
+    return "t2va"
+
+
 def frames_for_seconds(seconds: float) -> int:
     """Convert seconds to H3 frame count on the 17k+5 grid at 24 fps.
 

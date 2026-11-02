@@ -66,3 +66,29 @@ def test_model_spec_is_frozen():
     spec = get_model("anima-base")
     with pytest.raises(Exception):
         spec.id = "other"  # type: ignore[misc]
+
+
+def test_h3_owns_its_frame_grid():
+    assert get_model("minimax-h3").frames_for_seconds(5.0) == 124
+    assert get_model("minimax-h3").frames_for_seconds(1.0) == 39
+
+
+def test_default_model_is_configurable(monkeypatch):
+    from api.catalog import default_model_id
+
+    monkeypatch.setenv("COMFY_REST_DEFAULT_MODEL", "anima-base")
+    assert default_model_id() == "anima-base"
+
+
+def test_empty_registry_has_no_default_model():
+    import api.catalog as catalog
+
+    saved = dict(catalog._SPECS)
+    saved_aliases = dict(catalog._ALIASES)
+    try:
+        catalog._SPECS.clear()
+        catalog._ALIASES.clear()
+        assert catalog.default_model_id() is None
+    finally:
+        catalog._SPECS.update(saved)
+        catalog._ALIASES.update(saved_aliases)
