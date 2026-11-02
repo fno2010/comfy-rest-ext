@@ -246,6 +246,8 @@ dot-path 参数会先按 `/v2/extension/acceleration/schema` 校验维度、方�
 
 `--preset` 也从同一 schema 读取，当前值等价于 legacy speed 字符串，并保留 `auto` 的服务端 env 语义。`--speed-json`/`--speed-file`/`--preset` 不能与其它加速输入混用；multipart 下 composable 对象同样可用。
 
+逐方法支持状态、节点/包依赖与 smoke 记录见 [`docs/acceleration-methods.md`](docs/acceleration-methods.md)。
+
 ```bash
 # 4-step LightX2V Turbo LoRA（默认 4 步、shift 6/3、euler/simple）
 # 面向 FL2V/I2V 效果最好；复杂 T2V 4-step 建议先 A/B

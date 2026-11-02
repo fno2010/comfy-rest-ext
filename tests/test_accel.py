@@ -534,6 +534,39 @@ def test_build_task_records_resolved_acceleration(monkeypatch):
     assert accel["vae_decode"] == {"method": "default", "applied": False}
 
 
+@pytest.mark.parametrize(("layer", "method", "node_class"), [
+    ("turbo", "turbo-v4", "MiniMaxH3TurboLoRA"),
+    ("turbo", "lightx2v-4step-v1.3", "MiniMaxH3TurboLoRA"),
+    ("attention", "sol", "SolAttnMiniMaxH3Patcher"),
+    ("attention", "sage", "PathchSageAttentionKJ"),
+    ("attention", "flash", "PatchFlashAttentionKJ"),
+    ("block_cache", "te-speed", "TESpeedMiniMaxH3"),
+    ("block_cache", "fbc", "H3FirstBlockCache"),
+    ("block_cache", "t8", "MiniMaxH3BlockCacheT8"),
+    ("block_cache", "dasiwa", "MiniMaxH3Cache"),
+    ("step_cache", "easycache", "EasyCache"),
+    ("step_cache", "lazycache", "LazyCache"),
+    ("step_cache", "spectrum", "SpectrumApplyMiniMaxH3"),
+])
+def test_every_implemented_method_builds_expected_node(
+    layer, method, node_class,
+):
+    cfg = accel.parse_accel_config({layer: method})
+    wf = build_h3_workflow(
+        prompt="p", width=512, height=512, length=39, seed=0, accel=cfg,
+    )
+    assert _find(wf, node_class) is not None
+
+
+@pytest.mark.parametrize("method", ["cachedit", "teacache"])
+def test_unimplemented_methods_fail_closed(method):
+    cfg = accel.parse_accel_config({(
+        "block_cache" if method == "cachedit" else "step_cache"
+    ): method})
+    error = accel.check_config_available(cfg)
+    assert error and "not implemented" in error
+
+
 def test_nonfinite_params_rejected():
     with pytest.raises(accel.AccelConfigError):
         accel.parse_accel_config({
@@ -620,6 +653,16 @@ class TestAccelerationSchema:
         assert accel.check_model_allowed(
             frozenset(), accel.parse_accel_config("none")
         ) is None
+
+    def test_flash_reports_missing_python_dependency(self, monkeypatch):
+        monkeypatch.setattr(
+            accel, "_missing_package_groups",
+            lambda method: [["flash_attn", "flash_attn_interface"]]
+            if method.id == "flash" else [],
+        )
+        error = accel.check_option_available("attention", "flash")
+        assert error and "Python package" in error
+        assert "flash_attn" in error
 
     def test_schema_availability_uses_installed_nodes(self, monkeypatch):
         saved = accel._node_cache
