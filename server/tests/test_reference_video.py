@@ -7,11 +7,7 @@ import json
 
 import pytest
 
-from api.openai.v1 import (
-    _infer_task_type,
-    _parse_content_items,
-    _resolve_ref_video,
-)
+from api.openai.v1 import _parse_content_items, _resolve_ref_video
 from api.tasks.video_task import VideoTask, _record_to_task, _task_to_record
 from api.workflows import h3
 from api.workflows.h3 import build_h3_workflow
@@ -22,9 +18,9 @@ def _find(wf, class_type):
 
 
 def test_infer_video_reference_is_r2v():
-    assert _infer_task_type({"_ref_videos_data": [b"v"]}) == "r2v"
-    assert _infer_task_type({"ref_videos": ["v.mp4"]}) == "r2v"
-    assert _infer_task_type({"ref_video_urls": ["https://v"]}) == "r2v"
+    assert h3.infer_task_type({"_ref_videos_data": [b"v"]}) == "r2v"
+    assert h3.infer_task_type({"ref_videos": ["v.mp4"]}) == "r2v"
+    assert h3.infer_task_type({"ref_video_urls": ["https://v"]}) == "r2v"
 
 
 def test_parse_content_items_video_reference():

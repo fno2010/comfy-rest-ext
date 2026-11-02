@@ -43,6 +43,7 @@ class Setting:
 
 
 SETTINGS: Dict[str, Setting] = {
+    "COMFY_REST_DEFAULT_MODEL": Setting("COMFY_REST_DEFAULT_MODEL", "str", ""),
     "H3_STEPS": Setting("H3_STEPS", "int", 20, minimum=1, maximum=200),
     "H3_SAMPLER": Setting("H3_SAMPLER", "str", "euler"),
     "H3_SCHEDULER": Setting("H3_SCHEDULER", "str", "simple"),

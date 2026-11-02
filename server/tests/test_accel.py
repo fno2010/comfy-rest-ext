@@ -23,7 +23,7 @@ def _load_module(name, rel_path):
 
 accel = _load_module("comfy_rest_ext_accel", "api/accel.py")
 
-from api.tasks.video_task import build_h3_workflow  # noqa: E402
+from api.workflows.h3 import build_h3_workflow  # noqa: E402
 from api.workflows.h3 import check_task_compat  # noqa: E402
 
 

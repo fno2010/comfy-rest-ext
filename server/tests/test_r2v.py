@@ -15,17 +15,10 @@ sys.modules["server"] = server_mod
 
 import folder_paths  # noqa: E402  (installed by tests/conftest.py)
 
-from api.openai.v1 import (  # noqa: E402
-    _model_for_task,
-    _task_type_from_model,
-    _infer_task_type,
-    CANONICAL_MODEL_ID,
-)
-from api.tasks.video_task import (  # noqa: E402
-    VideoTask,
-    build_h3_workflow,
-    frames_for_seconds,
-)
+from api.openai.v1 import _task_type_from_model  # noqa: E402
+from api.catalog import default_model_id  # noqa: E402
+from api.tasks.video_task import VideoTask  # noqa: E402
+from api.workflows.h3 import build_h3_workflow, frames_for_seconds  # noqa: E402
 
 
 def _find(wf, class_type):
@@ -94,10 +87,8 @@ def test_build_h3_workflow_r2v_single_reference():
     assert wf[ref_id]["inputs"]["ref_images.ref_image_0"] == [load_id, 0]
 
 
-def test_model_for_task_returns_canonical():
-    assert _model_for_task("r2v") == CANONICAL_MODEL_ID
-    assert _model_for_task("fl2va") == CANONICAL_MODEL_ID
-    assert _model_for_task("t2va") == CANONICAL_MODEL_ID
+def test_default_model_is_registry_driven():
+    assert default_model_id() == "minimax-h3"
 
 
 def test_task_type_from_model_aliases():
@@ -107,7 +98,7 @@ def test_task_type_from_model_aliases():
 
 
 def test_task_type_from_model_canonical_and_none():
-    assert _task_type_from_model(CANONICAL_MODEL_ID) is None
+    assert _task_type_from_model(default_model_id()) is None
     assert _task_type_from_model(None) is None
 
 
@@ -118,18 +109,21 @@ def test_task_type_from_model_unknown_raises():
 
 
 def test_infer_task_type_no_image_is_t2v():
-    assert _infer_task_type({}) == "t2va"
+    from api.workflows.h3 import infer_task_type
+    assert infer_task_type({}) == "t2va"
 
 
 def test_infer_task_type_single_image_is_fl2va():
-    assert _infer_task_type({"_ref_images_data": [b"x"]}) == "fl2va"
-    assert _infer_task_type({"_first_frame_data": b"x"}) == "fl2va"
-    assert _infer_task_type({"input_reference": "img.png"}) == "fl2va"
+    from api.workflows.h3 import infer_task_type
+    assert infer_task_type({"_ref_images_data": [b"x"]}) == "fl2va"
+    assert infer_task_type({"_first_frame_data": b"x"}) == "fl2va"
+    assert infer_task_type({"input_reference": "img.png"}) == "fl2va"
 
 
 def test_infer_task_type_multiple_images_is_r2v():
-    assert _infer_task_type({"_ref_images_data": [b"a", b"b"]}) == "r2v"
-    assert _infer_task_type({"ref_images": ["a.png", "b.png"]}) == "r2v"
+    from api.workflows.h3 import infer_task_type
+    assert infer_task_type({"_ref_images_data": [b"a", b"b"]}) == "r2v"
+    assert infer_task_type({"ref_images": ["a.png", "b.png"]}) == "r2v"
 
 
 def test_video_response_includes_inference_time_s():
@@ -145,7 +139,7 @@ def test_video_response_includes_inference_time_s():
     from api.openai.v1 import _video_response
     resp = _video_response(task)
     assert resp["inference_time_s"] == 30.0
-    assert resp["model"] == CANONICAL_MODEL_ID
+    assert resp["model"] == default_model_id()
 
 
 def test_video_response_inference_time_null_when_not_done():
@@ -266,7 +260,7 @@ def test_read_progress_ksampler_weighted_total(progress_module):
         width=1344, height=768, length=101, seed=0,
         prompt_id="prompt_1", created_at=1000.0, started_at=1000.0,
     )
-    wf = vt.build_h3_workflow(prompt="p", width=1344, height=768,
+    wf = build_h3_workflow(prompt="p", width=1344, height=768,
                               length=101, seed=0)
     sampler_id = _find(wf, "KSampler")
     registry = FakeRegistry(
@@ -289,7 +283,7 @@ def test_read_progress_other_prompt_returns_none(progress_module):
         width=1344, height=768, length=101, seed=0,
         prompt_id="prompt_1", created_at=1000.0, started_at=1000.0,
     )
-    wf = vt.build_h3_workflow(prompt="p", width=1344, height=768,
+    wf = build_h3_workflow(prompt="p", width=1344, height=768,
                               length=101, seed=0)
     sampler_id = _find(wf, "KSampler")
     registry = FakeRegistry(
@@ -308,7 +302,7 @@ def test_read_progress_no_import_returns_none():
         task_id="video_x", status="running", prompt="p", task_type="t2va",
         width=1344, height=768, length=101, seed=0, created_at=1000.0,
     )
-    wf = vt.build_h3_workflow(prompt="p", width=1344, height=768,
+    wf = build_h3_workflow(prompt="p", width=1344, height=768,
                               length=101, seed=0)
     saved = _sys.modules.pop("comfy_execution.progress", None)
     try:

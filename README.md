@@ -35,6 +35,8 @@ uv tool install /path/to/comfy-rest-ext/cli
 comfy-rest-ext --help
 ```
 
+默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
+
 ## 快速验证
 
 启动 ComfyUI 后，访问健康检查端点：

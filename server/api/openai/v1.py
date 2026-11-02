@@ -31,7 +31,6 @@ from ..accel import (
 from ..workflows.h3 import check_task_compat
 from ..tasks.video_task import (
     VideoTask,
-    frames_for_seconds,
     get_video_manager,
     submit_video_task,
     _record_to_task,
@@ -40,15 +39,13 @@ from ..tasks.video_persistence import get_video_persistence
 from ..catalog import (
     all_model_ids,
     alias_task_type,
+    default_model_id,
     get_model,
 )
 
 logger = logging.getLogger("comfy-rest-ext.openai")
 
 routes = PromptServer.instance.routes
-
-CANONICAL_MODEL_ID = "minimax-h3"
-MODEL_IDS = list(all_model_ids())
 
 MAX_REFERENCE_VIDEOS = 3
 MAX_VIDEO_BYTES = 256 * 1024 * 1024
@@ -85,25 +82,6 @@ def _task_type_from_model(model: Optional[str]) -> Optional[str]:
     if spec.modality != "video":
         raise KeyError(model)
     return alias_task_type(model)
-
-
-def _infer_task_type(fields: dict) -> str:
-    """Infer task type from request content (video/image references)."""
-    videos = (
-        fields.get("_ref_videos_data")
-        or fields.get("ref_videos")
-        or fields.get("ref_video_urls")
-        or []
-    )
-    if videos:
-        return "r2v"
-    images = fields.get("_ref_images_data") or fields.get("ref_images") or []
-    if len(images) > 1:
-        return "r2v"
-    if (images or fields.get("_first_frame_data") or fields.get("input_reference")
-            or fields.get("first_frame_url")):
-        return "fl2va"
-    return "t2va"
 
 
 def _json_safe(value: Any) -> Any:
@@ -143,7 +121,7 @@ def _video_response(task: VideoTask) -> dict:
     return {
         "id": task.task_id,
         "object": "video",
-        "model": task.model_id or _model_for_task(task.task_type),
+        "model": task.model_id or default_model_id() or "unknown",
         "prompt": task.prompt,
         "speed": _json_safe(task.speed),
         "params": effective_params,
@@ -193,24 +171,22 @@ def _video_response(task: VideoTask) -> dict:
     }
 
 
-def _model_for_task(task_type: str) -> str:
-    return CANONICAL_MODEL_ID
-
-
 @routes.get("/v1/models")
 async def show_available_models(request: web.Request) -> web.Response:
     """List available models (OpenAI shape)."""
     created = int(time.time())
     return web.json_response({
         "object": "list",
-        "data": [_model_card(m, created) for m in MODEL_IDS],
+        "data": [_model_card(m, created) for m in all_model_ids()],
     })
 
 
 @routes.get("/v1/models/{model_id}")
 async def retrieve_model(request: web.Request) -> web.Response:
     model_id = request.match_info["model_id"]
-    if model_id not in MODEL_IDS:
+    try:
+        get_model(model_id)
+    except KeyError:
         return web.json_response({"error": "Model not found"}, status=404)
     return web.json_response(_model_card(model_id, int(time.time())))
 
@@ -243,7 +219,12 @@ async def create_video(request: web.Request) -> web.Response:
     if not prompt:
         return web.json_response({"error": "prompt is required"}, status=400)
 
-    model = fields.get("model") or CANONICAL_MODEL_ID
+    model = fields.get("model") or default_model_id()
+    if not model:
+        return web.json_response(
+            {"error": "no model configured and no model was provided"},
+            status=400,
+        )
     try:
         spec = get_model(model)
         if spec.modality != "video":
@@ -252,7 +233,7 @@ async def create_video(request: web.Request) -> web.Response:
     except KeyError:
         return web.json_response(
             {"error": f"Model mismatch: '{model}' is not a served video model. "
-                      f"Use '{CANONICAL_MODEL_ID}' or an image endpoint."},
+                      "Use /v1/models or an image endpoint."},
             status=400,
         )
 
@@ -260,8 +241,10 @@ async def create_video(request: web.Request) -> web.Response:
         task_type = fields["task"]
     elif model_task_type is not None:
         task_type = model_task_type
+    elif spec.infer_task_type is not None:
+        task_type = spec.infer_task_type(fields)
     else:
-        task_type = _infer_task_type(fields)
+        task_type = spec.default_task or spec.tasks[0]
     if task_type not in spec.tasks:
         return web.json_response({"error": f"unsupported task: {task_type}"}, status=400)
 
@@ -362,7 +345,7 @@ async def create_video(request: web.Request) -> web.Response:
             )
 
     task_id = f"video_{uuid.uuid4().hex}"
-    length = frames_for_seconds(seconds)
+    length = spec.frames_for_seconds(seconds)
     compat_error = check_task_compat(accel_cfg, length)
     if compat_error:
         return web.json_response({"error": compat_error}, status=400)

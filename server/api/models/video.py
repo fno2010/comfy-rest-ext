@@ -16,11 +16,10 @@ from typing import Optional
 from aiohttp import web
 from server import PromptServer
 
-from ..catalog import get_model
+from ..catalog import default_model_id, get_model
 from ..schemas.requests import VideoGenerateRequest
 from ..tasks.video_task import (
     VideoTask,
-    frames_for_seconds,
     get_video_manager,
     submit_video_task,
     _record_to_task,
@@ -67,12 +66,18 @@ async def create_video_task(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
 
-    # Legacy route is H3-only; ignore any `model` field from old clients.
+    # Legacy route resolves the configured default model; old clients may
+    # still omit `model`.
+    model_id = default_model_id()
     try:
-        spec = get_model("minimax-h3")
+        spec = get_model(model_id) if model_id else None
     except KeyError:
         spec = None
     defaults = spec.defaults if spec else {}
+    if spec is None or spec.modality != "video":
+        return web.json_response(
+            {"error": "no video model configured"}, status=400
+        )
 
     # Apply models.json defaults before Pydantic validation so numeric
     # strings are coerced exactly like explicit request fields.
@@ -92,7 +97,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Invalid request: {e}"}, status=400)
 
     task_id = str(uuid.uuid4())
-    length = frames_for_seconds(req.duration)
+    length = spec.frames_for_seconds(req.duration)
 
     first_frame = None
     if req.first_frame:
@@ -111,7 +116,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         height=req.height,
         length=length,
         seed=req.seed,
-        model_id=spec.id if spec else "minimax-h3",
+        model_id=spec.id,
         modality="video",
         params={"duration": req.duration},
         first_frame=first_frame,

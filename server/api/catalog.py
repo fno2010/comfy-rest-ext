@@ -132,6 +132,9 @@ class ModelSpec:
     alias_tasks: Tuple[Tuple[str, str], ...] = ()
     capabilities: frozenset = frozenset()
     accel_methods: frozenset = frozenset()
+    length_for_seconds: Optional[Callable[[float], int]] = None
+    infer_task_type: Optional[Callable[[Dict[str, Any]], str]] = None
+    default_task: Optional[str] = None
     size: Optional[SizePolicy] = None
     max_n: int = 1
     variant: str = "base"
@@ -141,6 +144,16 @@ class ModelSpec:
 
     def task_types(self) -> Tuple[str, ...]:
         return self.tasks
+
+    def frames_for_seconds(self, seconds: float) -> int:
+        """Map a duration to the model's frame count.
+
+        Models that need a special grid (for example H3's 17k+5) provide this
+        callable from their adapter; the fallback is a plain 24fps estimate.
+        """
+        if self.length_for_seconds is not None:
+            return int(self.length_for_seconds(seconds))
+        return max(1, int(round(float(seconds) * 24)))
 
     def alias_task_map(self) -> Dict[str, str]:
         return dict(self.alias_tasks)
@@ -198,6 +211,24 @@ def all_model_ids() -> Tuple[str, ...]:
     return tuple(ids)
 
 
+def default_model_id() -> Optional[str]:
+    """Resolve the configured default model without canonical-name assumptions.
+
+    ``COMFY_REST_DEFAULT_MODEL`` wins. Otherwise prefer the first registered
+    video model, then the first registered model. Returns None for an empty
+    registry.
+    """
+    configured = os.environ.get("COMFY_REST_DEFAULT_MODEL")
+    if configured:
+        return get_model(configured).id
+    for spec in _SPECS.values():
+        if spec.modality == "video":
+            return spec.id
+    for spec in _SPECS.values():
+        return spec.id
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Registered models
 # ---------------------------------------------------------------------------
@@ -224,6 +255,9 @@ H3_SPEC = register(ModelSpec(
     ),
     capabilities=frozenset({"negative_prompt", "seed", "accel", "reference_video"}),
     accel_methods=frozenset({"*"}),
+    length_for_seconds=h3.frames_for_seconds,
+    infer_task_type=h3.infer_task_type,
+    default_task="t2va",
     max_n=1,
     output_mime="video/mp4",
     timeout_s=3600,
@@ -806,6 +840,15 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
         alias_tasks=tuple(alias_tasks_value.items()),
         capabilities=frozenset(capabilities_value),
         accel_methods=accel_methods,
+        length_for_seconds=(
+            existing.length_for_seconds if existing is not None else None
+        ),
+        infer_task_type=(
+            existing.infer_task_type if existing is not None else None
+        ),
+        default_task=(
+            existing.default_task if existing is not None else None
+        ),
         size=size,
         max_n=max_n,
         variant=variant,

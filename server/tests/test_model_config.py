@@ -558,7 +558,7 @@ def test_image_defaults_apply_n_and_seed(tmp_path):
 @pytest.mark.asyncio
 async def test_legacy_video_route_uses_spec_defaults(tmp_path, monkeypatch):
     from api.models import video
-    from api.tasks.video_task import frames_for_seconds
+    from api.catalog import get_model
 
     path = _write(tmp_path, {
         "minimax-h3": {
@@ -594,7 +594,7 @@ async def test_legacy_video_route_uses_spec_defaults(tmp_path, monkeypatch):
     assert (body["width"], body["height"]) == (512, 512)
     task = captured["task"]
     assert task.seed == 7
-    assert task.length == frames_for_seconds(2.0)
+    assert task.length == get_model("minimax-h3").frames_for_seconds(2.0)
 
     captured.clear()
     await video.create_video_task(Request({"prompt": "a cat", "width": 768}))
@@ -611,7 +611,7 @@ async def test_legacy_video_route_uses_spec_defaults(tmp_path, monkeypatch):
     assert (body["width"], body["height"], body["duration"]) == (640, 640, 3.0)
     task = captured["task"]
     assert (task.width, task.height, task.seed) == (640, 640, 9)
-    assert task.length == frames_for_seconds(3.0)
+    assert task.length == get_model("minimax-h3").frames_for_seconds(3.0)
 
     # Non-object bodies are a 400, not an uncaught AttributeError.
     response = await video.create_video_task(Request([]))
