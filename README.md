@@ -2,6 +2,8 @@
 
 ComfyUI REST API 扩展，通过 Custom Node 机制向 ComfyUI 补充缺失的 REST API 端点。
 
+Roadmap: [ROADMAP.md](ROADMAP.md) — v0.8.0 focuses on deployment-agnostic server, standalone CLI, and an installable agent skill.
+
 ## 功能
 
 - **OpenAI 兼容视频生成 API** — T2V / I2V / R2V（图像或视频参考）生成、任务持久化、历史查询（MiniMax-H3）
