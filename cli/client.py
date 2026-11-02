@@ -146,6 +146,8 @@ class ComfyRestClient:
         boundary = f"----comfyrestext{os.getpid()}{id(payload):x}"
         parts: list = []
         for key, value in payload.items():
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value)
             parts.append(
                 (
                     f"--{boundary}\r\n"
@@ -190,6 +192,8 @@ class ComfyRestClient:
         boundary = f"----comfyrestext{os.getpid()}{id(payload):x}"
         parts: list = []
         for key, value in payload.items():
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value)
             parts.append(
                 (
                     f"--{boundary}\r\n"

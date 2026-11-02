@@ -50,6 +50,7 @@ class GenerationTask:
     ref_images: Optional[list] = None
     ref_videos: Optional[list] = None
     speed: Optional[Any] = None  # legacy str or AccelConfig dict
+    accel_methods: Optional[frozenset] = None  # model allowlist; None = unknown
     prompt_id: Optional[str] = None
     progress: float = 0.0
     current_node: Optional[str] = None
@@ -150,6 +151,9 @@ def _task_to_record(task: GenerationTask) -> dict:
         "ref_images": task.ref_images,
         "ref_videos": task.ref_videos,
         "speed": task.speed,
+        "accel_methods": (
+            sorted(task.accel_methods) if task.accel_methods is not None else None
+        ),
         "prompt_id": task.prompt_id,
         "progress": task.progress,
         "current_node": task.current_node,
@@ -190,6 +194,10 @@ def _record_to_task(record: dict) -> GenerationTask:
         ref_images=record.get("ref_images"),
         ref_videos=record.get("ref_videos"),
         speed=record.get("speed"),
+        accel_methods=(
+            frozenset(record["accel_methods"])
+            if record.get("accel_methods") is not None else None
+        ),
         prompt_id=record.get("prompt_id"),
         progress=record.get("progress", 0.0),
         current_node=record.get("current_node"),
@@ -409,6 +417,7 @@ def apply_model_spec(task: GenerationTask, spec) -> None:
     """
     task.assets = dict(spec.assets)
     task.variant = spec.variant
+    task.accel_methods = spec.accel_methods
     params = dict(spec.defaults)
     params.update(task.params or {})
     task.params = params

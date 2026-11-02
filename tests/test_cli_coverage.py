@@ -551,19 +551,21 @@ def test_cmd_generate_multipart(tmp_path, capsys):
     assert payload["prompt"] == "p"
 
 
-def test_cmd_generate_multipart_rejects_composable_speed(tmp_path, capsys):
+def test_cmd_generate_multipart_accepts_composable_speed(tmp_path, capsys):
     client = FakeClient()
     image = tmp_path / "ref.png"
     image.write_bytes(b"PNGDATA")
     args = Args(
-        json=False, prompt="p", image=[str(image)], model=None,
+        json=True, prompt="p", image=[str(image)], model=None,
         width=None, height=None, seconds=None, seed=None, speed=None,
         steps=8, turbo=None, block_cache=None, step_cache=None,
         attention=None, vae_decode=None, multipart=True,
     )
-    assert commands.cmd_generate(client, args) == 1
-    assert "multipart" in capsys.readouterr().err
-    assert not client.calls
+    assert commands.cmd_generate(client, args) == 0
+    kind, payload, files = client.calls[-1]
+    assert kind == "video-multipart"
+    assert payload["speed"] == {"steps": 8}
+    assert files == [("input_reference", "ref.png", b"PNGDATA")]
 
 
 def test_deps_install_sync_polls_to_completion(monkeypatch, capsys):

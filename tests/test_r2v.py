@@ -169,6 +169,14 @@ def test_frames_for_seconds_snaps_to_grid():
     assert frames_for_seconds(15.0) == 362
 
 
+def test_parse_speed_field_accepts_structured_multipart_value():
+    from api.openai.v1 import _parse_speed_field
+
+    assert _parse_speed_field("auto") == "auto"
+    assert _parse_speed_field('{"attention":"sage"}') == {"attention": "sage"}
+    assert _parse_speed_field("{invalid") == "{invalid"
+
+
 @pytest.mark.asyncio
 async def test_r2v_route_defaults_to_balanced_profile(monkeypatch):
     import json

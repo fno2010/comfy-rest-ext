@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import math
 import os
@@ -22,7 +23,11 @@ from aiohttp import web, MultipartReader
 from server import PromptServer
 
 from ..schemas.requests import VideoGenerateRequest
-from ..accel import DEFAULT_R2V_PROFILE
+from ..accel import (
+    DEFAULT_R2V_PROFILE,
+    check_model_allowed,
+    model_supports_profile,
+)
 from ..workflows.h3 import check_task_compat
 from ..tasks.video_task import (
     VideoTask,
@@ -275,7 +280,11 @@ async def create_video(request: web.Request) -> web.Response:
     speed = fields.get("speed")
     if speed is None:
         speed = "auto"
-    if speed == "auto" and task_type == "r2v":
+    if (
+        speed == "auto"
+        and task_type == "r2v"
+        and model_supports_profile(spec.accel_methods, DEFAULT_R2V_PROFILE)
+    ):
         speed = DEFAULT_R2V_PROFILE
     try:
         from ..accel import check_config_available, parse_accel_config
@@ -285,6 +294,9 @@ async def create_video(request: web.Request) -> web.Response:
     missing_node = check_config_available(accel_cfg)
     if missing_node:
         return web.json_response({"error": f"invalid speed: {missing_node}"}, status=400)
+    model_error = check_model_allowed(spec.accel_methods, accel_cfg)
+    if model_error:
+        return web.json_response({"error": model_error}, status=400)
 
     width = _parse_int(fields.get("width"), int(spec.defaults.get("width", 1344)))
     height = _parse_int(fields.get("height"), int(spec.defaults.get("height", 768)))
@@ -449,6 +461,24 @@ def _parse_content_items(body: dict) -> dict:
     }
 
 
+def _parse_speed_field(value: str):
+    """Accept both legacy speed strings and JSON-encoded structured speed.
+
+    Multipart form fields are strings; a browser/CLI cannot send a JSON
+    object directly. Structured accelerations are serialized as JSON and
+    parsed here so reference uploads have the same acceleration surface as
+    JSON video requests.
+    """
+    text = value.strip()
+    if not text.startswith("{"):
+        return value
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return value
+    return parsed
+
+
 async def _parse_multipart(request: web.Request):
     """Parse a multipart/form-data video request (OpenAI SDK shape).
 
@@ -480,6 +510,8 @@ async def _parse_multipart(request: web.Request):
         fields["_ref_images_data"] = ref_images_data
     if ref_videos_data:
         fields["_ref_videos_data"] = ref_videos_data
+    if "speed" in fields:
+        fields["speed"] = _parse_speed_field(fields["speed"])
     return fields
 
 

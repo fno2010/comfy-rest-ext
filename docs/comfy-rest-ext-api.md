@@ -939,7 +939,7 @@ GET /v2/extension/acceleration/schema
 
 不调用 ComfyUI 原生 API、`/view` 或前端 SDK。支持自动刷新（有活跃任务时 2s，否则 5s）、分页、排序、类型/状态/模型筛选、搜索，以及 Models 弹窗（读取 `/v1/models`，不跳转 JSON）。卡片采用增量更新，视频播放不会被轮询刷新打断。
 
-`+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。视频表单的 Acceleration 支持 legacy preset 和 `custom…`；`custom` 会从 `/v2/extension/acceleration/schema` 动态渲染四个维度、method 与参数控件，提交为结构化 `speed` 对象。当前 `custom` 仅支持 `Text only` 视频；带参考图/视频时使用 preset（multipart 的 `speed` 仍是 legacy 字符串）。
+`+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。视频表单的 Acceleration 支持 legacy preset 和 `custom…`；`custom` 会从 `/v2/extension/acceleration/schema` 动态渲染四个维度、method 与参数控件，提交为结构化 `speed` 对象。`custom` 对 T2V/I2V/R2V 都可用；multipart 会把结构化 `speed` 序列化为 JSON 字段，服务端按同一规则解析。
 
 参考图：选择 Qwen-Image 2.1 时图片表单显示参考图上传（走 `/v1/images/edits`，prompt 用 `<image1>`…）；视频表单提供 `Text only` / `First frame (I2V)` / `Reference images (R2V)`，后两者走 `/v1/videos` multipart，R2V prompt 用 `<Picture N>`。R2V 下若模型声明 `reference_video` capability，还会显示参考视频上传（最多 3 个，prompt 用 `<Video N>`）。
 
@@ -949,7 +949,7 @@ GET /v2/extension/acceleration/schema
 
 ### GET `/v2/extension/acceleration/schema` — 加速 schema
 
-只读端点，供 dashboard、CLI 和文档消费。返回当前注册的维度、方法、参数 schema、legacy `speed` 映射、节点可用性与已知约束；不执行任务。
+只读端点，供 dashboard、CLI 和文档消费。返回当前注册的维度、方法、参数 schema、legacy `speed` 映射、节点可用性与已知约束；不执行任务。可传 `?model=<id>`，按该模型的 `acceleration` allowlist 过滤方法、presets 和 `default_profiles`；未知模型返回 404。
 
 ```json
 {
@@ -1086,7 +1086,7 @@ curl -X POST http://host:8188/v1/videos \
   -F "seconds=2" \
   -F "video=@/path/to/ref.mp4;type=video/mp4"
 ```
-H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` 参考。视频参考（参考图同理）会让任务走 `ref2va` checkpoint。参考视频帧会参与每个采样步，耗时显著高于纯文本/首帧；建议先用 `512x512`、短时长验证。
+H3 的参考视频上限为 3 个；音频轨会自动作为对应 `<Audio N>` 参考。视频参考（参考图同理）会让任务走 `ref2va` checkpoint。参考视频帧会参与每个采样步，耗时显著高于纯文本/首帧；建议先用 `512x512`、短时长验证。multipart 的 `speed` 字段既接受 legacy 字符串，也接受 JSON 对象（例如 `-F 'speed={"attention":"sage"}'`），与 JSON 请求共享同一套校验和 model allowlist。
 
 **响应（OpenAI VideoResource 形状）：**
 ```json

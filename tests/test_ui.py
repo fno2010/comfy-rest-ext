@@ -187,6 +187,7 @@ async def test_dashboard_exposes_schema_driven_acceleration_form():
     html = (await task_dashboard(None)).text
     assert 'id="gen-speed-preset"' in html
     assert 'id="gen-accel-fields"' in html
-    assert "/v2/extension/acceleration/schema" in html
-    assert "custom acceleration is only supported for text-only video" in html
+    assert "/v2/extension/acceleration/schema?model=" in html
+    assert "custom acceleration is only supported for text-only video" not in html
+    assert "JSON.stringify(value)" in html
     assert "buildSpeed" in html
