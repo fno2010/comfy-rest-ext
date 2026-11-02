@@ -1,0 +1,19 @@
+[project]
+name = "comfy-rest-ext-cli"
+version = "0.7.0"
+description = "Standalone CLI for comfy-rest-ext"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+comfy-rest-ext-cli = "comfy_rest_ext_cli.__main__:main"
+comfy-rest-ext = "comfy_rest_ext_cli.__main__:main"
+
+[tool.setuptools]
+packages = ["comfy_rest_ext_cli"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]

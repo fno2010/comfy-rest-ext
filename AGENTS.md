@@ -26,34 +26,22 @@
 
 ```
 comfy-rest-ext/
-├── __init__.py              # 包入口，导出 comfy_entrypoint
-├── api/
-│   ├── __init__.py
-│   ├── routes.py            # 所有 REST API 路由注册
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── download.py      # 模型下载相关端点
-│   │   ├── management.py    # 模型管理增强端点
-│   │   ├── dependencies.py  # 依赖管理端点
-│   │   ├── snapshot.py      # 快照管理端点
-│   │   └── nodes.py         # 节点打包/验证端点
-│   ├── tasks/
-│   │   ├── __init__.py
-│   │   ├── task_queue.py    # 异步任务队列
-│   │   └── handlers.py      # 任务处理器
-│   └── schemas/
-│       ├── __init__.py
-│       └── requests.py      # Pydantic 请求模型
-├── web/                     # 前端资源（如有）
-│   └── js/
-├── docs/
-│   └── references/          # 参考文档
-│       ├── API.md
-│       ├── API-supplement-proposal.md
-│       ├── API-implementation-reference.md
-│       └── openapi.yaml
-├── pyproject.toml           # 项目配置
-└── README.md
+├── server/                  # ComfyUI custom node (server-side)
+│   ├── __init__.py          # comfy_entrypoint
+│   ├── api/                 # REST routes, tasks, workflows
+│   ├── web/                 # dashboard assets
+│   ├── tests/               # server tests
+│   └── pyproject.toml
+├── cli/                     # standalone HTTP-only CLI
+│   ├── comfy_rest_ext_cli/  # package
+│   ├── tests/               # CLI tests (no ComfyUI imports)
+│   └── pyproject.toml
+├── contracts/               # versioned HTTP/OpenAPI contract
+├── skills/                  # installable agent skills
+├── docs/                    # shared documentation
+├── ROADMAP.md
+├── README.md
+└── AGENTS.md
 ```
 
 ---
@@ -64,7 +52,7 @@ comfy-rest-ext/
 
 - Python: `>=3.10`
 - 依赖尽量使用 ComfyUI 已有的包，避免额外依赖
-- 额外依赖需在 `pyproject.toml` 中声明
+- 额外依赖需在对应子项目的 `pyproject.toml` 中声明（`server/` 或 `cli/`）
 
 ### ComfyUI API 注册模式
 

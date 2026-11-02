@@ -21,10 +21,18 @@ Roadmap: [ROADMAP.md](ROADMAP.md) — v0.8.0 focuses on deployment-agnostic serv
 
 ## 安装
 
-将本目录软链接到 ComfyUI 的 `custom_nodes` 目录：
+将 **server 子项目**软链接到 ComfyUI 的 `custom_nodes` 目录：
 
 ```bash
-ln -s /path/to/comfy-rest-ext $COMFYUI/custom_nodes/comfy-rest-ext
+ln -s /path/to/comfy-rest-ext/server $COMFYUI/custom_nodes/comfy-rest-ext
+```
+
+CLI 是独立子项目，不需要 ComfyUI 的 Python 环境：
+
+```bash
+uv tool install /path/to/comfy-rest-ext/cli
+# 或 pipx install /path/to/comfy-rest-ext/cli
+comfy-rest-ext --help
 ```
 
 ## 快速验证
@@ -640,31 +648,23 @@ DELETE /v2/extension/frontend/pr-cache?confirm=true
 ## 项目结构
 
 ```
-comfy-rest-ext/
-├── __init__.py              # comfy_entrypoint 入口
-├── api/                     # API 路由实现
-│   ├── __init__.py          # 路由注册 + 健康检查
-│   ├── extension.py         # ComfyExtension 实现
-│   ├── models/              # 按功能域分组的端点
-│   │   ├── download.py      # 模型下载
-│   │   ├── management.py    # 模型管理
-│   │   ├── dependencies.py  # 工作流依赖
-│   │   ├── snapshot.py      # 快照管理
-│   │   ├── nodes.py         # 节点管理
-│   │   └── pr_cache.py      # PR 缓存
-│   ├── tasks/               # 异步任务处理
-│   │   ├── task_queue.py    # 任务队列
-│   │   ├── registry.py      # 任务注册表
-│   │   ├── download_task.py # 下载任务实现
-│   │   └── deps_task.py    # 依赖任务实现
-│   └── schemas/             # Pydantic 请求模型
-│       └── requests.py
-├── docs/                    # 文档
-│   └── references/          # 参考文档
-├── tests/                   # 测试
-├── pyproject.toml
-├── AGENTS.md                # 开发规范
-└── PLAN.md                  # 实现计划
+comfy-rest-ext/                 # monorepo; not itself a custom node
+├── server/                     # ComfyUI custom node (server-side)
+│   ├── __init__.py             # comfy_entrypoint
+│   ├── api/                    # REST routes, tasks, workflows
+│   ├── web/                    # dashboard asset
+│   ├── tests/                  # server/unit tests
+│   └── pyproject.toml
+├── cli/                        # standalone HTTP-only CLI
+│   ├── comfy_rest_ext_cli/
+│   ├── tests/
+│   └── pyproject.toml
+├── contracts/                  # versioned HTTP/OpenAPI contract
+├── skills/                     # installable agent skills
+├── docs/                       # shared/project docs
+├── ROADMAP.md
+├── AGENTS.md
+└── README.md
 ```
 
 ## 依赖
