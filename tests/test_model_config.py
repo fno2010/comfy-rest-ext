@@ -15,11 +15,26 @@ from api.workflows.anima import build_anima_task
 def restore_catalog():
     specs = dict(catalog._SPECS)
     aliases = dict(catalog._ALIASES)
+    builders = dict(catalog.BUILDERS)
+    modalities = dict(catalog.BUILDER_MODALITY)
+    tasks = dict(catalog.BUILDER_TASKS)
+    default_keys = dict(catalog.BUILDER_DEFAULTS_KEYS)
+    asset_keys = dict(catalog.BUILDER_ASSET_KEYS)
     yield
     catalog._SPECS.clear()
     catalog._SPECS.update(specs)
     catalog._ALIASES.clear()
     catalog._ALIASES.update(aliases)
+    catalog.BUILDERS.clear()
+    catalog.BUILDERS.update(builders)
+    catalog.BUILDER_MODALITY.clear()
+    catalog.BUILDER_MODALITY.update(modalities)
+    catalog.BUILDER_TASKS.clear()
+    catalog.BUILDER_TASKS.update(tasks)
+    catalog.BUILDER_DEFAULTS_KEYS.clear()
+    catalog.BUILDER_DEFAULTS_KEYS.update(default_keys)
+    catalog.BUILDER_ASSET_KEYS.clear()
+    catalog.BUILDER_ASSET_KEYS.update(asset_keys)
 
 
 def _write(tmp_path, models):
@@ -129,6 +144,57 @@ def test_invalid_config_rolls_back(tmp_path):
     with pytest.raises(catalog.ModelConfigError):
         catalog.load_model_config(path)
     assert catalog.all_model_ids() == before
+
+
+def test_dynamic_builder_module_is_loaded(tmp_path):
+    descriptor = "api.workflows.anima:build_anima_task"
+    path = _write(tmp_path, {
+        "dynamic-anima": _new_image(
+            "dynamic-anima",
+            builder=descriptor,
+            defaults={"steps": 2, "cfg": 3.0},
+        ),
+    })
+    catalog.load_model_config(path)
+    spec = catalog.get_model("dynamic-anima")
+    assert spec.family == descriptor
+    assert spec.build is build_anima_task
+    assert descriptor in catalog.BUILDERS
+    assert catalog.BUILDER_MODALITY[descriptor] == "image"
+    assert catalog.BUILDER_TASKS[descriptor] == frozenset({"t2i"})
+    built = spec.build(_task(
+        model_id=spec.id,
+        variant=spec.variant,
+        assets=spec.assets,
+        params=spec.defaults,
+    ))
+    assert built.workflow
+
+
+def test_dynamic_builder_rolls_back_on_later_error(tmp_path):
+    descriptor = "api.workflows.anima:build_anima_task"
+    path = _write(tmp_path, {
+        "dynamic-anima": _new_image("dynamic-anima", builder=descriptor),
+        "broken": _new_image("broken", builder="missing.module:build"),
+    })
+    before_models = catalog.all_model_ids()
+    with pytest.raises(catalog.ModelConfigError):
+        catalog.load_model_config(path)
+    assert descriptor not in catalog.BUILDERS
+    assert catalog.all_model_ids() == before_models
+
+
+def test_dynamic_builder_requires_declared_capabilities(tmp_path):
+    path = _write(tmp_path, {
+        "dynamic-anima": {
+            "builder": "api.workflows.anima:build_anima_task",
+            "modality": "image",
+            "tasks": [],
+            "size": _image_size(),
+        },
+    })
+    with pytest.raises(catalog.ModelConfigError, match="tasks"):
+        catalog.load_model_config(path)
 
 
 def test_alias_collision_rejected(tmp_path):

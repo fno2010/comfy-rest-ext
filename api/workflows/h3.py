@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 from ..accel import (
     DASIWA_MAX_FRAMES,
+    DEFAULT_R2V_PROFILE,
     AccelConfig,
     apply_accel_layers,
     check_config_available,
@@ -231,9 +232,27 @@ def _accel_layer_snapshot(accel_cfg, layer: str, **extra: Any) -> Dict[str, Any]
     return {"method": method, "params": params}
 
 
+def effective_speed(task: Any) -> Optional[str]:
+    """Resolve the server-side default profile for a task.
+
+    R2V gets the measured balanced profile unless the caller explicitly chose
+    a speed. T2V/I2V keep the historical ``auto`` behavior.
+    """
+    speed = getattr(task, "speed", None)
+    if (
+        speed in (None, "auto")
+        and getattr(task, "task_type", None) == "r2v"
+        and (getattr(task, "ref_images", None) or getattr(task, "ref_videos", None))
+    ):
+        return DEFAULT_R2V_PROFILE
+    return speed or "auto"
+
+
 def build_h3_task(task: Any) -> BuildResult:
     """Build an H3 workflow from a generic GenerationTask."""
-    accel_cfg = parse_accel_config(task.speed)
+    speed = effective_speed(task)
+    task.speed = speed
+    accel_cfg = parse_accel_config(speed)
     compat_error = check_task_compat(accel_cfg, task.length)
     if compat_error:
         raise ValueError(compat_error)
@@ -243,7 +262,7 @@ def build_h3_task(task: Any) -> BuildResult:
 
     params = task.params or {}
     steps = resolve_steps(
-        accel_cfg, task.speed, os.environ.get("H3_STEPS"), params.get("steps")
+        accel_cfg, speed, os.environ.get("H3_STEPS"), params.get("steps")
     )
 
     is_ref = bool(task.ref_images or task.ref_videos)
@@ -326,6 +345,7 @@ def build_h3_task(task: Any) -> BuildResult:
     )
 
     task.acceleration = {
+        "profile": speed if isinstance(speed, str) else "custom",
         "steps": steps,
         "sampler": sampler_name,
         "scheduler": scheduler_name,

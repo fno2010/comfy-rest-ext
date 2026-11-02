@@ -29,12 +29,28 @@ DASIWA_MAX_FRAMES = 39
 VAE_DECODE_OPTIONS = ("default",)
 
 # Legacy speed string -> equivalent config (backward compatibility).
+# Named profiles are intentionally explicit: callers can always pass "none"
+# or "quality" to reproduce the unaccelerated baseline.
 _LEGACY_SPEED_MAP = {
     "none": {"block_cache": "none", "attention": "none"},
     "te-speed": {"block_cache": "te-speed", "attention": "none"},
     "sol-stack": {"block_cache": "fbc", "attention": "sol"},
     "auto": {"block_cache": "none", "attention": "none"},
+    "r2v-balanced": {
+        "steps": 15,
+        "attention": "sage",
+        "step_cache": "easycache",
+    },
+    "quality": {
+        "steps": 20,
+        "turbo": "none",
+        "block_cache": "none",
+        "step_cache": "none",
+        "attention": "none",
+    },
 }
+
+DEFAULT_R2V_PROFILE = "r2v-balanced"
 
 
 @dataclass(frozen=True)
@@ -464,6 +480,11 @@ def acceleration_schema() -> Dict[str, Any]:
             "H3_SOL_STACK": os.environ.get("H3_SOL_STACK", "0") == "1",
         },
         "presets": {key: key for key in _LEGACY_SPEED_MAP},
+        "default_profiles": {"r2v": DEFAULT_R2V_PROFILE},
+        "profile_note": (
+            "R2V defaults to r2v-balanced when speed is omitted. "
+            "quality/none reproduce the unaccelerated baseline."
+        ),
         "parse_only": {
             "vae_decode": {
                 "options": ["default"],
@@ -610,6 +631,7 @@ class AccelConfig:
     """Validated acceleration configuration."""
 
     steps: int = 20
+    steps_explicit: bool = False
     turbo: str = "none"
     block_cache: str = "none"
     step_cache: str = "none"
@@ -643,11 +665,19 @@ def parse_accel_config(raw: Any, default_steps: int = 20) -> AccelConfig:
     if isinstance(raw, str):
         key = raw.lower()
         if key in _LEGACY_SPEED_MAP:
-            cfg = AccelConfig(steps=default_steps, **_LEGACY_SPEED_MAP[key])
+            profile = dict(_LEGACY_SPEED_MAP[key])
+            profile_steps = profile.pop("steps", None)
+            cfg = AccelConfig(
+                steps=default_steps if profile_steps is None else profile_steps,
+                **profile,
+            )
+            cfg.steps_explicit = profile_steps is not None
         else:
             # Unknown legacy strings retain the historical auto behavior.
             cfg = AccelConfig(steps=default_steps)
-        return _apply_env_defaults(cfg)
+        if key in ("auto",) or key not in _LEGACY_SPEED_MAP:
+            return _apply_env_defaults(cfg)
+        return cfg
 
     if not isinstance(raw, dict):
         raise AccelConfigError(
@@ -658,7 +688,7 @@ def parse_accel_config(raw: Any, default_steps: int = 20) -> AccelConfig:
     if not isinstance(steps, int) or isinstance(steps, bool) or steps <= 0:
         raise AccelConfigError(f"steps must be a positive integer, got {steps!r}")
 
-    cfg = AccelConfig(steps=steps)
+    cfg = AccelConfig(steps=steps, steps_explicit="steps" in raw)
     for layer in ACCEL_DIMENSIONS:
         method_id, params = _parse_layer(layer, raw.get(layer, "none"))
         setattr(cfg, layer, method_id)
@@ -751,7 +781,7 @@ def resolve_steps(
     Explicit request steps win; otherwise a turbo method's trained default
     (e.g. LightX2V 4-step) wins over the server env/request default.
     """
-    if isinstance(speed, dict) and "steps" in speed:
+    if cfg.steps_explicit:
         return cfg.steps
     method = get_method(cfg.turbo)
     if method is not None and method.default_steps is not None:

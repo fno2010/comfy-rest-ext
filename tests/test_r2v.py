@@ -169,6 +169,46 @@ def test_frames_for_seconds_snaps_to_grid():
     assert frames_for_seconds(15.0) == 362
 
 
+@pytest.mark.asyncio
+async def test_r2v_route_defaults_to_balanced_profile(monkeypatch):
+    import json
+    import api.openai.v1 as v1
+
+    captured = {}
+
+    class Manager:
+        def create(self, task):
+            captured["task"] = task
+
+    async def fake_submit(task):
+        return task
+
+    async def fake_resolve(_ref):
+        return "ref.png"
+
+    monkeypatch.setattr(v1, "get_video_manager", lambda: Manager())
+    monkeypatch.setattr(v1, "submit_video_task", fake_submit)
+    monkeypatch.setattr(v1, "_resolve_ref_image", fake_resolve)
+
+    class Request:
+        headers = {}
+
+        async def json(self):
+            return {
+                "model": "minimax-h3-r2v",
+                "prompt": "p",
+                "task": "r2v",
+                "ref_images": ["https://example.invalid/ref.png"],
+                "seconds": 4,
+            }
+
+    response = await v1.create_video(Request())
+    assert response.status == 200
+    body = json.loads(response.text)
+    assert body["speed"] == "r2v-balanced"
+    assert captured["task"].speed == "r2v-balanced"
+
+
 # ---------------------------------------------------------------------------
 # Progress model (_read_progress / _estimate_eta)
 # ---------------------------------------------------------------------------

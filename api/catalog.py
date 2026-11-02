@@ -7,6 +7,7 @@ Adding a model is a registration, not a new branch in the HTTP routes.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import math
@@ -409,6 +410,67 @@ _MODEL_KEYS = {
     "max_n", "output_mime", "timeout_s", "description",
 }
 
+_BUILDER_DESCRIPTOR_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$")
+
+
+def _import_builder(descriptor: str, model_id: str) -> Callable[[Any], Any]:
+    """Import a ``module:function`` builder descriptor.
+
+    models.json is trusted local configuration; importing a module from it is
+    intentional. The descriptor is parsed explicitly so a typo cannot silently
+    fall back to a built-in builder.
+    """
+    if not _BUILDER_DESCRIPTOR_RE.fullmatch(descriptor):
+        raise ModelConfigError(
+            f"{model_id}.builder must be a built-in name or 'module:function'; "
+            f"got {descriptor!r}"
+        )
+    module_name, _, attr = descriptor.partition(":")
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as e:
+        raise ModelConfigError(
+            f"{model_id}.builder cannot import {module_name!r}: {e}"
+        ) from e
+    builder = getattr(module, attr, None)
+    if not callable(builder):
+        raise ModelConfigError(
+            f"{model_id}.builder {descriptor!r} does not resolve to a callable"
+        )
+    return builder
+
+
+def _register_dynamic_builder(
+    descriptor: str,
+    model_id: str,
+    entry: Dict[str, Any],
+) -> None:
+    """Register a config-provided builder and its declared capabilities.
+
+    New builders have no built-in defaults/assets whitelist; their entry may
+    define any string keys. The builder still receives the generic task object,
+    so the modality/tasks declaration remains authoritative.
+    """
+    if descriptor in BUILDERS:
+        return
+    modality = entry.get("modality")
+    tasks = entry.get("tasks")
+    if modality not in ("video", "image"):
+        raise ModelConfigError(
+            f"{model_id}.modality is required for a new builder"
+        )
+    if not isinstance(tasks, (list, tuple)) or not tasks or not all(
+        isinstance(task, str) and task for task in tasks
+    ):
+        raise ModelConfigError(
+            f"{model_id}.tasks is required for a new builder"
+        )
+    BUILDERS[descriptor] = _import_builder(descriptor, model_id)
+    BUILDER_MODALITY[descriptor] = modality
+    BUILDER_TASKS[descriptor] = frozenset(tasks)
+    BUILDER_DEFAULTS_KEYS[descriptor] = None
+    BUILDER_ASSET_KEYS[descriptor] = None
+
 CONFIG_ENV = "COMFY_REST_MODEL_CONFIG"
 
 _SIZE_FIELDS = {
@@ -522,6 +584,8 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     existing = _SPECS.get(model_id)
 
     builder = entry.get("builder", existing.family if existing else None)
+    if isinstance(builder, str) and ":" in builder:
+        _register_dynamic_builder(builder, model_id, entry)
     if builder not in BUILDERS:
         raise ModelConfigError(
             f"{model_id}.builder must be one of {sorted(BUILDERS)}; got {builder!r}"
@@ -585,7 +649,11 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     defaults_value = entry.get("defaults", {})
     if not isinstance(defaults_value, dict):
         raise ModelConfigError(f"{model_id}.defaults must be an object")
-    unknown_defaults = set(defaults_value) - BUILDER_DEFAULTS_KEYS[builder]
+    allowed_defaults = BUILDER_DEFAULTS_KEYS[builder]
+    unknown_defaults = (
+        set(defaults_value) - allowed_defaults
+        if allowed_defaults is not None else set()
+    )
     if unknown_defaults:
         raise ModelConfigError(
             f"{model_id}.defaults has unknown keys for builder {builder!r}: "
@@ -595,10 +663,12 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     if existing is not None and builder != existing.family:
         # Inherited defaults belong to the old builder; drop keys the new
         # builder does not understand instead of failing the override.
-        defaults = {
-            key: value for key, value in defaults.items()
-            if key in BUILDER_DEFAULTS_KEYS[builder]
-        }
+        allowed_defaults = BUILDER_DEFAULTS_KEYS[builder]
+        if allowed_defaults is not None:
+            defaults = {
+                key: value for key, value in defaults.items()
+                if key in allowed_defaults
+            }
     for key in ("sampler", "scheduler", "negative_prompt", "ref_image_size"):
         if key in defaults and not isinstance(defaults[key], str):
             raise ModelConfigError(f"{model_id}.defaults.{key} must be a string")
@@ -641,7 +711,11 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
     ):
         raise ModelConfigError(f"{model_id}.assets must be a string map")
     assets.update(assets_value)
-    unknown_assets = set(assets) - BUILDER_ASSET_KEYS[builder]
+    allowed_assets = BUILDER_ASSET_KEYS[builder]
+    unknown_assets = (
+        set(assets) - allowed_assets
+        if allowed_assets is not None else set()
+    )
     if unknown_assets:
         raise ModelConfigError(
             f"{model_id}.assets has unknown keys for builder {builder!r}: "
@@ -764,24 +838,56 @@ def load_model_config(path: Optional[Path] = None) -> Tuple[str, ...]:
     if not isinstance(models, dict):
         raise ModelConfigError(f"{config_file}: top-level 'models' object is required")
 
-    specs = [_build_spec(model_id, entry) for model_id, entry in models.items()]
+    # A new builder module may be registered while parsing a model entry.
+    # Keep the registry atomic too: a later invalid entry must not leave a
+    # half-loaded builder behind.
+    builder_state = (
+        dict(BUILDERS),
+        dict(BUILDER_MODALITY),
+        dict(BUILDER_TASKS),
+        dict(BUILDER_DEFAULTS_KEYS),
+        dict(BUILDER_ASSET_KEYS),
+    )
 
-    final_specs = dict(_SPECS)
-    final_specs.update({spec.id: spec for spec in specs})
-    final_aliases: Dict[str, str] = {}
-    for spec in final_specs.values():
-        for alias in spec.aliases:
-            if alias in final_specs:
-                raise ModelConfigError(
-                    f"alias {alias!r} conflicts with an existing model id"
-                )
-            owner = final_aliases.get(alias)
-            if owner is not None and owner != spec.id:
-                raise ModelConfigError(
-                    f"alias {alias!r} is claimed by both {owner!r} and {spec.id!r}"
-                )
-            final_aliases[alias] = spec.id
-    _validate_final_registry(final_specs, final_aliases)
+    def restore_builder_state() -> None:
+        for registry, saved in zip(
+            (
+                BUILDERS,
+                BUILDER_MODALITY,
+                BUILDER_TASKS,
+                BUILDER_DEFAULTS_KEYS,
+                BUILDER_ASSET_KEYS,
+            ),
+            builder_state,
+        ):
+            registry.clear()
+            registry.update(saved)
+
+    try:
+        specs = [
+            _build_spec(model_id, entry)
+            for model_id, entry in models.items()
+        ]
+
+        final_specs = dict(_SPECS)
+        final_specs.update({spec.id: spec for spec in specs})
+        final_aliases: Dict[str, str] = {}
+        for spec in final_specs.values():
+            for alias in spec.aliases:
+                if alias in final_specs:
+                    raise ModelConfigError(
+                        f"alias {alias!r} conflicts with an existing model id"
+                    )
+                owner = final_aliases.get(alias)
+                if owner is not None and owner != spec.id:
+                    raise ModelConfigError(
+                        f"alias {alias!r} is claimed by both {owner!r} and {spec.id!r}"
+                    )
+                final_aliases[alias] = spec.id
+        _validate_final_registry(final_specs, final_aliases)
+    except Exception:
+        restore_builder_state()
+        raise
 
     _SPECS.clear()
     _SPECS.update(final_specs)
