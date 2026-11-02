@@ -139,6 +139,7 @@ def _video_response(task: VideoTask) -> dict:
         "params": effective_params,
         "acceleration": _json_safe(task.acceleration),
         "capability_plan": _json_safe(task.capability_plan),
+        "provisioning_actions": _json_safe(task.provisioning_actions),
         "status": status,
         "progress": int(task.progress * 100),
         "current_node": task.current_node,

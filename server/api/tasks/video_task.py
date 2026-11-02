@@ -50,6 +50,7 @@ class GenerationTask:
     speed: Optional[Any] = None  # legacy str or AccelConfig dict
     accel_methods: Optional[frozenset] = None  # model allowlist; None = unknown
     capability_plan: Optional[Dict[str, Any]] = None
+    provisioning_actions: Optional[list] = None
     prompt_id: Optional[str] = None
     progress: float = 0.0
     current_node: Optional[str] = None
@@ -154,6 +155,7 @@ def _task_to_record(task: GenerationTask) -> dict:
             sorted(task.accel_methods) if task.accel_methods is not None else None
         ),
         "capability_plan": task.capability_plan,
+        "provisioning_actions": task.provisioning_actions,
         "prompt_id": task.prompt_id,
         "progress": task.progress,
         "current_node": task.current_node,
@@ -199,6 +201,7 @@ def _record_to_task(record: dict) -> GenerationTask:
             if record.get("accel_methods") is not None else None
         ),
         capability_plan=record.get("capability_plan"),
+        provisioning_actions=record.get("provisioning_actions"),
         prompt_id=record.get("prompt_id"),
         progress=record.get("progress", 0.0),
         current_node=record.get("current_node"),

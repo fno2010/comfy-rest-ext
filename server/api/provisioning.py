@@ -255,10 +255,22 @@ async def provision_capabilities(
         "retry_task_id": retry_task_id,
     }
     if retry_task_id:
+        from .tasks.resume import (
+            ResumeError,
+            get_video_task,
+            record_provisioning,
+            resume_blocked_video_task,
+        )
+        task, _manager = get_video_task(retry_task_id)
+        if task is None:
+            raise ProvisionError(404, "retry task not found")
+        record_provisioning(
+            retry_task_id, actions,
+            restart_required=bool(restart_required),
+        )
         if restart_required:
             result["retry_status"] = "waiting_for_restart"
         else:
-            from .tasks.resume import ResumeError, resume_blocked_video_task
             try:
                 task = await resume_blocked_video_task(retry_task_id)
             except ResumeError as e:
