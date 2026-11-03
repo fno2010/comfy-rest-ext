@@ -79,8 +79,10 @@ Tracked by **#50**: [feat: standalone CLI distribution and persistent server con
 
 Exit criteria:
 
-- `uvx` / `pipx` / clean wheel install;
-- no repo checkout, no ComfyUI imports;
+- static single-file CLI per supported OS/arch; no Python/uv/pipx runtime, no repo checkout;
+- Python wheel remains an additional path (`uvx` / `pipx`);
+- skill can bootstrap the pinned static binary by checksum;
+- no ComfyUI imports;
 - persistent `~/.config/comfy-rest-ext/config.toml` profiles;
 - stable JSON + exit codes, robust wait/reconnect;
 - `doctor` and provisioning commands.
