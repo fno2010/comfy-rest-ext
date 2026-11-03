@@ -92,3 +92,23 @@ def test_empty_registry_has_no_default_model():
     finally:
         catalog._SPECS.update(saved)
         catalog._ALIASES.update(saved_aliases)
+
+
+@pytest.mark.asyncio
+async def test_empty_registry_exposes_no_models():
+    import json
+    import api.catalog as catalog
+    import api.openai.v1 as v1
+
+    saved = dict(catalog._SPECS)
+    saved_aliases = dict(catalog._ALIASES)
+    try:
+        catalog._SPECS.clear()
+        catalog._ALIASES.clear()
+        response = await v1.show_available_models(None)
+        body = json.loads(response.text)
+        assert body["object"] == "list"
+        assert body["data"] == []
+    finally:
+        catalog._SPECS.update(saved)
+        catalog._ALIASES.update(saved_aliases)
