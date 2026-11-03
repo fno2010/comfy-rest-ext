@@ -261,3 +261,8 @@ curl http://127.0.0.1:8188/v2/model/download
 - 每条 commit 描述一个完整的改动
 - commit message 格式: `feat: add model download endpoint`
 - 文档与代码同步更新
+
+## 网络与凭据
+
+- 本环境访问 GitHub HTTPS 经常超时；`git push` / `gh` 超时不是凭据丢失。必须用短超时重试多次（本环境实测第 4 次成功），不要询问用户重复说明。
+- 临时 HOME/XDG 测试必须用 `env HOME=... XDG_CONFIG_HOME=... command`，禁止在持久 shell 中 `export`，否则会污染后续 `gh` / git 的凭据查找路径。
