@@ -1,0 +1,62 @@
+name: CLI static artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli-go/go.mod
+          cache: false
+      - name: Test
+        working-directory: cli-go
+        run: go test ./...
+      - name: Build static binary
+        working-directory: cli-go
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          name=comfy-rest-ext
+          [ "$GOOS" = windows ] && name=comfy-rest-ext.exe
+          go build -trimpath -ldflags='-s -w' -o "dist/$name" .
+          file "dist/$name" || true
+      - name: Checksum
+        working-directory: cli-go/dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum comfy-rest-ext* > SHA256SUMS
+          else
+            shasum -a 256 comfy-rest-ext* > SHA256SUMS
+          fi
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comfy-rest-ext-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            cli-go/dist/comfy-rest-ext*
+            cli-go/dist/SHA256SUMS

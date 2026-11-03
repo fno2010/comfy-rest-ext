@@ -37,6 +37,14 @@ uv tool install /path/to/comfy-rest-ext/cli
 
 当前 Python 包是过渡/reference 客户端；真正的无 Python 静态单文件 CLI 由 #50 的 Go 实现提供，尚未发布。PyInstaller 不满足静态二进制验收，不纳入交付路径。
 
+Go 静态 CLI 的迁移实现位于 `cli-go/`：
+
+```bash
+cd cli-go
+./build.sh
+ldd dist/comfy-rest-ext   # not a dynamic executable
+```
+
 默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
 
 ## 快速验证
