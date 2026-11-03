@@ -8,7 +8,7 @@ Next milestone: **[v0.8.0 — deployment-agnostic server + agent harness](https:
 - [x] #47 package boundaries — merged in PR #55 (`5990844`)
 - [x] #48 deployment-agnostic adapters/capability discovery
 - [x] #49 capability provisioning
-- [ ] #50 standalone CLI distribution
+- [x] #50 standalone CLI distribution
 - [ ] #51 agent skill / harness
 - [ ] #52 clean-environment acceptance
 
