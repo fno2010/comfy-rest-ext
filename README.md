@@ -27,22 +27,15 @@ Roadmap: [ROADMAP.md](ROADMAP.md) — v0.8.0 focuses on deployment-agnostic serv
 ln -s /path/to/comfy-rest-ext/server $COMFYUI/custom_nodes/comfy-rest-ext
 ```
 
-CLI 是独立子项目，不需要 ComfyUI 的 Python 环境。支持两种分发路径：
+CLI 是独立子项目，不需要 ComfyUI 的 Python 环境：
 
 ```bash
-# Python 路径
 uv tool install /path/to/comfy-rest-ext/cli
 # 或 pipx install /path/to/comfy-rest-ext/cli
-
-# 无 Python 的单文件路径（在目标平台构建）
-./cli/build-standalone.sh
-./cli/dist/comfy-rest-ext --help
+# 或 uvx --from /path/to/comfy-rest-ext/cli comfy-rest-ext --help
 ```
 
-`uvx` 适合临时运行，`uv tool install` / `pipx` 适合持久安装。静态单文件是面向无 Python agent sandbox 的主路径。
-
-单文件构建使用 Python 3.10 的 PyInstaller 运行时以降低 glibc 要求；发布时应在目标 OS/arch 上分别构建（Linux/macOS/Windows），不要把开发机的 Linux 二进制当作跨平台产物。
-CI 矩阵见 `.github/workflows/cli-artifacts.yml`，产物附带 `SHA256SUMS`。
+当前 Python 包是过渡/reference 客户端；真正的无 Python 静态单文件 CLI 由 #50 的 Go 实现提供，尚未发布。PyInstaller 不满足静态二进制验收，不纳入交付路径。
 
 默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
 
