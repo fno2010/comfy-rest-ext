@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,6 +20,33 @@ func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	return fs
+}
+
+// parseArgs accepts options before or after positional arguments. The
+// stdlib flag package stops at the first positional; agent invocations often
+// put the prompt/task id first.
+func parseArgs(fs *flag.FlagSet, args []string, valueFlags map[string]bool) ([]string, error) {
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(a, "-") && a != "-" {
+			flags = append(flags, a)
+			if !strings.Contains(a, "=") && valueFlags[a] && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+			continue
+		}
+		positional = append(positional, a)
+	}
+	if err := fs.Parse(flags); err != nil {
+		return nil, err
+	}
+	return positional, nil
 }
 
 func runConfig(cfg *Config, g Globals, args []string) int {
@@ -309,11 +340,13 @@ func cmdModels(c *Client, asJSON bool, args []string) int {
 	return 0
 }
 
-func cmdVideos(c *Client, asJSON bool, args []string) int {
+func cmdVideos(c *Client, asJSON bool, args []string, defaultModel string) int {
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
 	switch args[0] {
+	case "generate":
+		return generateVideo(c, asJSON, args[1:], defaultModel)
 	case "list":
 		m, err := c.getJSON("/v1/videos", nil)
 		if err != nil {
@@ -346,10 +379,11 @@ func cmdVideos(c *Client, asJSON bool, args []string) int {
 		fs := newFlagSet("videos wait")
 		timeout := fs.Float64("timeout", 300, "max seconds to wait; 0 waits indefinitely")
 		interval := fs.Float64("interval", 5, "poll interval seconds")
-		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 1 {
+		pos, err := parseArgs(fs, args[1:], map[string]bool{"--timeout": true, "--interval": true})
+		if err != nil || len(pos) != 1 {
 			return 2
 		}
-		id := fs.Arg(0)
+		id := pos[0]
 		deadline := time.Time{}
 		if *timeout > 0 {
 			deadline = time.Now().Add(time.Duration(*timeout * float64(time.Second)))
@@ -389,10 +423,11 @@ func cmdVideos(c *Client, asJSON bool, args []string) int {
 	case "content":
 		fs := newFlagSet("videos content")
 		out := fs.String("out", "", "output path")
-		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 1 {
+		pos, err := parseArgs(fs, args[1:], map[string]bool{"--out": true})
+		if err != nil || len(pos) != 1 {
 			return 2
 		}
-		id := fs.Arg(0)
+		id := pos[0]
 		path := *out
 		if path == "" {
 			path = id + ".mp4"
@@ -427,11 +462,15 @@ func cmdVideos(c *Client, asJSON bool, args []string) int {
 	}
 }
 
-func cmdImages(c *Client, asJSON bool, args []string) int {
+func cmdImages(c *Client, asJSON bool, args []string, defaultModel string) int {
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
 	switch args[0] {
+	case "generate":
+		return generateImage(c, asJSON, args[1:], defaultModel, false)
+	case "edit":
+		return generateImage(c, asJSON, args[1:], defaultModel, true)
 	case "list":
 		m, err := c.getJSON("/v2/extension/image", nil)
 		if err != nil {
@@ -464,10 +503,11 @@ func cmdImages(c *Client, asJSON bool, args []string) int {
 		fs := newFlagSet("images content")
 		out := fs.String("out", "", "output path")
 		index := fs.Int("index", 0, "output index")
-		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 1 {
+		pos, err := parseArgs(fs, args[1:], map[string]bool{"--out": true, "--index": true})
+		if err != nil || len(pos) != 1 {
 			return 2
 		}
-		id := fs.Arg(0)
+		id := pos[0]
 		path := *out
 		if path == "" {
 			path = fmt.Sprintf("%s_%d.png", id, *index)
@@ -488,6 +528,238 @@ func cmdImages(c *Client, asJSON bool, args []string) int {
 	default:
 		return fail(fmt.Errorf("unknown images command: %s", args[0]), asJSON, 2)
 	}
+}
+
+type stringList []string
+
+func (s *stringList) String() string     { return strings.Join(*s, ",") }
+func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
+
+func readSpeed(raw string) (any, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	if strings.HasPrefix(raw, "@") {
+		data, err := os.ReadFile(strings.TrimPrefix(raw, "@"))
+		if err != nil {
+			return nil, err
+		}
+		var out any
+		if err := json.Unmarshal(data, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+	var out any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("invalid --speed-json: %w", err)
+	}
+	return out, nil
+}
+
+func generateVideo(c *Client, asJSON bool, args []string, defaultModel string) int {
+	fs := newFlagSet("videos generate")
+	model := fs.String("model", "", "video model id")
+	width := fs.Int("width", 0, "frame width")
+	height := fs.Int("height", 0, "frame height")
+	seconds := fs.Float64("seconds", 0, "video length in seconds")
+	seed := fs.Int64("seed", 0, "generation seed")
+	speedJSON := fs.String("speed-json", "", "speed JSON or @file")
+	var images, videos stringList
+	fs.Var(&images, "image", "reference image path (repeatable)")
+	fs.Var(&videos, "video", "reference video path (repeatable)")
+	pos, err := parseArgs(fs, args, map[string]bool{
+		"--model": true, "--width": true, "--height": true, "--seconds": true,
+		"--seed": true, "--speed-json": true, "--image": true, "--video": true,
+	})
+	if err != nil || len(pos) < 1 {
+		return 2
+	}
+	prompt := pos[0]
+	payload := map[string]any{"prompt": prompt}
+	if *model != "" {
+		payload["model"] = *model
+	} else if defaultModel != "" {
+		payload["model"] = defaultModel
+	}
+	if *width > 0 {
+		payload["width"] = *width
+	}
+	if *height > 0 {
+		payload["height"] = *height
+	}
+	if *seconds > 0 {
+		payload["seconds"] = *seconds
+	}
+	if *seed != 0 {
+		payload["seed"] = *seed
+	}
+	if *speedJSON != "" {
+		speed, err := readSpeed(*speedJSON)
+		if err != nil {
+			return fail(err, asJSON, 2)
+		}
+		payload["speed"] = speed
+	}
+	if len(images) > 0 || len(videos) > 0 {
+		items := []any{map[string]any{"type": "input_text", "text": prompt}}
+		role := "first_frame"
+		if len(images) > 1 || len(videos) > 0 || strings.HasSuffix(*model, "-r2v") {
+			role = "reference_image"
+		}
+		for _, path := range images {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fail(err, asJSON, 2)
+			}
+			ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+			if ext == "" {
+				ext = "png"
+			}
+			items = append(items, map[string]any{
+				"type":      "input_image",
+				"image_url": "data:image/" + ext + ";base64," + base64.StdEncoding.EncodeToString(data),
+				"role":      role,
+			})
+		}
+		for _, path := range videos {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fail(err, asJSON, 2)
+			}
+			ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+			if ext == "" {
+				ext = "mp4"
+			}
+			items = append(items, map[string]any{
+				"type":      "input_video",
+				"video_url": "data:video/" + ext + ";base64," + base64.StdEncoding.EncodeToString(data),
+			})
+		}
+		payload["input"] = items
+		delete(payload, "prompt")
+	}
+	m, err := c.postJSON("/v1/videos", payload)
+	if err != nil {
+		return fail(err, asJSON, 1)
+	}
+	if asJSON {
+		return emitJSON(m)
+	}
+	fmt.Printf("task %v queued (status: %v)\n", m["id"], m["status"])
+	return 0
+}
+
+func generateImage(c *Client, asJSON bool, args []string, defaultModel string, edit bool) int {
+	fs := newFlagSet("images generate")
+	model := fs.String("model", defaultModel, "image model id")
+	size := fs.String("size", "", "WIDTHxHEIGHT")
+	width := fs.Int("width", 0, "output width")
+	height := fs.Int("height", 0, "output height")
+	n := fs.Int("n", 0, "number of images")
+	seed := fs.Int64("seed", 0, "generation seed")
+	out := fs.String("out", "image.png", "output path")
+	var images stringList
+	fs.Var(&images, "image", "reference image path (repeatable)")
+	pos, err := parseArgs(fs, args, map[string]bool{
+		"--model": true, "--size": true, "--width": true, "--height": true,
+		"--n": true, "--seed": true, "--out": true, "--image": true,
+	})
+	if err != nil || len(pos) < 1 {
+		return 2
+	}
+	prompt := pos[0]
+	payload := map[string]any{"prompt": prompt}
+	if *model != "" {
+		payload["model"] = *model
+	}
+	if *size != "" {
+		payload["size"] = *size
+	}
+	if *width > 0 {
+		payload["width"] = *width
+	}
+	if *height > 0 {
+		payload["height"] = *height
+	}
+	if *n > 0 {
+		payload["n"] = *n
+	}
+	if *seed != 0 {
+		payload["seed"] = *seed
+	}
+	var data []byte
+	var reqErr error
+	if edit {
+		if len(images) == 0 {
+			return fail(fmt.Errorf("images edit requires --image"), asJSON, 2)
+		}
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		for key, value := range payload {
+			_ = writer.WriteField(key, fmt.Sprint(value))
+		}
+		for i, path := range images {
+			file, e := os.Open(path)
+			if e != nil {
+				return fail(e, asJSON, 2)
+			}
+			part, e := writer.CreateFormFile("image", fmt.Sprintf("image%d%s", i+1, filepath.Ext(path)))
+			if e != nil {
+				file.Close()
+				return fail(e, asJSON, 1)
+			}
+			_, e = io.Copy(part, file)
+			file.Close()
+			if e != nil {
+				return fail(e, asJSON, 1)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			return fail(err, asJSON, 1)
+		}
+		data, _, reqErr = c.request("POST", "/v1/images/edits", body.Bytes(), writer.FormDataContentType(), false)
+	} else {
+		data, _, reqErr = c.request("POST", "/v1/images/generations", mustJSON(payload), "application/json", false)
+	}
+	if reqErr != nil {
+		return fail(reqErr, asJSON, 1)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(data, &response); err != nil {
+		return fail(err, asJSON, 1)
+	}
+	if asJSON {
+		return emitJSON(response)
+	}
+	items, _ := response["data"].([]any)
+	for i, item := range items {
+		obj, _ := item.(map[string]any)
+		if b64, ok := obj["b64_json"].(string); ok {
+			raw, err := base64.StdEncoding.DecodeString(b64)
+			if err != nil {
+				return fail(err, asJSON, 1)
+			}
+			path := *out
+			if i > 0 {
+				ext := filepath.Ext(path)
+				if ext == "" {
+					ext = ".png"
+				}
+				path = strings.TrimSuffix(path, ext) + "_" + strconv.Itoa(i+1) + ext
+			}
+			if err := os.WriteFile(path, raw, 0o644); err != nil {
+				return fail(err, asJSON, 1)
+			}
+			fmt.Println("saved:", path)
+		}
+	}
+	return 0
+}
+
+func mustJSON(v any) []byte {
+	data, _ := json.Marshal(v)
+	return data
 }
 
 func printStatus(m map[string]any) {

@@ -58,9 +58,9 @@ func run(args []string) int {
 	case "models":
 		return cmdModels(client, g.JSON, rest[1:])
 	case "videos":
-		return cmdVideos(client, g.JSON, rest[1:])
+		return cmdVideos(client, g.JSON, rest[1:], r.DefaultModel)
 	case "images":
-		return cmdImages(client, g.JSON, rest[1:])
+		return cmdImages(client, g.JSON, rest[1:], r.DefaultModel)
 	case "version", "--version":
 		if g.JSON {
 			return emitJSON(map[string]any{"version": version})
@@ -134,8 +134,8 @@ Commands:
   capabilities [--model ID] [--capability ID]
   doctor
   models [list|get ID]
-  videos [list|status ID|wait ID|content ID|retry ID]
-  images [list|status ID|content ID]
+  videos [generate PROMPT|list|status ID|wait ID|content ID|retry ID]
+  images [generate PROMPT|edit PROMPT|list|status ID|content ID]
   config [list|use NAME|set NAME KEY VALUE|get NAME [KEY]|path]
   version`)
 }
