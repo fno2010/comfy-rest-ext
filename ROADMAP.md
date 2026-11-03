@@ -1,6 +1,6 @@
 # comfy-rest-ext Roadmap
 
-Current release: **v0.7.0**  
+Current release: **v0.8.0**
 Next milestone: **[v0.8.0 — deployment-agnostic server + agent harness](https://github.com/fno2010/comfy-rest-ext/milestone/1)**
 
 ## Status

@@ -69,11 +69,24 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
+      - name: Package server and skill
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          tar -czf "release/comfy-rest-ext-server-${GITHUB_REF_NAME}.tar.gz" server
+          (cd skills && zip -qr "../release/comfy-rest-ext-skill-${GITHUB_REF_NAME}.zip" comfy-rest-ext)
+          (cd release && sha256sum * > SHA256SUMS)
+          find release artifacts -maxdepth 2 -type f -print
       - uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/**
+          files: |
+            artifacts/**
+            release/**
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
