@@ -112,3 +112,12 @@ async def test_empty_registry_exposes_no_models():
     finally:
         catalog._SPECS.update(saved)
         catalog._ALIASES.update(saved_aliases)
+
+
+def test_available_models_filter_missing_nodes_and_assets(monkeypatch):
+    import api.catalog as catalog
+
+    monkeypatch.setattr(catalog, "_node_names", lambda: set())
+    monkeypatch.setattr(catalog, "_asset_exists", lambda folder, name: False)
+    assert catalog.available_model_ids() == ()
+    assert catalog.default_model_id() is None

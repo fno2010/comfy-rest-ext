@@ -128,6 +128,8 @@ class ModelSpec:
     build: Callable[[Any], Any]
     defaults: Dict[str, Any] = field(default_factory=dict)
     assets: Dict[str, str] = field(default_factory=dict)
+    required_nodes: Tuple[str, ...] = ()
+    required_assets: Tuple[Tuple[str, str], ...] = ()
     aliases: Tuple[str, ...] = ()
     alias_tasks: Tuple[Tuple[str, str], ...] = ()
     capabilities: frozenset = frozenset()
@@ -211,6 +213,47 @@ def all_model_ids() -> Tuple[str, ...]:
     return tuple(ids)
 
 
+def _node_names() -> Optional[set]:
+    try:
+        import nodes as comfy_nodes
+        return set(getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}))
+    except Exception:
+        return None
+
+
+def _asset_exists(folder: str, name: str) -> bool:
+    try:
+        import folder_paths
+        getter = getattr(folder_paths, "get_full_path", None)
+    except Exception:
+        return True
+    if getter is None:
+        return True
+    try:
+        return getter(folder, name) is not None
+    except Exception:
+        return False
+
+
+def model_available(spec: ModelSpec) -> bool:
+    """Return whether a model's declared nodes and assets are present."""
+    nodes = _node_names()
+    if nodes is not None and any(node not in nodes for node in spec.required_nodes):
+        return False
+    return all(_asset_exists(folder, name) for folder, name in spec.required_assets)
+
+
+def available_models() -> Tuple[ModelSpec, ...]:
+    return tuple(spec for spec in _SPECS.values() if model_available(spec))
+
+
+def available_model_ids() -> Tuple[str, ...]:
+    available = {spec.id for spec in available_models()}
+    ids = [spec.id for spec in _SPECS.values() if spec.id in available]
+    ids.extend(alias for alias, owner in _ALIASES.items() if owner in available)
+    return tuple(ids)
+
+
 def default_model_id() -> Optional[str]:
     """Resolve the configured default model without canonical-name assumptions.
 
@@ -220,11 +263,12 @@ def default_model_id() -> Optional[str]:
     """
     configured = os.environ.get("COMFY_REST_DEFAULT_MODEL")
     if configured:
-        return get_model(configured).id
-    for spec in _SPECS.values():
+        spec = get_model(configured)
+        return spec.id if model_available(spec) else None
+    for spec in available_models():
         if spec.modality == "video":
             return spec.id
-    for spec in _SPECS.values():
+    for spec in available_models():
         return spec.id
     return None
 
@@ -247,6 +291,7 @@ H3_SPEC = register(ModelSpec(
         "sampler": "euler",
         "scheduler": "simple",
     },
+    required_nodes=("MiniMaxH3ImageToVideo",),
     aliases=("minimax-h3-t2v", "minimax-h3-i2v", "minimax-h3-r2v"),
     alias_tasks=(
         ("minimax-h3-t2v", "t2va"),
@@ -283,6 +328,11 @@ ANIMA_BASE_SPEC = register(ModelSpec(
         "negative_prompt": ANIMA_NEGATIVE,
     },
     capabilities=frozenset({"negative_prompt", "n", "seed"}),
+    required_assets=(
+        ("diffusion_models", "anima-base-v1.0.safetensors"),
+        ("text_encoders", "qwen_3_06b_base.safetensors"),
+        ("vae", "qwen_image_vae.safetensors"),
+    ),
     size=SizePolicy(
         default_width=1024,
         default_height=1024,
@@ -327,6 +377,11 @@ ANIMA_TURBO_SPEC = register(ModelSpec(
     ),
     max_n=8,
     variant="turbo",
+    required_assets=(
+        ("diffusion_models", "anima-turbo-v1.0.safetensors"),
+        ("text_encoders", "qwen_3_06b_base.safetensors"),
+        ("vae", "qwen_image_vae.safetensors"),
+    ),
     output_mime="image/png",
     timeout_s=900,
     description="Anima Turbo v1.0 2B anime text-to-image (8 steps)",
@@ -359,6 +414,7 @@ QWEN_IMAGE_SPEC = register(ModelSpec(
         "resolution": 1024,
     },
     capabilities=frozenset({"negative_prompt", "n", "seed", "alpha", "edit"}),
+    required_nodes=("TextEncodeQwenImage21",),
     size=QWEN_IMAGE_POLICY,
     max_n=4,
     output_mime="image/png",
@@ -381,6 +437,7 @@ QWEN_IMAGE_TURBO_SPEC = register(ModelSpec(
         "resolution": 1024,
     },
     capabilities=frozenset({"negative_prompt", "n", "seed", "alpha", "edit"}),
+    required_nodes=("TextEncodeQwenImage21",),
     size=QWEN_IMAGE_POLICY,
     max_n=4,
     variant="turbo",
@@ -443,6 +500,7 @@ BUILDER_ASSET_KEYS = {
 _MODEL_KEYS = {
     "builder", "modality", "tasks", "aliases", "alias_tasks",
     "defaults", "capabilities", "acceleration", "size", "variant", "assets",
+    "required_nodes", "required_assets",
     "max_n", "output_mime", "timeout_s", "description",
 }
 
@@ -758,6 +816,29 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
             f"{sorted(unknown_assets)}"
         )
 
+    required_nodes_value = entry.get(
+        "required_nodes", existing.required_nodes if existing else []
+    )
+    if not isinstance(required_nodes_value, (list, tuple)) or not all(
+        isinstance(item, str) and item for item in required_nodes_value
+    ):
+        raise ModelConfigError(f"{model_id}.required_nodes must be a string list")
+    required_nodes = tuple(required_nodes_value)
+
+    required_assets_value = entry.get(
+        "required_assets", existing.required_assets if existing else []
+    )
+    if not isinstance(required_assets_value, (list, tuple)) or not all(
+        isinstance(item, (list, tuple)) and len(item) == 2
+        and isinstance(item[0], str) and item[0]
+        and isinstance(item[1], str) and item[1]
+        for item in required_assets_value
+    ):
+        raise ModelConfigError(
+            f"{model_id}.required_assets must be a list of [folder, name] pairs"
+        )
+    required_assets = tuple((item[0], item[1]) for item in required_assets_value)
+
     capabilities_value = entry.get(
         "capabilities", existing.capabilities if existing else []
     )
@@ -836,6 +917,8 @@ def _build_spec(model_id: str, entry: Any) -> ModelSpec:
         build=BUILDERS[builder],
         defaults=defaults,
         assets=assets,
+        required_nodes=required_nodes,
+        required_assets=required_assets,
         aliases=aliases,
         alias_tasks=tuple(alias_tasks_value.items()),
         capabilities=frozenset(capabilities_value),

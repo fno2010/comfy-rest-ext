@@ -18,7 +18,7 @@ from .accel import (
     methods_for_dimension,
     ACCEL_DIMENSIONS,
 )
-from .catalog import get_model
+from .catalog import available_models, get_model
 from . import provisioners
 
 routes = PromptServer.instance.routes
@@ -119,5 +119,7 @@ async def get_capabilities(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": f"unknown model {model_id!r}"}, status=404
         )
+    if model_id is None and not available_models():
+        payload = {"model": None, "capabilities": [], "summary": {}}
     payload["provisioners"] = await provisioners.provisioner_report()
     return web.json_response(payload, headers={"Cache-Control": "no-store"})

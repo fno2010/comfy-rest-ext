@@ -42,6 +42,7 @@ from ..tasks.video_task import (
 from ..tasks.video_persistence import get_video_persistence
 from ..catalog import (
     all_model_ids,
+    available_model_ids,
     alias_task_type,
     default_model_id,
     get_model,
@@ -191,7 +192,7 @@ async def show_available_models(request: web.Request) -> web.Response:
     created = int(time.time())
     return web.json_response({
         "object": "list",
-        "data": [_model_card(m, created) for m in all_model_ids()],
+        "data": [_model_card(m, created) for m in available_model_ids()],
     })
 
 

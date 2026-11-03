@@ -180,3 +180,17 @@ async def test_video_task_blocks_and_retries_after_provisioning(monkeypatch):
     assert created["task"].status == "queued"
     assert created["task"].capability_plan is None
     assert submitted == [created["task"]]
+
+
+@pytest.mark.asyncio
+async def test_empty_deployment_capabilities_are_empty(monkeypatch):
+    from api import capabilities as caps
+
+    monkeypatch.setattr(caps, "available_models", lambda: ())
+    class Request:
+        query = {}
+    response = await caps.get_capabilities(Request())
+    import json
+    body = json.loads(response.text)
+    assert body["capabilities"] == []
+    assert body["summary"] == {}
