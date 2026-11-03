@@ -45,6 +45,16 @@ cd cli-go
 ldd dist/comfy-rest-ext   # not a dynamic executable
 ```
 
+## Agent skill
+
+安装 skill：
+
+```bash
+npx skills add fno2010/comfy-rest-ext --skill comfy-rest-ext
+```
+
+skill 优先使用 PATH 中的 `comfy-rest-ext`；缺失时由 `skills/comfy-rest-ext/scripts/bootstrap-cli.sh` 下载 pinned 静态二进制并校验 checksum，不要求 Python/uv/pipx 或本地 ComfyUI。
+
 默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
 
 ## 快速验证

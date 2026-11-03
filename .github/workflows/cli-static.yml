@@ -39,8 +39,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          name=comfy-rest-ext
-          [ "$GOOS" = windows ] && name=comfy-rest-ext.exe
+          name="comfy-rest-ext-${GOOS}-${GOARCH}"
+          [ "$GOOS" = windows ] && name="${name}.exe"
           go build -trimpath -ldflags='-s -w' -o "dist/$name" .
           file "dist/$name" || true
       - name: Checksum
@@ -48,18 +48,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum comfy-rest-ext* > SHA256SUMS
-          else
-            shasum -a 256 comfy-rest-ext* > SHA256SUMS
-          fi
-          cat SHA256SUMS
+          for f in comfy-rest-ext-*; do
+            case "$f" in *.sha256) continue;; esac
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$f" > "$f.sha256"
+            else
+              shasum -a 256 "$f" > "$f.sha256"
+            fi
+          done
+          cat *.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: comfy-rest-ext-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            cli-go/dist/comfy-rest-ext*
-            cli-go/dist/SHA256SUMS
+          path: cli-go/dist/comfy-rest-ext*
 
   release:
     if: startsWith(github.ref, 'refs/tags/')

@@ -1,0 +1,23 @@
+{
+  "skill_name": "comfy-rest-ext",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Use the remote ComfyUI profile I configured to make a 4-second cinematic video of a paper boat in a rain storm, then save and verify the result.",
+      "expected_output": "Discover the endpoint/models first, submit a video task, persist its id, wait, and report a saved artifact path.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Generate an image of a red fox in fresh snow, then edit it to add a small wooden cabin in the background while preserving the fox.",
+      "expected_output": "Discover image models/capabilities, generate, then edit with an explicit preservation instruction and report artifacts.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "The last video task is blocked because an acceleration capability is missing. Explain the plan, ask before installing anything, and recover the original task.",
+      "expected_output": "Report the capability plan, obtain explicit consent, provision, restart/reconnect if needed, and retry the same task id.",
+      "files": []
+    }
+  ]
+}
