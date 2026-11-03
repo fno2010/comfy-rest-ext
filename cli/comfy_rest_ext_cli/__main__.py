@@ -11,6 +11,7 @@ nodes, pr-cache, health. Legacy flat commands remain as aliases.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from typing import Any, Optional
@@ -102,17 +103,41 @@ def _add_download_create_args(parser: argparse.ArgumentParser) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="comfy-rest-ext-cli",
+        prog=os.path.basename(sys.argv[0]) or "comfy-rest-ext",
         description="Command-line client for comfy-rest-ext.",
     )
     parser.add_argument("--base-url", default=None,
-                        help="ComfyUI base URL (default: http://127.0.0.1:8188)")
+                        help="ComfyUI base URL (overrides profile)")
+    parser.add_argument("--profile", default=None,
+                        help="server profile from config.toml")
+    parser.add_argument("--api-key", default=None,
+                        help="bearer API key (overrides profile; prefer env)")
     parser.add_argument("--json", action="store_true",
                         help="Emit machine-readable JSON output")
     parser.add_argument("--timeout", dest="http_timeout", type=float,
                         help="HTTP request timeout in seconds "
-                             "(default: COMFY_REST_EXT_TIMEOUT or 60)")
+                             "(default: profile or 60)")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # -- persistent config ----------------------------------------------
+    p = sub.add_parser("config", help="manage persistent server profiles")
+    config_sub = p.add_subparsers(dest="config_command", required=True)
+    sp = config_sub.add_parser("list", help="list profiles (API keys redacted)")
+    sp.set_defaults(func=commands.cmd_config_list)
+    sp = config_sub.add_parser("use", help="select the default profile")
+    sp.add_argument("profile")
+    sp.set_defaults(func=commands.cmd_config_use)
+    sp = config_sub.add_parser("set", help="set a profile value")
+    sp.add_argument("profile")
+    sp.add_argument("key", choices=["base_url", "api_key", "timeout", "default_model"])
+    sp.add_argument("value", help="value; use '-' for api_key to read stdin")
+    sp.set_defaults(func=commands.cmd_config_set)
+    sp = config_sub.add_parser("get", help="show a profile or one value")
+    sp.add_argument("profile")
+    sp.add_argument("key", nargs="?")
+    sp.set_defaults(func=commands.cmd_config_get)
+    sp = config_sub.add_parser("path", help="show the config file path")
+    sp.set_defaults(func=commands.cmd_config_path)
 
     # -- capabilities / provisioning ------------------------------------
     p = sub.add_parser("capabilities", help="show operational capability status")
@@ -383,6 +408,8 @@ def _rewrite_dot_params(argv: list[str]) -> list[str]:
 
 
 def main(argv: Any = None) -> int:
+    from . import config
+
     parser = _build_parser()
     try:
         parsed_argv = _rewrite_dot_params(
@@ -392,17 +419,39 @@ def main(argv: Any = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     args = parser.parse_args(parsed_argv)
-    kwargs: dict = {}
-    if args.base_url:
-        kwargs["base_url"] = args.base_url
-    if args.http_timeout is not None:
-        kwargs["timeout"] = args.http_timeout
-    client = ComfyRestClient(**kwargs)
+
+    if args.command == "config":
+        try:
+            return args.func(None, args)
+        except ApiError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return e.status or 1
+
+    try:
+        data = config.load_config()
+        resolved = config.resolve(
+            data,
+            profile=args.profile,
+            base_url=args.base_url,
+            api_key=args.api_key,
+            timeout=args.http_timeout,
+        )
+    except config.ConfigError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if (getattr(args, "model", None) is None
+            and resolved.get("default_model")):
+        args.model = resolved["default_model"]
+    client = ComfyRestClient(
+        base_url=resolved["base_url"],
+        timeout=resolved["timeout"],
+        api_key=resolved["api_key"],
+    )
     try:
         return args.func(client, args)
     except ApiError as e:
         print(f"error: {e}", file=sys.stderr)
-        return 1
+        return e.status or 1
     except KeyboardInterrupt:
         return 130
 

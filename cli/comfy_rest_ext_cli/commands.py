@@ -1240,3 +1240,94 @@ def cmd_pr_cache_clear(client: ComfyRestClient, args: Any) -> int:
     print(f"cleared:   {result.get('cleared')}")
     print(f"removed:   {result.get('entries_removed', 0)}")
     return 1 if errors else 0
+
+
+# ---------------------------------------------------------------------------
+# Persistent config
+# ---------------------------------------------------------------------------
+
+def _config_or_error():
+    from . import config
+    try:
+        return config, config.load_config()
+    except config.ConfigError as e:
+        raise ApiError(2, str(e)) from e
+
+
+def cmd_config_list(client: ComfyRestClient, args: Any) -> int:
+    config, data = _config_or_error()
+    output = config.redact(data)
+    if args.json:
+        return _emit(output, True)
+    print(f"default profile: {output['default_profile']}")
+    for name, values in output["profiles"].items():
+        details = ", ".join(f"{k}={v}" for k, v in sorted(values.items()) if v != "")
+        print(f"{name}" + (f"  ({details})" if details else ""))
+    if not output["profiles"]:
+        print("(no profiles configured)")
+    return 0
+
+
+def cmd_config_use(client: ComfyRestClient, args: Any) -> int:
+    config, data = _config_or_error()
+    if args.profile not in (data.get("profiles") or {}):
+        return _emit_error(f"profile not found: {args.profile}")
+    data["default_profile"] = args.profile
+    path = config.save_config(data)
+    if args.json:
+        return _emit({"default_profile": args.profile, "path": str(path)}, True)
+    print(f"default profile: {args.profile}")
+    return 0
+
+
+def cmd_config_set(client: ComfyRestClient, args: Any) -> int:
+    config, data = _config_or_error()
+    key = args.key
+    if key not in config._FIELDS:
+        return _emit_error(f"unknown config key: {key}")
+    value = args.value
+    if key == "api_key" and value == "-":
+        value = sys.stdin.readline().rstrip("\n")
+    if key == "timeout":
+        try:
+            value = float(value)
+        except ValueError:
+            return _emit_error("timeout must be a number")
+    profiles = data.setdefault("profiles", {})
+    profile = profiles.setdefault(args.profile, {})
+    profile[key] = value
+    path = config.save_config(data)
+    if args.json:
+        return _emit({"profile": args.profile, "key": key, "path": str(path)}, True)
+    print(f"set {key} for profile {args.profile}")
+    return 0
+
+
+def cmd_config_get(client: ComfyRestClient, args: Any) -> int:
+    config, data = _config_or_error()
+    values = (data.get("profiles") or {}).get(args.profile)
+    if values is None:
+        return _emit_error(f"profile not found: {args.profile}")
+    if args.key:
+        if args.key not in values:
+            return _emit_error(f"key not set: {args.key}")
+        value = "***" if args.key == "api_key" and values[args.key] else values[args.key]
+        if args.json:
+            return _emit({"profile": args.profile, "key": args.key, "value": value}, True)
+        print(value)
+        return 0
+    output = config.redact({"default_profile": args.profile, "profiles": {args.profile: values}})
+    if args.json:
+        return _emit(output["profiles"][args.profile], True)
+    for key, value in sorted(output["profiles"][args.profile].items()):
+        print(f"{key}={value}")
+    return 0
+
+
+def cmd_config_path(client: ComfyRestClient, args: Any) -> int:
+    from . import config
+    path = config.config_path()
+    if args.json:
+        return _emit({"path": str(path)}, True)
+    print(path)
+    return 0

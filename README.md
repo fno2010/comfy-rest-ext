@@ -27,13 +27,21 @@ Roadmap: [ROADMAP.md](ROADMAP.md) — v0.8.0 focuses on deployment-agnostic serv
 ln -s /path/to/comfy-rest-ext/server $COMFYUI/custom_nodes/comfy-rest-ext
 ```
 
-CLI 是独立子项目，不需要 ComfyUI 的 Python 环境：
+CLI 是独立子项目，不需要 ComfyUI 的 Python 环境。支持两种分发路径：
 
 ```bash
+# Python 路径
 uv tool install /path/to/comfy-rest-ext/cli
 # 或 pipx install /path/to/comfy-rest-ext/cli
-comfy-rest-ext --help
+
+# 无 Python 的单文件路径（在目标平台构建）
+./cli/build-standalone.sh
+./cli/dist/comfy-rest-ext --help
 ```
+
+`uvx` 适合临时运行，`uv tool install` / `pipx` 适合持久安装。静态单文件是面向无 Python agent sandbox 的主路径。
+
+单文件构建使用 Python 3.10 的 PyInstaller 运行时以降低 glibc 要求；发布时应在目标 OS/arch 上分别构建（Linux/macOS/Windows），不要把开发机的 Linux 二进制当作跨平台产物。
 
 默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
 
@@ -178,6 +186,7 @@ python3 -m cli --help
 | `nodes` | `list` / `pack` / `validate` / `init` |
 | `pr-cache` | `list` / `size` / `delete` / `clear --confirm` |
 | `health` | 无子命令 |
+| `config` | `list` / `set` / `use` / `get` / `path` |
 | `capabilities` / `doctor` | capability 与 provisioning backend 诊断 |
 | `provision` | 安装已声明的 capability |
 | `restart` / `wait-reconnect` | 受控重启与 boot_id 重连 |
@@ -239,6 +248,23 @@ comfy-rest-ext-cli pr-cache size
 # 所有命令支持 --json；全局 --timeout 控制单次 HTTP 请求超时
 comfy-rest-ext-cli --json videos list
 comfy-rest-ext-cli --timeout 120 models all
+
+# 持久 profile（写入 ~/.config/comfy-rest-ext/config.toml，权限 0600）
+comfy-rest-ext-cli config set prod base_url https://comfy.example
+comfy-rest-ext-cli config set prod api_key -   # 从 stdin 读 token，不回显
+comfy-rest-ext-cli config use prod
+comfy-rest-ext-cli --json config list
+
+覆盖顺序：`CLI flag > 环境变量 > profile > 默认值`。可用变量：
+
+```text
+COMFY_REST_EXT_PROFILE
+COMFY_REST_EXT_CONFIG
+COMFY_REST_EXT_BASE_URL
+COMFY_REST_EXT_API_KEY
+COMFY_REST_EXT_TIMEOUT
+COMFY_REST_EXT_DEFAULT_MODEL
+```
 
 # 指向非默认 ComfyUI 地址
 comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models

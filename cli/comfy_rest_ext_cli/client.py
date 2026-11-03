@@ -69,9 +69,11 @@ class ComfyRestClient:
         self,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
+        api_key: Optional[str] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.api_key = api_key or ""
 
     def _request(
         self,
@@ -82,9 +84,13 @@ class ComfyRestClient:
     ) -> Any:
         url = f"{self.base_url}{path}"
         req = urllib.request.Request(url, data=body, method=method)
-        if headers:
-            for key, value in headers.items():
-                req.add_header(key, value)
+        request_headers = dict(headers or {})
+        if self.api_key and not any(
+            key.lower() == "authorization" for key in request_headers
+        ):
+            request_headers["Authorization"] = f"Bearer {self.api_key}"
+        for key, value in request_headers.items():
+            req.add_header(key, value)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = resp.read()
