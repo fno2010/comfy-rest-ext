@@ -45,6 +45,14 @@ cd cli-go
 ldd dist/comfy-rest-ext   # not a dynamic executable
 ```
 
+## Clean acceptance
+
+```bash
+COMFY_REST_EXT_CLI=/path/to/comfy-rest-ext-linux-amd64 \
+COMFY_REST_EXT_BASE_URL=https://comfy.example \
+./scripts/acceptance-clean.sh
+```
+
 ## Agent skill
 
 安装 skill：
