@@ -305,10 +305,51 @@ func cmdDoctor(c *Client, asJSON bool) int {
 
 func cmdModels(c *Client, asJSON bool, args []string) int {
 	action := "list"
-	id := ""
 	if len(args) > 0 {
 		action = args[0]
 	}
+	switch action {
+	case "all":
+		return modelsAll(c, asJSON, args[1:])
+	case "info":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: models info PATH"), asJSON, 2)
+		}
+		m, err := c.getJSON("/v2/extension/models/info", url.Values{"path": []string{args[1]}})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		for _, k := range []string{"name", "path", "full_path", "size", "hash", "created", "modified"} {
+			if v, ok := m[k]; ok && v != nil {
+				fmt.Printf("%-12s %v\n", k, v)
+			}
+		}
+		return 0
+	case "delete":
+		fs := newFlagSet("models delete")
+		force := fs.Bool("force", false, "skip protected-model checks")
+		pos, err := parseArgs(fs, args[1:], nil)
+		if err != nil || len(pos) != 1 {
+			return 2
+		}
+		path := "/v2/extension/models/" + escapePath(pos[0])
+		if *force {
+			path += "?force=true"
+		}
+		m, err := c.deleteJSON(path)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("deleted:", m["deleted"])
+		return 0
+	}
+	id := ""
 	if action == "get" {
 		if len(args) != 2 {
 			return fail(fmt.Errorf("usage: models get ID"), asJSON, 2)
@@ -443,6 +484,19 @@ func cmdVideos(c *Client, asJSON bool, args []string, defaultModel string) int {
 			return emitJSON(map[string]any{"path": path, "bytes": len(data)})
 		}
 		fmt.Println("saved:", filepath.Clean(path))
+		return 0
+	case "delete":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: videos delete ID"), asJSON, 2)
+		}
+		m, err := c.deleteJSON("/v1/videos/" + url.PathEscape(args[1]))
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("deleted:", args[1])
 		return 0
 	case "retry":
 		if len(args) != 2 {
@@ -989,4 +1043,376 @@ func cmdDownloads(c *Client, asJSON bool, args []string) int {
 	default:
 		return fail(fmt.Errorf("unknown downloads command: %s", args[0]), asJSON, 2)
 	}
+}
+
+func modelsAll(c *Client, asJSON bool, args []string) int {
+	fs := newFlagSet("models all")
+	folder := fs.String("folder", "", "folder filter")
+	hash := fs.Bool("hash", false, "include hashes")
+	metadata := fs.Bool("metadata", false, "include metadata")
+	if _, err := parseArgs(fs, args, map[string]bool{"--folder": true}); err != nil {
+		return 2
+	}
+	q := url.Values{}
+	if *folder != "" {
+		q.Set("folder", *folder)
+	}
+	q.Set("include_hash", strconv.FormatBool(*hash))
+	q.Set("include_metadata", strconv.FormatBool(*metadata))
+	m, err := c.getJSON("/v2/extension/models/all", q)
+	if err != nil {
+		return fail(err, asJSON, 1)
+	}
+	if asJSON {
+		return emitJSON(m)
+	}
+	fmt.Println("total:", m["total"])
+	for _, item := range anySlice(m["models"]) {
+		obj, _ := item.(map[string]any)
+		fmt.Printf("%-16v %-60v %v\n", obj["folder"], obj["path"], obj["size"])
+	}
+	return 0
+}
+
+func readWorkflow(path string) (map[string]any, error) {
+	var data []byte
+	var err error
+	if path == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, err
+	}
+	if prompt, ok := obj["prompt"].(map[string]any); ok {
+		return prompt, nil
+	}
+	return obj, nil
+}
+
+func cmdDeps(c *Client, asJSON bool, args []string) int {
+	if len(args) == 0 {
+		return fail(fmt.Errorf("usage: deps check-workflow|install|status|check-node|restore"), asJSON, 2)
+	}
+	switch args[0] {
+	case "check-workflow", "install":
+		fs := newFlagSet("deps " + args[0])
+		workflow := fs.String("workflow", "", "workflow JSON path or -")
+		sync := fs.Bool("sync", false, "wait for completion")
+		if _, err := parseArgs(fs, args[1:], map[string]bool{"--workflow": true}); err != nil || *workflow == "" {
+			return 2
+		}
+		wf, err := readWorkflow(*workflow)
+		if err != nil {
+			return fail(fmt.Errorf("workflow error: %w", err), asJSON, 2)
+		}
+		var m map[string]any
+		if args[0] == "check-workflow" {
+			m, err = c.postJSON("/v2/extension/workflow/dependencies/check", map[string]any{"workflow": wf})
+		} else {
+			m, err = c.postJSON("/v2/extension/workflow/dependencies", map[string]any{
+				"workflow": wf, "async_install": !*sync,
+			})
+		}
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if *sync && args[0] == "install" {
+			id := fmt.Sprint(m["task_id"])
+			deadline := time.Now().Add(300 * time.Second)
+			for fmt.Sprint(m["status"]) != "completed" && fmt.Sprint(m["status"]) != "failed" &&
+				fmt.Sprint(m["status"]) != "cancelled" && time.Now().Before(deadline) {
+				time.Sleep(2 * time.Second)
+				m, err = c.getJSON("/v2/extension/workflow/dependencies/"+url.PathEscape(id), nil)
+				if err != nil {
+					return fail(err, asJSON, 1)
+				}
+			}
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("status:", m["status"])
+		return 0
+	case "status":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: deps status ID"), asJSON, 2)
+		}
+		m, err := c.getJSON("/v2/extension/workflow/dependencies/"+url.PathEscape(args[1]), nil)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		for k, v := range m {
+			if v != nil {
+				fmt.Printf("%-16s %v\n", k, v)
+			}
+		}
+		return 0
+	case "check-node":
+		fs := newFlagSet("deps check-node")
+		node := fs.String("node", "", "node class name")
+		if _, err := parseArgs(fs, args[1:], map[string]bool{"--node": true}); err != nil || *node == "" {
+			return 2
+		}
+		m, err := c.getJSON("/v2/extension/dependencies/check", url.Values{"node": []string{*node}})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("node:", m["node"])
+		return 0
+	case "restore":
+		fs := newFlagSet("deps restore")
+		var nodes stringList
+		fs.Var(&nodes, "node", "node name (repeatable)")
+		sync := fs.Bool("sync", false, "wait synchronously")
+		if _, err := parseArgs(fs, args[1:], map[string]bool{"--node": true}); err != nil || len(nodes) == 0 {
+			return 2
+		}
+		m, err := c.postJSON("/v2/extension/dependencies/restore", map[string]any{
+			"nodes": nodes, "async_mode": !*sync,
+		})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("status:", m["status"])
+		return 0
+	default:
+		return fail(fmt.Errorf("unknown deps command: %s", args[0]), asJSON, 2)
+	}
+}
+
+func cmdSnapshot(c *Client, asJSON bool, args []string) int {
+	if len(args) == 0 {
+		return fail(fmt.Errorf("usage: snapshot export|import|diff|list"), asJSON, 2)
+	}
+	switch args[0] {
+	case "export":
+		fs := newFlagSet("snapshot export")
+		format := fs.String("format", "tarball", "tarball or zip")
+		models := fs.Bool("include-models", false, "include model files")
+		pos, err := parseArgs(fs, args[1:], map[string]bool{"--format": true})
+		if err != nil || len(pos) != 1 {
+			return 2
+		}
+		m, err := c.postJSON("/v2/extension/snapshot/export", map[string]any{
+			"snapshot_id": pos[0], "format": *format, "include_models": *models,
+		})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("success:", m["success"], "path:", m["path"])
+		return 0
+	case "import":
+		fs := newFlagSet("snapshot import")
+		noModels := fs.Bool("no-restore-models", false, "do not restore models")
+		noNodes := fs.Bool("no-restore-nodes", false, "do not restore nodes")
+		pos, err := parseArgs(fs, args[1:], nil)
+		if err != nil || len(pos) != 1 {
+			return 2
+		}
+		m, err := c.postJSON("/v2/extension/snapshot/import", map[string]any{
+			"path": pos[0], "restore_models": !*noModels, "restore_nodes": !*noNodes,
+		})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("success:", m["success"])
+		return 0
+	case "diff":
+		if len(args) != 3 {
+			return fail(fmt.Errorf("usage: snapshot diff A B"), asJSON, 2)
+		}
+		m, err := c.getJSON("/v2/extension/snapshot/diff", url.Values{"snapshot_a": []string{args[1]}, "snapshot_b": []string{args[2]}})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		for _, k := range []string{"custom_nodes", "pip_packages"} {
+			fmt.Println(k + ":")
+			if section, ok := m[k].(map[string]any); ok {
+				for _, change := range []string{"added", "removed", "common"} {
+					fmt.Printf("  %s: %v\n", change, section[change])
+				}
+			}
+		}
+		return 0
+	case "list":
+		m, err := c.getJSON("/v2/extension/snapshot/list", nil)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		for _, item := range anySlice(m["snapshots"]) {
+			obj, _ := item.(map[string]any)
+			fmt.Printf("%v %v %v\n", obj["name"], obj["size"], obj["path"])
+		}
+		return 0
+	default:
+		return fail(fmt.Errorf("unknown snapshot command: %s", args[0]), asJSON, 2)
+	}
+}
+
+func cmdNodes(c *Client, asJSON bool, args []string) int {
+	if len(args) == 0 {
+		return fail(fmt.Errorf("usage: nodes list|pack|validate|init"), asJSON, 2)
+	}
+	switch args[0] {
+	case "list":
+		m, err := c.getJSON("/v2/extension/nodes/list", nil)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		for _, item := range anySlice(m["nodes"]) {
+			obj, _ := item.(map[string]any)
+			fmt.Printf("%-40v git=%v init=%v %v\n", obj["name"], obj["is_git"], obj["has_init"], obj["path"])
+		}
+		return 0
+	case "pack":
+		fs := newFlagSet("nodes pack")
+		noIgnore := fs.Bool("no-comfyignore", false, "ignore .comfyignore")
+		pos, err := parseArgs(fs, args[1:], nil)
+		if err != nil || len(pos) != 1 {
+			return 2
+		}
+		m, err := c.postJSON("/v2/extension/nodes/pack", map[string]any{
+			"node_name": pos[0], "respect_comfyignore": !*noIgnore,
+		})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("path:", m["path"], "size:", m["size"])
+		return 0
+	case "validate":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: nodes validate NAME"), asJSON, 2)
+		}
+		m, err := c.postJSON("/v2/extension/nodes/validate", map[string]any{"node_name": args[1]})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("valid:", m["valid"])
+		if m["valid"] == false {
+			return 1
+		}
+		return 0
+	case "init":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: nodes init PATH"), asJSON, 2)
+		}
+		m, err := c.postJSON("/v2/extension/nodes/init", map[string]any{"path": args[1]})
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("path:", m["path"])
+		return 0
+	default:
+		return fail(fmt.Errorf("unknown nodes command: %s", args[0]), asJSON, 2)
+	}
+}
+
+func cmdPRCache(c *Client, asJSON bool, args []string) int {
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list":
+		m, err := c.getJSON("/v2/extension/frontend/pr-cache", nil)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("count:", m["count"], "total:", m["total_size"])
+		return 0
+	case "size":
+		m, err := c.getJSON("/v2/extension/frontend/pr-cache/size", nil)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("count:", m["count"], "total:", m["total_size"])
+		return 0
+	case "delete":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: pr-cache delete PR"), asJSON, 2)
+		}
+		m, err := c.deleteJSON("/v2/extension/frontend/pr-cache/" + url.PathEscape(args[1]))
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("deleted:", m["deleted"])
+		return 0
+	case "clear":
+		fs := newFlagSet("pr-cache clear")
+		confirm := fs.Bool("confirm", false, "confirm deletion")
+		if _, err := parseArgs(fs, args[1:], nil); err != nil || !*confirm {
+			return fail(fmt.Errorf("refusing to clear PR cache without --confirm"), asJSON, 2)
+		}
+		m, err := c.deleteJSON("/v2/extension/frontend/pr-cache?confirm=true")
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("cleared:", m["cleared"], "removed:", m["entries_removed"])
+		return 0
+	default:
+		return fail(fmt.Errorf("unknown pr-cache command: %s", args[0]), asJSON, 2)
+	}
+}
+
+func anySlice(v any) []any {
+	out, _ := v.([]any)
+	return out
+}
+
+func escapePath(path string) string {
+	parts := strings.Split(path, "/")
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	return strings.Join(parts, "/")
 }

@@ -65,6 +65,14 @@ func run(args []string) int {
 		return cmdDownloads(client, g.JSON, rest[1:])
 	case "models":
 		return cmdModels(client, g.JSON, rest[1:])
+	case "deps":
+		return cmdDeps(client, g.JSON, rest[1:])
+	case "snapshot":
+		return cmdSnapshot(client, g.JSON, rest[1:])
+	case "nodes":
+		return cmdNodes(client, g.JSON, rest[1:])
+	case "pr-cache":
+		return cmdPRCache(client, g.JSON, rest[1:])
 	case "videos":
 		return cmdVideos(client, g.JSON, rest[1:], r.DefaultModel)
 	case "images":
@@ -145,9 +153,13 @@ Commands:
   restart [--yes] [--retry-task ID] [--reason TEXT]
   wait-reconnect [--since-boot ID] [--retry-task ID]
   downloads [list|create URL|status ID|cancel ID]
-  models [list|get ID]
-  videos [generate PROMPT|list|status ID|wait ID|content ID|retry ID]
+  models [list|get ID|all|info PATH|delete PATH]
+  videos [generate PROMPT|list|status ID|wait ID|content ID|retry ID|delete ID]
   images [generate PROMPT|edit PROMPT|list|status ID|content ID]
+  deps [check-workflow|install|status|check-node|restore]
+  snapshot [export|import|diff|list]
+  nodes [list|pack|validate|init]
+  pr-cache [list|size|delete|clear]
   config [list|use NAME|set NAME KEY VALUE|get NAME [KEY]|path]
   version`)
 }
