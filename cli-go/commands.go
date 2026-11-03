@@ -783,10 +783,8 @@ func generateImage(c *Client, asJSON bool, args []string, defaultModel string, e
 	if err := json.Unmarshal(data, &response); err != nil {
 		return fail(err, asJSON, 1)
 	}
-	if asJSON {
-		return emitJSON(response)
-	}
 	items, _ := response["data"].([]any)
+	saved := make([]string, 0, len(items))
 	for i, item := range items {
 		obj, _ := item.(map[string]any)
 		if b64, ok := obj["b64_json"].(string); ok {
@@ -805,8 +803,15 @@ func generateImage(c *Client, asJSON bool, args []string, defaultModel string, e
 			if err := os.WriteFile(path, raw, 0o644); err != nil {
 				return fail(err, asJSON, 1)
 			}
-			fmt.Println("saved:", path)
+			saved = append(saved, path)
+			if !asJSON {
+				fmt.Println("saved:", path)
+			}
 		}
+	}
+	if asJSON {
+		response["saved_paths"] = saved
+		return emitJSON(response)
 	}
 	return 0
 }

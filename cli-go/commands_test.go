@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -46,5 +49,24 @@ func TestGenerateImagePayload(t *testing.T) {
 	}
 	if payload["model"] != "anima-base" || payload["size"] != "512x512" || payload["n"] != float64(2) {
 		t.Fatalf("payload=%#v", payload)
+	}
+}
+
+func TestGenerateImageWritesFileInJSONMode(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("PNGDATA"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + payload + `"}]}`))
+	}))
+	defer srv.Close()
+	out := filepath.Join(t.TempDir(), "image.png")
+	c := NewClient(Resolved{BaseURL: srv.URL, Timeout: 5})
+	if rc := generateImage(c, true, []string{
+		"a cat", "--model", "anima-base", "--out", out,
+	}, "anima-base", false); rc != 0 {
+		t.Fatalf("rc=%d", rc)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil || string(data) != "PNGDATA" {
+		t.Fatalf("file=%q err=%v", data, err)
 	}
 }
