@@ -178,6 +178,9 @@ python3 -m cli --help
 | `nodes` | `list` / `pack` / `validate` / `init` |
 | `pr-cache` | `list` / `size` / `delete` / `clear --confirm` |
 | `health` | 无子命令 |
+| `capabilities` / `doctor` | capability 与 provisioning backend 诊断 |
+| `provision` | 安装已声明的 capability |
+| `restart` / `wait-reconnect` | 受控重启与 boot_id 重连 |
 
 旧的扁平命令（`generate` / `status` / `list` / `wait` / `image` / `image-edit` / `images` / `image-status` / `download` / `download-status`）保留为别名。`models` 和 `images` 不带子命令时仍然执行列表。
 
@@ -189,7 +192,8 @@ comfy-rest-ext-cli health
 comfy-rest-ext-cli capabilities --model minimax-h3
 comfy-rest-ext-cli doctor
 comfy-rest-ext-cli provision attention.flash --yes --retry-task video_xxxx
-comfy-rest-ext-cli wait-reconnect --retry-task video_xxxx --timeout 300
+comfy-rest-ext-cli restart --yes --retry-task video_xxxx --timeout 300
+comfy-rest-ext-cli wait-reconnect --since-boot <old-boot-id> --retry-task video_xxxx --timeout 300
 comfy-rest-ext-cli models
 comfy-rest-ext-cli models get anima-base
 comfy-rest-ext-cli models all --folder diffusion_models

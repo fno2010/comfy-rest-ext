@@ -8,6 +8,7 @@ injected per-request (CLI flag) or read from the environment.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import urllib.error
@@ -94,8 +95,9 @@ class ComfyRestClient:
             except (json.JSONDecodeError, AttributeError):
                 message = payload.decode("utf-8", errors="replace") or e.reason
             raise ApiError(e.code, message) from e
-        except urllib.error.URLError as e:
-            raise ApiError(0, f"connection failed: {e.reason}") from e
+        except (urllib.error.URLError, http.client.HTTPException, ConnectionError, OSError) as e:
+            reason = getattr(e, "reason", e)
+            raise ApiError(0, f"connection failed: {reason}") from e
         if not data:
             return None
         try:
@@ -436,6 +438,25 @@ class ComfyRestClient:
     def acceleration_schema(self) -> Dict[str, Any]:
         return self._get("/v2/extension/acceleration/schema")
 
+    def provisioners(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/provisioners")
+
+    def restart_capabilities(self) -> Dict[str, Any]:
+        return self._get("/v2/extension/restart/capabilities")
+
+    def restart(
+        self,
+        authorized: bool = False,
+        retry_task_id: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload = {"authorized": authorized, "confirm": "restart"}
+        if retry_task_id:
+            payload["retry_task_id"] = retry_task_id
+        if reason:
+            payload["reason"] = reason
+        return self._json_request("POST", "/v2/extension/restart", payload)
+
     def capabilities(
         self,
         model: Optional[str] = None,
@@ -457,4 +478,4 @@ class ComfyRestClient:
         payload = {"capabilities": capabilities, "authorized": authorized}
         if retry_task_id:
             payload["retry_task_id"] = retry_task_id
-        return self._request("POST", "/v2/extension/provision", payload)
+        return self._json_request("POST", "/v2/extension/provision", payload)

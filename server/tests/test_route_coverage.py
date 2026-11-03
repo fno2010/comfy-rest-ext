@@ -46,7 +46,11 @@ COVERED_ROUTES = {
     ("GET", "/v2/extension/models/info"),
     ("DELETE", "/v2/extension/models/{path:.*}"),
     ("GET", "/v2/extension/capabilities"),
+    ("GET", "/v2/extension/tasks"),
+    ("GET", "/v2/extension/provisioners"),
     ("POST", "/v2/extension/provision"),
+    ("GET", "/v2/extension/restart/capabilities"),
+    ("POST", "/v2/extension/restart"),
 }
 
 EXCLUDED_ROUTES = {

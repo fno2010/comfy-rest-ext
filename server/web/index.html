@@ -517,14 +517,17 @@
   const STATUS_LABEL = { in_progress: "running", running: "running" };
 
   const state = {
-    videos: [],
-    images: [],
+    tasks: [],
+    total: 0,
+    stats: {},
+    models: [],
     catalog: [],
     filters: { kind: "all", status: "all", model: "", query: "" },
     sort: "smart",
     page: 1,
     pageSize: Number(localStorage.getItem("comfy-rest-ext.pageSize")) || 12,
     loading: false,
+    pending: false,
     timer: null,
     fetchedAt: null,
     modelOptionsSig: "",
@@ -808,45 +811,16 @@
     };
   }
 
-  function allTasks() {
-    return state.videos.concat(state.images);
+  function normalizeTask(task) {
+    return task.kind === "image" ? normalizeImage(task) : normalizeVideo(task);
   }
 
   function hasActive() {
-    return allTasks().some((task) => ACTIVE.has(task.status));
-  }
-
-  function matches(task) {
-    const f = state.filters;
-    if (f.kind !== "all" && task.kind !== f.kind) return false;
-    if (f.model && task.model !== f.model) return false;
-    if (f.status === "active" && !ACTIVE.has(task.status)) return false;
-    if (f.status === "completed" && task.status !== "completed") return false;
-    if (f.status === "failed" && task.status !== "failed") return false;
-    if (f.query) {
-      const q = f.query.toLowerCase();
-      if (![task.id, task.model, task.prompt, task.status]
-        .some((value) => String(value || "").toLowerCase().includes(q))) return false;
+    const stats = state.stats || {};
+    if (Number(stats.video_active || 0) + Number(stats.image_active || 0) > 0) {
+      return true;
     }
-    return true;
-  }
-
-  function filteredTasks() {
-    return allTasks().filter(matches).sort((a, b) => {
-      if (state.sort === "smart") {
-        const activeA = ACTIVE.has(a.status) ? 0 : 1;
-        const activeB = ACTIVE.has(b.status) ? 0 : 1;
-        if (activeA !== activeB) return activeA - activeB;
-        return (b.created_at || 0) - (a.created_at || 0);
-      }
-      if (state.sort === "newest") return (b.created_at || 0) - (a.created_at || 0);
-      if (state.sort === "oldest") return (a.created_at || 0) - (b.created_at || 0);
-      if (state.sort === "model") {
-        const cmp = String(a.model).localeCompare(String(b.model));
-        return cmp || (b.created_at || 0) - (a.created_at || 0);
-      }
-      return (b.progress || 0) - (a.progress || 0);
-    });
+    return state.tasks.some((task) => ACTIVE.has(task.status));
   }
 
   function cacheLabel(cache) {
@@ -1042,19 +1016,17 @@
   }
 
   function renderStats() {
-    const videos = state.videos;
-    const images = state.images;
-    const active = (list) => list.filter((task) => ACTIVE.has(task.status)).length;
-    $("stat-video-total").textContent = videos.length;
-    $("stat-video-running").textContent = active(videos);
-    $("stat-image-total").textContent = images.length;
-    $("stat-image-running").textContent = active(images);
+    const stats = state.stats || {};
+    $("stat-video-total").textContent = Number(stats.video_total || 0);
+    $("stat-video-running").textContent = Number(stats.video_active || 0);
+    $("stat-image-total").textContent = Number(stats.image_total || 0);
+    $("stat-image-running").textContent = Number(stats.image_active || 0);
   }
 
   function renderModelOptions() {
     const select = $("model-filter");
     const current = state.filters.model;
-    const models = new Set(allTasks().map((task) => task.model).filter(Boolean));
+    const models = new Set(state.models || []);
     for (const model of state.catalog) {
       if (model.canonical && model.canonical !== model.id) continue;
       models.add(model.id);
@@ -1103,15 +1075,11 @@
   }
 
   function renderList() {
-    const filtered = filteredTasks();
-    const total = filtered.length;
+    const total = state.total;
     const pages = Math.max(1, Math.ceil(total / state.pageSize));
-    if (state.page > pages) state.page = pages;
-    if (state.page < 1) state.page = 1;
-    const start = (state.page - 1) * state.pageSize;
-    const pageTasks = filtered.slice(start, start + state.pageSize);
+    const pageTasks = state.tasks;
 
-    const allIds = new Set(allTasks().map((task) => task.id));
+    const allIds = new Set(pageTasks.map((task) => task.id));
     for (const id of Array.from(cardCache.keys())) {
       if (!allIds.has(id)) cardCache.delete(id);
     }
@@ -1129,7 +1097,7 @@
 
     $("empty").hidden = total !== 0;
     grid.hidden = total === 0;
-    renderFilterSummary(allTasks().length, total);
+    renderFilterSummary(total, pageTasks.length);
     renderPager(total, pages);
   }
 
@@ -1139,13 +1107,18 @@
     renderList();
   }
 
-  async function fetchJson(url) {
+  async function fetchJson(url, timeoutMs = 30000) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(url, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(url + " -> HTTP " + response.status);
       return await response.json();
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        throw new Error(url + " -> timeout after " + Math.round(timeoutMs / 1000) + "s");
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -1162,38 +1135,49 @@
     notice.classList.toggle("show", Boolean(message));
   }
 
-  async function load() {
-    if (state.loading) return;
+  async function load({ resetPage = false } = {}) {
+    if (resetPage) state.page = 1;
+    if (state.loading) {
+      state.pending = true;
+      return;
+    }
     state.loading = true;
     setBusy(true);
+    const params = new URLSearchParams({
+      kind: state.filters.kind,
+      status: state.filters.status,
+      model: state.filters.model,
+      q: state.filters.query,
+      sort: state.sort,
+      limit: String(state.pageSize),
+      offset: String((state.page - 1) * state.pageSize),
+    });
     try {
-      const [videos, images] = await Promise.allSettled([
-        fetchJson("/v1/videos"),
-        fetchJson("/v2/extension/image"),
-      ]);
-      const errors = [];
-      if (videos.status === "fulfilled") {
-        state.videos = (videos.value.data || []).map(normalizeVideo);
-      } else {
-        errors.push("videos: " + videos.reason.message);
+      const data = await fetchJson("/v2/extension/tasks?" + params.toString(), 30000);
+      const pages = Math.max(1, Math.ceil(Number(data.total || 0) / state.pageSize));
+      if (state.page > pages) {
+        state.page = pages;
+        state.pending = true;
       }
-      if (images.status === "fulfilled") {
-        state.images = (images.value.tasks || []).map(normalizeImage);
-      } else {
-        errors.push("images: " + images.reason.message);
-      }
-      if (errors.length === 2) {
-        showNotice("Refresh failed: " + errors.join("; "));
-      } else {
-        showNotice(errors.length ? "Partial refresh: " + errors.join("; ") : "");
-        state.fetchedAt = new Date();
-        $("updated").textContent = "updated " + state.fetchedAt.toLocaleTimeString();
-        renderAll();
-      }
+      state.tasks = (data.data || []).map(normalizeTask);
+      state.total = Number(data.total || 0);
+      state.stats = data.stats || {};
+      state.models = data.models || [];
+      showNotice("");
+      state.fetchedAt = new Date();
+      $("updated").textContent = "updated " + state.fetchedAt.toLocaleTimeString();
+      renderAll();
+    } catch (error) {
+      showNotice("Refresh failed: " + (error.message || String(error)));
     } finally {
       state.loading = false;
       setBusy(false);
-      schedule();
+      if (state.pending) {
+        state.pending = false;
+        load();
+      } else {
+        schedule();
+      }
     }
   }
 
@@ -1201,12 +1185,11 @@
     if (state.timer) clearTimeout(state.timer);
     state.timer = null;
     if (!$("auto").checked || document.hidden) return;
-    state.timer = setTimeout(load, hasActive() ? 2000 : 5000);
+    state.timer = setTimeout(load, hasActive() ? 2000 : 15000);
   }
 
   function resetPageAndRender() {
-    state.page = 1;
-    renderList();
+    load({ resetPage: true });
   }
 
   function setKind(kind) {
@@ -1226,10 +1209,11 @@
   }
 
   function goPage(page) {
-    const filtered = filteredTasks();
-    const pages = Math.max(1, Math.ceil(filtered.length / state.pageSize));
-    state.page = Math.max(1, Math.min(pages, page));
-    renderList();
+    const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+    const next = Math.max(1, Math.min(pages, page));
+    if (next === state.page) return;
+    state.page = next;
+    load();
   }
 
   async function ensureCatalog() {
@@ -1747,7 +1731,7 @@
   $("prev-page").addEventListener("click", () => goPage(state.page - 1));
   $("next-page").addEventListener("click", () => goPage(state.page + 1));
   $("last-page").addEventListener("click", () => {
-    goPage(Math.max(1, Math.ceil(filteredTasks().length / state.pageSize)));
+    goPage(Math.max(1, Math.ceil(state.total / state.pageSize)));
   });
   $("pages").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-page]");
@@ -1790,7 +1774,7 @@
     const runtimeButton = event.target.closest("button.detail-link");
     if (runtimeButton) {
       const id = runtimeButton.closest(".card")?.dataset.id;
-      const task = allTasks().find((item) => item.id === id);
+      const task = state.tasks.find((item) => item.id === id);
       if (task) openRuntime(task);
       return;
     }

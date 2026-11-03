@@ -7,6 +7,8 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
 ## 目录
 
 - [健康检查](#健康检查)
+- [能力安装](#能力安装)
+- [受控重启](#受控重启)
 - [模型下载](#模型下载)
 - [模型管理](#模型管理)
 - [自定义节点管理](#自定义节点管理)
@@ -28,9 +30,108 @@ ComfyUI REST API 扩展，为 ComfyUI 补充的额外端点。
 ```json
 {
   "status": "ok",
-  "extension": "comfy-rest-ext"
+  "extension": "comfy-rest-ext",
+  "boot_id": "b1e9af06847e4cbeb3be8579fa933e49"
 }
 ```
+
+`boot_id` 在每次进程启动时变化；CLI 用它确认服务确实重启过，而不是只检查端口可达。
+
+---
+
+## 能力安装
+
+安装后端按以下顺序选择：
+
+1. **ComfyUI-Manager**：已检测到 Manager 时，按已声明的 `manager_id` + 精确版本入队安装；
+2. **native pinned**：未声明 Manager 来源时，只接受 GitHub repo + 40 位 commit；
+3. 没有可用后端时返回明确的 409/422 计划，不静默降级。
+
+Manager 是可选依赖。缺失时 `doctor` 会显示 `manager (unavailable)`，native 后端仍可用于已 pin 的节点。
+
+### GET `/v2/extension/provisioners` — 查看安装后端
+
+```json
+{
+  "backends": [
+    {"id": "manager", "available": true, "prefix": "/v2/manager", "version": "V4.2.2"},
+    {"id": "native", "available": true, "pinned_only": true}
+  ]
+}
+```
+
+### GET `/v2/extension/capabilities` — capability 状态
+
+返回 `available` / `installable` / `unsupported` 状态、缺失包/节点、安装动作，以及 `provisioners` backend 状态。
+
+### GET `/v2/extension/tasks` — dashboard 分页任务列表
+
+Dashboard 专用的统一任务列表，合并视频和图片任务，支持服务端过滤、排序和分页；默认每页 50，最大 200。
+
+查询参数：
+
+| 参数 | 说明 |
+|---|---|
+| `limit` / `offset` | 分页，`offset` 默认为 0 |
+| `kind` | `all` / `video` / `image` |
+| `status` | `all` / `active` / `completed` / `failed` |
+| `model` | 精确模型 id |
+| `q` | id/model/prompt/status 搜索 |
+| `sort` | `smart` / `newest` / `oldest` / `model` / `progress` |
+
+响应包含当前页 `data`、`total`、`has_more`、全局 `stats` 和可用 `models`；响应启用压缩。列表不返回全部历史，避免任务增长后 dashboard 超时。
+
+### POST `/v2/extension/provision` — 执行授权安装
+
+```json
+{
+  "capabilities": ["attention.flash"],
+  "authorized": true,
+  "retry_task_id": "video_xxxx"
+}
+```
+
+安装完成后只返回 `restart_required`；不会自动执行进程重启。
+
+### 来源与镜像
+
+扩展不硬编码 registry 或 Git 镜像地址：
+
+- **Manager**：使用 Manager 自身的 channel/cache/镜像配置；capability spec 可声明 `channel` 和 `mode`。
+- **native Git**：`repo` 必须是 HTTPS、带 pin commit，且 host 在 `COMFY_REST_GIT_ALLOW_HOSTS`（逗号分隔，默认 `github.com`）中。需要 Gitee 或企业镜像时把它加入 allowlist。
+- **Python 包**：沿用进程的 pip 配置，例如 `PIP_INDEX_URL`。
+
+---
+
+## 受控重启
+
+### GET `/v2/extension/restart/capabilities` — 查看重启适配器
+
+```json
+{
+  "mode": "ask",
+  "allowed": true,
+  "active_tasks": 0,
+  "restart_safe": true,
+  "backends": [
+    {"id": "safe-restart", "available": false, "reason": "http_404"},
+    {"id": "manager", "available": true, "prefix": "/v2/manager", "version": "V4.2.2"},
+    {"id": "external", "available": true, "action": "restart ComfyUI through the process supervisor"}
+  ]
+}
+```
+
+### POST `/v2/extension/restart` — 请求受控重启
+
+```json
+{
+  "authorized": true,
+  "confirm": "restart",
+  "reason": "provisioning"
+}
+```
+
+成功返回 `202`，包含旧 `boot_id` 和实际使用的 backend。默认策略是 `ask`，可用 `COMFY_REST_RESTART_MODE=off|ask` 控制。存在排队/运行任务时返回 `409`，不会丢弃正在进行的任务。
 
 ---
 
@@ -753,7 +854,11 @@ ws.addEventListener('message', (event) => {
 | GET | `/v2/extension/snapshot/list` | 列出快照 |
 | GET | `/v2/extension/acceleration/schema` | 加速维度/方法/参数/可用性 schema |
 | GET | `/v2/extension/capabilities` | 结构化 capability 状态与安装动作 |
+| GET | `/v2/extension/tasks` | dashboard 分页任务列表 |
+| GET | `/v2/extension/provisioners` | 查看 Manager/native 安装后端 |
 | POST | `/v2/extension/provision` | 按策略/授权执行 capability 安装；可带 `retry_task_id` |
+| GET | `/v2/extension/restart/capabilities` | 查看可用重启适配器与活动任务 |
+| POST | `/v2/extension/restart` | 受控重启（显式授权） |
 | POST | `/v1/videos/{video_id}/retry` | 重试 provisioning-blocked 视频任务 |
 
 | POST | `/v2/extension/video/generate` | 提交视频生成任务 |

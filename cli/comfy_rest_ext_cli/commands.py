@@ -792,9 +792,34 @@ def cmd_doctor(client: ComfyRestClient, args: Any) -> int:
         caps = client.capabilities()
     except ApiError as e:
         return _emit_error(str(e))
+    provisioners = caps.get("provisioners")
+    if not provisioners:
+        try:
+            provisioners = getattr(client, "provisioners", lambda: {})()
+        except ApiError:
+            provisioners = {}
     if args.json:
-        return _emit({"health": health, "capabilities": caps}, True)
+        return _emit(
+            {
+                "health": health,
+                "capabilities": caps,
+                "provisioners": provisioners,
+            },
+            True,
+        )
     print(f"health: {health.get('status', '')}")
+    for backend in provisioners.get("backends") or []:
+        flags = []
+        if backend.get("available") is False:
+            flags.append("unavailable")
+        if backend.get("pinned_only"):
+            flags.append("pinned only")
+        if backend.get("version"):
+            flags.append(str(backend["version"]))
+        if backend.get("reason"):
+            flags.append(str(backend["reason"]))
+        suffix = f" ({', '.join(flags)})" if flags else ""
+        print(f"provisioner: {backend.get('id', '')}{suffix}")
     summary = caps.get("summary") or {}
     print("capabilities: " + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
     missing = [
@@ -827,17 +852,57 @@ def cmd_provision(client: ComfyRestClient, args: Any) -> int:
     return 0
 
 
-def cmd_wait_reconnect(client: ComfyRestClient, args: Any) -> int:
+def _wait_for_health(client: ComfyRestClient, args: Any, since_boot=None) -> int:
     import time
     deadline = time.time() + args.timeout if args.timeout else None
     while True:
         try:
-            client.health()
-            break
+            health = client.health()
+            if not since_boot or health.get("boot_id") != since_boot:
+                return 0
         except Exception:
-            if deadline is not None and time.time() >= deadline:
-                return _emit_error("server did not reconnect before timeout")
-            time.sleep(args.interval)
+            pass
+        if deadline is not None and time.time() >= deadline:
+            return _emit_error("server did not reconnect before timeout")
+        time.sleep(args.interval)
+
+
+def cmd_restart(client: ComfyRestClient, args: Any) -> int:
+    try:
+        result = client.restart(
+            authorized=bool(getattr(args, "yes", False)),
+            retry_task_id=getattr(args, "retry_task", None),
+            reason=getattr(args, "reason", None),
+        )
+    except ApiError as e:
+        return _emit_error(str(e))
+    old_boot = result.get("boot_id")
+    if not old_boot:
+        return _emit_error("restart response did not include a boot_id")
+    code = _wait_for_health(client, args, since_boot=old_boot)
+    if code:
+        return code
+    if args.retry_task:
+        try:
+            task = client.retry_video(args.retry_task)
+        except ApiError as e:
+            return _emit_error(str(e))
+        if args.json:
+            return _emit(task, True)
+        print(f"{task.get('id')} {task.get('status')}")
+        return 0
+    if args.json:
+        return _emit({"status": "restarted", "backend": result.get("backend")}, True)
+    print(f"restarted via {result.get('backend', '')}")
+    return 0
+
+
+def cmd_wait_reconnect(client: ComfyRestClient, args: Any) -> int:
+    code = _wait_for_health(
+        client, args, since_boot=getattr(args, "since_boot", None)
+    )
+    if code:
+        return code
     if args.retry_task:
         try:
             task = client.retry_video(args.retry_task)

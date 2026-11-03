@@ -6,7 +6,7 @@ from the framework contract (#43) and from profile benchmarking (#16).
 ## Smoke conditions
 
 Unless noted otherwise, each method was exercised with one T2V task on the
-live GB10 / ComfyUI 0.37 stack:
+reference GB10 / ComfyUI 0.37 stack:
 
 - prompt: `A red cube rolling on a white table, soft studio light, simple clean scene`
 - 512x512, 1 second, seed 1, 2 steps (4 steps for spectrum and LightX2V)

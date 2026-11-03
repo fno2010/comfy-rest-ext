@@ -1415,7 +1415,8 @@
 ```json
 {
   "status": "ok",
-  "extension": "comfy-rest-ext"
+  "extension": "comfy-rest-ext",
+  "boot_id": "b1e9af06847e4cbeb3be8579fa933e49"
 }
 ```
 

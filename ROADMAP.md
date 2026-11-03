@@ -6,8 +6,8 @@ Next milestone: **[v0.8.0 — deployment-agnostic server + agent harness](https:
 ## Status
 
 - [x] #47 package boundaries — merged in PR #55 (`5990844`)
-- [ ] #48 deployment-agnostic adapters/capability discovery
-- [ ] #49 capability provisioning
+- [x] #48 deployment-agnostic adapters/capability discovery
+- [x] #49 capability provisioning
 - [ ] #50 standalone CLI distribution
 - [ ] #51 agent skill / harness
 - [ ] #52 clean-environment acceptance
@@ -31,7 +31,7 @@ Dependency direction is one-way:
 - CLI and skill must not import `server`, `nodes`, `folder_paths`, or `api.*`;
 - shared contract lives in `contracts/` or is generated; neither side imports the other's implementation.
 
-ComfyUI remains the host runtime. “Deployment-agnostic” means no assumptions about a particular ComfyUI deployment, image, label, model list, node list, or filesystem layout; it does not mean a ComfyUI-free inference backend.
+ComfyUI remains the host runtime. “Deployment-agnostic” means no assumptions about a particular ComfyUI deployment, image, model list, node list, or filesystem layout; it does not mean a ComfyUI-free inference backend.
 
 ## Workstreams
 
@@ -131,4 +131,4 @@ Tracking issue: **[#53](https://github.com/fno2010/comfy-rest-ext/issues/53)**
 - #15 config-driven workflow builder loading: closed.
 - #43 acceleration framework parity: closed.
 - #44 acceleration method support matrix: closed.
-- Current tests: 321 passing.
+- Current tests: 282 server + 74 CLI passing.

@@ -236,4 +236,6 @@ async def list_video_tasks(request: web.Request) -> web.Response:
         task = _record_to_task(record)
         manager.restore(task)
         tasks.append(_task_summary(task))
-    return web.json_response({"tasks": tasks})
+    response = web.json_response({"tasks": tasks})
+    response.enable_compression()
+    return response

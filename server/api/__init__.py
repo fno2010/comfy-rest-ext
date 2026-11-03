@@ -7,13 +7,19 @@ All REST API routes are registered here at module load time.
 from aiohttp import web
 from server import PromptServer
 
+from .boot import BOOT_ID
+
 routes = PromptServer.instance.routes
 
 # Health check endpoint (Phase 0)
 @routes.get("/v2/extension/health")
 async def health_check(request):
     """Health check endpoint for the extension."""
-    return web.json_response({"status": "ok", "extension": "comfy-rest-ext"})
+    return web.json_response({
+        "status": "ok",
+        "extension": "comfy-rest-ext",
+        "boot_id": BOOT_ID,
+    })
 
 
 # Import all route modules to trigger registration
@@ -27,8 +33,10 @@ from .models import pr_cache  # noqa: F401
 from .models import video  # noqa: F401
 from .openai import v1  # noqa: F401
 from .openai import images  # noqa: F401
+from .tasks import list as task_list  # noqa: F401
 from . import acceleration  # noqa: F401
 from . import capabilities  # noqa: F401
 from . import provisioning  # noqa: F401
+from . import restart  # noqa: F401
 from . import config  # noqa: F401
 from . import ui  # noqa: F401

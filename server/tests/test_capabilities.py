@@ -90,7 +90,7 @@ async def test_provision_authorized_installs_declared_package(monkeypatch):
 @pytest.mark.asyncio
 async def test_custom_node_installer_rejects_unpinned_source(tmp_path, monkeypatch):
     monkeypatch.setenv("COMFYUI_CUSTOM_NODES", str(tmp_path))
-    with pytest.raises(provisioning.ProvisionError, match="pinned GitHub"):
+    with pytest.raises(provisioning.ProvisionError, match="allowlisted host"):
         await provisioning._install_custom_node({
             "kind": "custom_node",
             "repo": "https://example.com/untrusted.git",

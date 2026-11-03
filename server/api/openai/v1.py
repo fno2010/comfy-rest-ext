@@ -708,10 +708,12 @@ async def list_videos(request: web.Request) -> web.Response:
         task = _record_to_task(record)
         manager.restore(task)
         tasks.append(_video_response(task))
-    return web.json_response({
+    response = web.json_response({
         "object": "list",
         "data": tasks,
     })
+    response.enable_compression()
+    return response
 
 
 @routes.get("/v1/videos/{video_id}/content")

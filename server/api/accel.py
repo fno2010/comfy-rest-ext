@@ -216,6 +216,13 @@ register_method(AccelMethod(
 register_method(AccelMethod(
     "sage", "attention",
     required_nodes=("PathchSageAttentionKJ",),
+    install_spec={
+        "kind": "custom_node",
+        "repo": "https://gitee.com/lubaiwan/ComfyUI-KJNodes.git",
+        "commit": "bb205d809b467307b8ec3bb1a22680a4873187f8",
+        "target": "ComfyUI-KJNodes",
+        "requires_restart": True,
+    },
     params_schema={
         "sage_attention": ParamSpec(
             str, "auto",

@@ -912,3 +912,86 @@ def test_flat_default_is_schema_rejected():
     )
     with pytest.raises(commands.ApiError, match="not registered"):
         commands._build_video_payload(args, schema=_SCHEMA)
+
+
+def test_parser_has_restart_commands():
+    parser = _build_parser()
+    for argv in (
+        ["restart", "--yes", "--retry-task", "video_x"],
+        ["wait-reconnect", "--since-boot", "old", "--retry-task", "video_x"],
+    ):
+        args = parser.parse_args(argv)
+        assert callable(args.func)
+
+
+def test_restart_waits_for_boot_id_and_retries(capsys):
+    class RestartClient:
+        def __init__(self):
+            self.health_calls = 0
+            self.retried = []
+
+        def restart(self, **kwargs):
+            return {"accepted": True, "backend": "safe-restart", "boot_id": "old"}
+
+        def health(self):
+            self.health_calls += 1
+            return {"status": "ok", "boot_id": "old" if self.health_calls == 1 else "new"}
+
+        def retry_video(self, video_id):
+            self.retried.append(video_id)
+            return {"id": video_id, "status": "queued"}
+
+    client = RestartClient()
+    args = Args(
+        json=False, yes=True, timeout=1, interval=0,
+        retry_task="video_x", reason="provisioning",
+    )
+    assert commands.cmd_restart(client, args) == 0
+    assert client.health_calls == 2
+    assert client.retried == ["video_x"]
+    assert "video_x queued" in capsys.readouterr().out
+
+
+def test_wait_reconnect_requires_new_boot_id(capsys):
+    class ReconnectClient:
+        def __init__(self):
+            self.calls = 0
+
+        def health(self):
+            self.calls += 1
+            return {"status": "ok", "boot_id": "old" if self.calls == 1 else "new"}
+
+    client = ReconnectClient()
+    args = Args(json=False, timeout=1, interval=0, since_boot="old", retry_task=None)
+    assert commands.cmd_wait_reconnect(client, args) == 0
+    assert client.calls == 2
+    assert capsys.readouterr().out.strip() == "connected"
+
+
+def test_provision_and_restart_send_json_bodies(monkeypatch):
+    client = ComfyRestClient("http://example")
+    calls = []
+
+    def fake_request(method, path, body=None, headers=None):
+        calls.append((method, path, body, headers))
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    client.provision(["attention.flash"], authorized=True)
+    client.restart(authorized=True, retry_task_id="video_x", reason="test")
+
+    assert [call[1] for call in calls] == [
+        "/v2/extension/provision",
+        "/v2/extension/restart",
+    ]
+    assert calls[0][3]["Content-Type"] == "application/json"
+    assert json.loads(calls[0][2]) == {
+        "capabilities": ["attention.flash"],
+        "authorized": True,
+    }
+    assert json.loads(calls[1][2]) == {
+        "authorized": True,
+        "confirm": "restart",
+        "retry_task_id": "video_x",
+        "reason": "test",
+    }

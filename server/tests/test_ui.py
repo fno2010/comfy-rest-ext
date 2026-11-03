@@ -39,6 +39,8 @@ async def test_dashboard_serves_html():
     assert response.content_type == "text/html"
     assert "Comfy-REST-Ext" in response.text
     assert "/v2/extension/image" in response.text
+    assert 'fetchJson("/v2/extension/tasks?" + params.toString(), 30000)' in response.text
+    assert 'timeout after' in response.text
 
 
 def test_image_summary_uses_extension_content_urls():

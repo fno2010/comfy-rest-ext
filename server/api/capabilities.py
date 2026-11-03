@@ -19,6 +19,7 @@ from .accel import (
     ACCEL_DIMENSIONS,
 )
 from .catalog import get_model
+from . import provisioners
 
 routes = PromptServer.instance.routes
 
@@ -118,4 +119,5 @@ async def get_capabilities(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": f"unknown model {model_id!r}"}, status=404
         )
+    payload["provisioners"] = await provisioners.provisioner_report()
     return web.json_response(payload, headers={"Cache-Control": "no-store"})

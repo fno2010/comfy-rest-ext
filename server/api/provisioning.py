@@ -17,12 +17,14 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlsplit
 
 from aiohttp import web
 from server import PromptServer
 
 from .accel import _missing_package_groups, get_method
 from .capabilities import capability_report
+from . import provisioners
 
 routes = PromptServer.instance.routes
 logger = logging.getLogger("comfy-rest-ext.provisioning")
@@ -71,14 +73,57 @@ def _custom_nodes_dir() -> Path:
     raise ProvisionError(500, "cannot resolve ComfyUI custom_nodes directory")
 
 
+
+def git_allow_hosts() -> set:
+    raw = os.environ.get("COMFY_REST_GIT_ALLOW_HOSTS", "github.com,gitee.com")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _validate_git_repo(repo: Any) -> str:
+    if not isinstance(repo, str):
+        raise ProvisionError(400, "custom node repo must be a pinned Git URL")
+    parsed = urlsplit(repo)
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme != "https"
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or host not in git_allow_hosts()
+    ):
+        raise ProvisionError(
+            400,
+            "custom node repo must be a pinned HTTPS Git URL from an allowlisted host",
+        )
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 2:
+        raise ProvisionError(
+            400,
+            "custom node repo must include an owner and repository",
+        )
+    return repo
+
 async def _install_custom_node(spec: Dict[str, Any]) -> Dict[str, Any]:
-    repo = spec.get("repo")
+    if spec.get("manager_id"):
+        try:
+            return await provisioners.install_custom_node(spec)
+        except provisioners.BackendUnavailable as e:
+            # A spec may declare both a Manager source and a native pin.
+            # Fall back only when the declared native pin is complete.
+            if not all(spec.get(field) for field in ("repo", "commit", "target")):
+                raise ProvisionError(409, e.message, e.plan) from e
+            logger.warning(
+                "ComfyUI-Manager unavailable; using native pin for %s",
+                spec.get("target"),
+            )
+        except provisioners.BackendError as e:
+            raise ProvisionError(502, e.message, e.plan) from e
+
+    repo = _validate_git_repo(spec.get("repo"))
     commit = spec.get("commit")
     target_name = spec.get("target")
-    if not isinstance(repo, str) or not re.fullmatch(
-        r"https://github\.com/[^/]+/[^/]+(?:\.git)?", repo
-    ):
-        raise ProvisionError(400, "custom node repo must be a pinned GitHub URL")
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ProvisionError(400, "custom node commit must be a 40-character SHA")
     if not isinstance(target_name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", target_name):
@@ -101,7 +146,12 @@ async def _install_custom_node(spec: Dict[str, Any]) -> Dict[str, Any]:
                 409,
                 f"custom node target is at {current}, expected {commit}",
             )
-        return {"kind": "custom_node", "target": str(target), "skipped": True}
+        return {
+            "kind": "custom_node",
+            "backend": "native",
+            "target": str(target),
+            "skipped": True,
+        }
 
     root.mkdir(parents=True, exist_ok=True)
     cmd = ["git", "clone", "--no-checkout", repo, str(target)]
@@ -132,7 +182,12 @@ async def _install_custom_node(spec: Dict[str, Any]) -> Dict[str, Any]:
     await proc.wait()
     if proc.returncode != 0:
         raise ProvisionError(502, f"git checkout failed for {commit}")
-    return {"kind": "custom_node", "target": str(target), "commit": commit}
+    return {
+        "kind": "custom_node",
+        "backend": "native",
+        "target": str(target),
+        "commit": commit,
+    }
 
 
 async def _install_python_package(spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -243,9 +298,9 @@ async def provision_capabilities(
 
     after = _select_capabilities(ids)
     restart_required = any(
-        spec.get("requires_restart")
-        for item in installable
-        for spec in [item.get("install_spec") or {}]
+        action.get("requires_restart")
+        or (item.get("install_spec") or {}).get("requires_restart")
+        for item, action in zip(installable, actions)
     )
     result = {
         "status": "completed",
@@ -284,6 +339,15 @@ async def provision_capabilities(
                 "status": task.status,
             }
     return result
+
+
+@routes.get("/v2/extension/provisioners")
+async def get_provisioners(request: web.Request) -> web.Response:
+    """Report which install backends this process can use."""
+    return web.json_response(
+        await provisioners.provisioner_report(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @routes.post("/v2/extension/provision")
