@@ -243,6 +243,7 @@ func cmdCapabilities(c *Client, asJSON bool, args []string) int {
 	fs := newFlagSet("capabilities")
 	model := fs.String("model", "", "filter by model id")
 	capability := fs.String("capability", "", "filter by capability id")
+	includeUnavailable := fs.Bool("include-unavailable", false, "include provisioning inventory when no models are servable")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -252,6 +253,9 @@ func cmdCapabilities(c *Client, asJSON bool, args []string) int {
 	}
 	if *capability != "" {
 		q.Set("capability", *capability)
+	}
+	if *includeUnavailable {
+		q.Set("include_unavailable", "1")
 	}
 	m, err := c.getJSON("/v2/extension/capabilities", q)
 	if err != nil {

@@ -64,6 +64,8 @@ Manager 是可选依赖。缺失时 `doctor` 会显示 `manager (unavailable)`�
 
 返回 `available` / `installable` / `unsupported` 状态、缺失包/节点、安装动作，以及 `provisioners` backend 状态。
 
+没有任何可服务模型时，默认返回空 capability 列表；需要查看安装计划时使用 `?include_unavailable=1`。这用于空部署的 provisioning discovery，不会把不可运行模型加入 `/v1/models`。
+
 ### GET `/v2/extension/tasks` — dashboard 分页任务列表
 
 Dashboard 专用的统一任务列表，合并视频和图片任务，支持服务端过滤、排序和分页；默认每页 50，最大 200。
@@ -1114,7 +1116,7 @@ GET /v2/extension/acceleration/schema
 
 ### GET `/v1/models` — 列出可用模型
 
-模型列表来自 `api/catalog.py` 注册表，可在扩展加载时通过 `models.json` 覆盖或新增（见 README 的「模型配置」章节）。修改配置后需要重启 ComfyUI。
+模型列表来自 `api/catalog.py` 注册表，可在扩展加载时通过 `models.json` 覆盖或新增（见 README 的「模型配置」章节）。修改配置后需要重启 ComfyUI。只有声明的 required nodes/assets 均存在的模型才会出现在 `/v1/models`；空部署返回空列表。
 
 ```json
 {

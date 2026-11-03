@@ -194,3 +194,17 @@ async def test_empty_deployment_capabilities_are_empty(monkeypatch):
     body = json.loads(response.text)
     assert body["capabilities"] == []
     assert body["summary"] == {}
+
+
+@pytest.mark.asyncio
+async def test_empty_deployment_can_request_provisioning_inventory(monkeypatch):
+    from api import capabilities as caps
+
+    monkeypatch.setattr(caps, "available_models", lambda: ())
+    class Request:
+        query = {"include_unavailable": "1"}
+    response = await caps.get_capabilities(Request())
+    import json
+    body = json.loads(response.text)
+    assert body["capabilities"]
+    assert "summary" in body

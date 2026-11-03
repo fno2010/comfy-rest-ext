@@ -28,7 +28,12 @@ comfy-rest-ext --json models
 comfy-rest-ext --json models get "$MODEL_ID"
 comfy-rest-ext --json capabilities
 comfy-rest-ext --json capabilities --model "$MODEL_ID"
+comfy-rest-ext --json capabilities --include-unavailable
 ```
+
+If `models` is empty, use the explicit provisioning inventory before giving up:
+the server can still report installable methods with
+`include_unavailable=1` (the Go CLI exposes this as `--include-unavailable`).
 
 Model, task, node, and acceleration inventories are runtime state. Do not use a memorized list.
 

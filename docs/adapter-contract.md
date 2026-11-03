@@ -12,6 +12,7 @@ canonical fallbacks.
 | `modality`, `tasks` | Capabilities exposed by `/v1/models` |
 | `build(task)` | Build a ComfyUI API-format workflow |
 | `defaults`, `assets`, `variant` | Model defaults and checkpoint/LoRA selection |
+| `required_nodes`, `required_assets` | Availability requirements used to hide unservable models |
 | `capabilities` | Feature flags such as `reference_video` |
 | `accel_methods` | Acceleration allowlist (`"*"` or method ids) |
 | `length_for_seconds(seconds)` | Model-specific duration → frame count |
@@ -26,6 +27,9 @@ addressed with an explicit task.
 ## Registration
 
 Models are registered in `api.catalog` or supplied through `models.json`.
+A model is only listed by `/v1/models` when its required ComfyUI nodes and
+model assets are present; the full provisioning inventory remains available via
+`GET /v2/extension/capabilities?include_unavailable=1`.
 `builder` may name a built-in builder or a `module:function` descriptor; the
 descriptor receives a generic task and returns a `BuildResult`. New models do
 not require changing `api/openai/v1.py` or `api/tasks/video_task.py`.

@@ -110,6 +110,7 @@ async def get_capabilities(request: web.Request) -> web.Response:
     """Return operational capability status and provisioning actions."""
     model_id = request.query.get("model") or None
     requested = request.query.get("capability") or None
+    include_unavailable = request.query.get("include_unavailable") in ("1", "true", "yes")
     capability_ids = (
         [item for item in requested.split(",") if item] if requested else None
     )
@@ -119,7 +120,7 @@ async def get_capabilities(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": f"unknown model {model_id!r}"}, status=404
         )
-    if model_id is None and not available_models():
+    if model_id is None and not available_models() and not include_unavailable:
         payload = {"model": None, "capabilities": [], "summary": {}}
     payload["provisioners"] = await provisioners.provisioner_report()
     return web.json_response(payload, headers={"Cache-Control": "no-store"})
