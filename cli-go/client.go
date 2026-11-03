@@ -116,3 +116,15 @@ func (c *Client) getRaw(path string) ([]byte, error) {
 	data, _, err := c.request(http.MethodGet, path, nil, "", true)
 	return data, err
 }
+
+func (c *Client) deleteJSON(path string) (map[string]any, error) {
+	data, _, err := c.request(http.MethodDelete, path, nil, "", false)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("invalid JSON response: %w", err)
+	}
+	return out, nil
+}

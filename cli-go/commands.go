@@ -772,3 +772,221 @@ func printStatus(m map[string]any) {
 		fmt.Println("error:  ", v)
 	}
 }
+
+func retryVideo(c *Client, id string) (map[string]any, error) {
+	return c.postJSON("/v1/videos/"+url.PathEscape(id)+"/retry", map[string]any{})
+}
+
+func waitHealth(c *Client, sinceBoot string, timeout, interval float64) (map[string]any, error) {
+	start := time.Now()
+	for {
+		m, err := c.getJSON("/v2/extension/health", nil)
+		if err == nil {
+			if sinceBoot == "" || fmt.Sprint(m["boot_id"]) != sinceBoot {
+				return m, nil
+			}
+		}
+		if timeout > 0 && time.Since(start) >= time.Duration(timeout*float64(time.Second)) {
+			return nil, fmt.Errorf("server did not reconnect before timeout")
+		}
+		if interval > 0 {
+			time.Sleep(time.Duration(interval * float64(time.Second)))
+		}
+	}
+}
+
+func cmdProvision(c *Client, asJSON bool, args []string) int {
+	fs := newFlagSet("provision")
+	yes := fs.Bool("yes", false, "explicitly authorize installation")
+	retry := fs.String("retry-task", "", "resume blocked video task")
+	pos, err := parseArgs(fs, args, map[string]bool{"--retry-task": true})
+	if err != nil || len(pos) == 0 {
+		return 2
+	}
+	payload := map[string]any{"capabilities": pos, "authorized": *yes}
+	if *retry != "" {
+		payload["retry_task_id"] = *retry
+	}
+	m, err := c.postJSON("/v2/extension/provision", payload)
+	if err != nil {
+		return fail(err, asJSON, 1)
+	}
+	if asJSON {
+		return emitJSON(m)
+	}
+	fmt.Println("status:", m["status"])
+	if actions, ok := m["actions"].([]any); ok {
+		for _, action := range actions {
+			fmt.Println("installed:", action)
+		}
+	}
+	if v, ok := m["restart_required"]; ok && v == true {
+		fmt.Println("restart required")
+	}
+	return 0
+}
+
+func cmdRestart(c *Client, asJSON bool, args []string) int {
+	fs := newFlagSet("restart")
+	yes := fs.Bool("yes", false, "explicitly authorize restart")
+	retry := fs.String("retry-task", "", "blocked video task to retry")
+	reason := fs.String("reason", "", "restart reason")
+	timeout := fs.Float64("timeout", 300, "reconnect timeout")
+	interval := fs.Float64("interval", 5, "poll interval")
+	if _, err := parseArgs(fs, args, map[string]bool{
+		"--retry-task": true, "--reason": true, "--timeout": true, "--interval": true,
+	}); err != nil {
+		return 2
+	}
+	payload := map[string]any{"authorized": *yes, "confirm": "restart"}
+	if *retry != "" {
+		payload["retry_task_id"] = *retry
+	}
+	if *reason != "" {
+		payload["reason"] = *reason
+	}
+	m, err := c.postJSON("/v2/extension/restart", payload)
+	if err != nil {
+		return fail(err, asJSON, 1)
+	}
+	oldBoot := fmt.Sprint(m["boot_id"])
+	if oldBoot == "" || oldBoot == "<nil>" {
+		return fail(fmt.Errorf("restart response did not include a boot_id"), asJSON, 1)
+	}
+	if _, err := waitHealth(c, oldBoot, *timeout, *interval); err != nil {
+		return fail(err, asJSON, 5)
+	}
+	if *retry != "" {
+		task, err := retryVideo(c, *retry)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(task)
+		}
+		printStatus(task)
+		return 0
+	}
+	if asJSON {
+		return emitJSON(map[string]any{"status": "restarted", "backend": m["backend"]})
+	}
+	fmt.Println("restarted via", m["backend"])
+	return 0
+}
+
+func cmdWaitReconnect(c *Client, asJSON bool, args []string) int {
+	fs := newFlagSet("wait-reconnect")
+	retry := fs.String("retry-task", "", "blocked video task to retry")
+	since := fs.String("since-boot", "", "require a different boot_id")
+	timeout := fs.Float64("timeout", 300, "reconnect timeout")
+	interval := fs.Float64("interval", 5, "poll interval")
+	if _, err := parseArgs(fs, args, map[string]bool{
+		"--retry-task": true, "--since-boot": true, "--timeout": true, "--interval": true,
+	}); err != nil {
+		return 2
+	}
+	if _, err := waitHealth(c, *since, *timeout, *interval); err != nil {
+		return fail(err, asJSON, 5)
+	}
+	if *retry != "" {
+		task, err := retryVideo(c, *retry)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(task)
+		}
+		printStatus(task)
+		return 0
+	}
+	if asJSON {
+		return emitJSON(map[string]any{"status": "connected"})
+	}
+	fmt.Println("connected")
+	return 0
+}
+
+func cmdDownloads(c *Client, asJSON bool, args []string) int {
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list":
+		fs := newFlagSet("downloads list")
+		status := fs.String("status", "all", "status filter")
+		if _, err := parseArgs(fs, args[1:], map[string]bool{"--status": true}); err != nil {
+			return 2
+		}
+		q := url.Values{"status": []string{*status}}
+		m, err := c.getJSON("/v2/extension/model/download", q)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		if tasks, ok := m["tasks"].([]any); ok {
+			for _, item := range tasks {
+				task, _ := item.(map[string]any)
+				fmt.Printf("%-40v %-12v %v\n", task["task_id"], task["status"], task["url"])
+			}
+		}
+		return 0
+	case "create":
+		fs := newFlagSet("downloads create")
+		folder := fs.String("folder", "", "target folder")
+		filename := fs.String("filename", "", "output filename")
+		pos, err := parseArgs(fs, args[1:], map[string]bool{"--folder": true, "--filename": true})
+		if err != nil || len(pos) != 1 {
+			return 2
+		}
+		payload := map[string]any{"url": pos[0]}
+		if *folder != "" {
+			payload["folder"] = *folder
+		}
+		if *filename != "" {
+			payload["filename"] = *filename
+		}
+		m, err := c.postJSON("/v2/extension/model/download", payload)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Printf("download task %v queued\n", m["task_id"])
+		return 0
+	case "status":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: downloads status ID"), asJSON, 2)
+		}
+		m, err := c.getJSON("/v2/extension/model/download/"+url.PathEscape(args[1]), nil)
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		for _, k := range []string{"task_id", "status", "progress", "url", "local_path", "error"} {
+			if v, ok := m[k]; ok && v != nil {
+				fmt.Printf("%-12s %v\n", k, v)
+			}
+		}
+		return 0
+	case "cancel":
+		if len(args) != 2 {
+			return fail(fmt.Errorf("usage: downloads cancel ID"), asJSON, 2)
+		}
+		m, err := c.deleteJSON("/v2/extension/model/download/" + url.PathEscape(args[1]))
+		if err != nil {
+			return fail(err, asJSON, 1)
+		}
+		if asJSON {
+			return emitJSON(m)
+		}
+		fmt.Println("cancelled:", m["task_id"])
+		return 0
+	default:
+		return fail(fmt.Errorf("unknown downloads command: %s", args[0]), asJSON, 2)
+	}
+}

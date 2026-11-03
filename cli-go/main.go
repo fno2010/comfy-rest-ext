@@ -55,6 +55,14 @@ func run(args []string) int {
 		return cmdCapabilities(client, g.JSON, rest[1:])
 	case "doctor":
 		return cmdDoctor(client, g.JSON)
+	case "provision":
+		return cmdProvision(client, g.JSON, rest[1:])
+	case "restart":
+		return cmdRestart(client, g.JSON, rest[1:])
+	case "wait-reconnect":
+		return cmdWaitReconnect(client, g.JSON, rest[1:])
+	case "downloads":
+		return cmdDownloads(client, g.JSON, rest[1:])
 	case "models":
 		return cmdModels(client, g.JSON, rest[1:])
 	case "videos":
@@ -133,6 +141,10 @@ Commands:
   health
   capabilities [--model ID] [--capability ID]
   doctor
+  provision CAPABILITY... [--yes] [--retry-task ID]
+  restart [--yes] [--retry-task ID] [--reason TEXT]
+  wait-reconnect [--since-boot ID] [--retry-task ID]
+  downloads [list|create URL|status ID|cancel ID]
   models [list|get ID]
   videos [generate PROMPT|list|status ID|wait ID|content ID|retry ID]
   images [generate PROMPT|edit PROMPT|list|status ID|content ID]
