@@ -15,8 +15,10 @@ import time
 from typing import Any, Dict, Optional, Sequence
 
 from .client import ApiError, ComfyRestClient
+from .exit_codes import EXIT_FAILURE, exit_code_for
 
 POLL_INTERVAL = 5.0
+OUTPUT_JSON = False
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -37,9 +39,20 @@ def _emit(data: Any, as_json: bool) -> int:
     return 0
 
 
-def _emit_error(message: str) -> int:
-    print(f"error: {message}", file=sys.stderr)
-    return 1
+def _emit_error(message: str, status: Optional[int] = None) -> int:
+    if status is None:
+        current = sys.exc_info()[1]
+        if isinstance(current, ApiError):
+            status = current.status
+    code = exit_code_for(status) if status is not None else EXIT_FAILURE
+    if OUTPUT_JSON:
+        print(json.dumps({
+            "ok": False,
+            "error": {"code": "cli_error", "message": message, "exit_code": code},
+        }, ensure_ascii=False), file=sys.stderr)
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return code
 
 
 def cmd_models(client: ComfyRestClient, args: Any) -> int:

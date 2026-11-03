@@ -1,0 +1,47 @@
+name: CLI standalone artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: linux-x86_64
+          - os: macos-14
+            artifact: macos-arm64
+          - os: windows-2022
+            artifact: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build onefile CLI
+        shell: bash
+        run: bash cli/build-standalone.sh
+      - name: Checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd cli/dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum comfy-rest-ext* > SHA256SUMS
+          else
+            shasum -a 256 comfy-rest-ext* > SHA256SUMS
+          fi
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comfy-rest-ext-${{ matrix.artifact }}
+          path: |
+            cli/dist/comfy-rest-ext*
+            cli/dist/SHA256SUMS

@@ -42,6 +42,7 @@ uv tool install /path/to/comfy-rest-ext/cli
 `uvx` 适合临时运行，`uv tool install` / `pipx` 适合持久安装。静态单文件是面向无 Python agent sandbox 的主路径。
 
 单文件构建使用 Python 3.10 的 PyInstaller 运行时以降低 glibc 要求；发布时应在目标 OS/arch 上分别构建（Linux/macOS/Windows），不要把开发机的 Linux 二进制当作跨平台产物。
+CI 矩阵见 `.github/workflows/cli-artifacts.yml`，产物附带 `SHA256SUMS`。
 
 默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
 
@@ -265,6 +266,15 @@ COMFY_REST_EXT_API_KEY
 COMFY_REST_EXT_TIMEOUT
 COMFY_REST_EXT_DEFAULT_MODEL
 ```
+
+Agent 调用约定：
+
+- 默认非交互；写操作需要显式 `--yes`
+- 成功输出保持原始 JSON（`--json`），失败在 stderr 输出：
+  ```json
+  {"ok": false, "error": {"code": "api_error", "status": 409, "message": "...", "exit_code": 6}}
+  ```
+- 退出码：`0` 成功，`1` 操作失败，`2` 参数/配置，`3` 认证/权限，`4` 未找到，`5` 网络/瞬时失败，`6` 冲突/需要恢复。
 
 # 指向非默认 ComfyUI 地址
 comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models

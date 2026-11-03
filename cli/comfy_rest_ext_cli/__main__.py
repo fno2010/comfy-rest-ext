@@ -11,6 +11,7 @@ nodes, pr-cache, health. Legacy flat commands remain as aliases.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -18,6 +19,28 @@ from typing import Any, Optional
 
 from .client import ApiError, ComfyRestClient
 from . import commands
+from .exit_codes import exit_code_for
+
+
+def _exit_code(status: int) -> int:
+    return exit_code_for(status)
+
+
+def _print_api_error(error: ApiError, as_json: bool) -> int:
+    code = _exit_code(error.status)
+    if as_json:
+        print(json.dumps({
+            "ok": False,
+            "error": {
+                "code": "api_error",
+                "status": error.status,
+                "message": error.message,
+                "exit_code": code,
+            },
+        }, ensure_ascii=False), file=sys.stderr)
+    else:
+        print(f"error: {error}", file=sys.stderr)
+    return code
 
 
 def _add_generate_args(parser: argparse.ArgumentParser) -> None:
@@ -420,12 +443,14 @@ def main(argv: Any = None) -> int:
         return 2
     args = parser.parse_args(parsed_argv)
 
+    commands.OUTPUT_JSON = bool(args.json)
     if args.command == "config":
         try:
             return args.func(None, args)
         except ApiError as e:
-            print(f"error: {e}", file=sys.stderr)
-            return e.status or 1
+            return _print_api_error(e, bool(args.json))
+        finally:
+            commands.OUTPUT_JSON = False
 
     try:
         data = config.load_config()
@@ -450,10 +475,11 @@ def main(argv: Any = None) -> int:
     try:
         return args.func(client, args)
     except ApiError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return e.status or 1
+        return _print_api_error(e, bool(args.json))
     except KeyboardInterrupt:
         return 130
+    finally:
+        commands.OUTPUT_JSON = False
 
 
 if __name__ == "__main__":

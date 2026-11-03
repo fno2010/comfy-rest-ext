@@ -99,3 +99,19 @@ def test_invalid_config_returns_error(isolated_config, capsys):
     path.write_text("[profiles.dev]\nunknown = true\n", encoding="utf-8")
     assert main(["config", "list"]) == 2
     assert "unknown profile key" in capsys.readouterr().err
+
+
+def test_exit_code_mapping_and_json_error(capsys):
+    from comfy_rest_ext_cli.__main__ import _exit_code, _print_api_error
+    from comfy_rest_ext_cli.client import ApiError
+    import json
+    assert _exit_code(0) == 5
+    assert _exit_code(400) == 2
+    assert _exit_code(401) == 3
+    assert _exit_code(404) == 4
+    assert _exit_code(409) == 6
+    assert _exit_code(500) == 5
+    assert _print_api_error(ApiError(409, "conflict"), True) == 6
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["ok"] is False
+    assert payload["error"]["exit_code"] == 6

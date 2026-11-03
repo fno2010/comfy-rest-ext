@@ -135,7 +135,7 @@ def test_cmd_status_json(capsys):
 def test_cmd_status_missing(capsys):
     client = FakeClient()
     args = Args(json=False, video_id="nope")
-    assert commands.cmd_status(client, args) == 1
+    assert commands.cmd_status(client, args) == 4
     assert "404" in capsys.readouterr().err
 
 
@@ -231,7 +231,7 @@ def test_cmd_image_status_missing(capsys):
     client = FakeClient()
     assert commands.cmd_image_status(
         client, Args(json=True, image_id="image_missing")
-    ) == 1
+    ) == 4
 
 
 def test_cmd_wait_completed(monkeypatch, capsys):
