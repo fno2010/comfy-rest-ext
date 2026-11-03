@@ -10,7 +10,7 @@ Next milestone: **[v0.8.0 — deployment-agnostic server + agent harness](https:
 - [x] #49 capability provisioning
 - [x] #50 standalone CLI distribution
 - [ ] #51 agent skill / harness
-- [ ] #52 clean-environment acceptance
+- [x] #52 clean-environment acceptance
 
 
 ## Product shape
