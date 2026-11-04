@@ -164,6 +164,10 @@ async def test_manager_v2_prefix_detection(manager_server):
 
 @pytest.mark.asyncio
 async def test_manager_install_rejects_unpinned_version(manager_server):
+    async def available():
+        return {"id": "manager", "available": True, "prefix": "/manager"}
+
+    manager_server.setattr(provisioners, "manager_status", available)
     with pytest.raises(provisioners.BackendError, match="pin"):
         await provisioners.install_custom_node({
             "kind": "custom_node",
