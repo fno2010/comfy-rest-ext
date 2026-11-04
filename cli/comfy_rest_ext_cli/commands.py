@@ -286,6 +286,12 @@ def _build_video_payload(args: Any, schema: Optional[Dict[str, Any]] = None) -> 
         payload["seconds"] = args.seconds
     if args.seed is not None:
         payload["seed"] = args.seed
+    video_format = getattr(args, "format", None)
+    if video_format:
+        payload["format"] = video_format
+    video_codec = getattr(args, "codec", None)
+    if video_codec:
+        payload["codec"] = video_codec
 
     # Speed: legacy string XOR composable per-layer options. Passing both
     # is ambiguous — fail loudly instead of silently preferring one.
@@ -691,7 +697,18 @@ def _save_bytes(data: Any, out: str, announce: bool = True) -> int:
 
 
 def cmd_video_content(client: ComfyRestClient, args: Any) -> int:
-    out = args.out or f"{args.video_id}.mp4"
+    out = args.out
+    if not out:
+        ext = ".mp4"
+        try:
+            task = client.get_video(args.video_id)
+            ext = {
+                "video/webm": ".webm",
+                "video/x-matroska": ".mkv",
+            }.get(task.get("media_type"), ext)
+        except ApiError:
+            pass
+        out = f"{args.video_id}{ext}"
     try:
         data = client.get_video_content(args.video_id)
         if args.json:

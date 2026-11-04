@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go CLI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli-go/go.mod
+          cache: false
+      - name: Check version consistency
+        run: ./scripts/check-version.sh
+      - name: Bootstrap contract
+        run: ./scripts/test-bootstrap-cli.sh
+      - name: Test and vet
+        working-directory: cli-go
+        run: |
+          set -euo pipefail
+          go test ./...
+          go vet ./...
+      - name: Build native binary
+        working-directory: cli-go
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < ../VERSION)"
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${version}" -o dist/comfy-rest-ext .
+          test "$(./dist/comfy-rest-ext --version)" = "$version"
+          ./dist/comfy-rest-ext --help >/dev/null
+      - name: Cross-build release targets
+        working-directory: cli-go
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < ../VERSION)"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            name="comfy-rest-ext-${goos}-${goarch}"
+            [ "$goos" = windows ] && name="${name}.exe"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath -ldflags "-s -w -X main.version=${version}" \
+              -o "dist/${name}" .
+          done
+          ls -lh dist
+
+  python:
+    name: Server and Python CLI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e server -e 'cli[dev]' Pillow
+      - name: Server tests
+        working-directory: server
+        run: python -m pytest -q
+      - name: Python CLI tests
+        run: python -m pytest cli/tests -q
+
+  package:
+    name: Release package dry run
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Package server and skill
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF_NAME//\//-}"
+          mkdir -p release
+          tar -czf "release/comfy-rest-ext-server-${ref}.tar.gz" server
+          (cd skills && zip -qr "../release/comfy-rest-ext-skill-${ref}.zip" comfy-rest-ext)
+          (cd release && sha256sum * > SHA256SUMS)
+          tar -tzf "release/comfy-rest-ext-server-${ref}.tar.gz" > /tmp/server-files.txt
+          unzip -l "release/comfy-rest-ext-skill-${ref}.zip" > /tmp/skill-files.txt
+          grep -q '^server/api/' /tmp/server-files.txt
+          grep -q 'comfy-rest-ext/cli-version' /tmp/skill-files.txt
+          grep -q 'comfy-rest-ext/scripts/bootstrap-cli.sh' /tmp/skill-files.txt
+          cat release/SHA256SUMS

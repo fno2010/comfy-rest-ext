@@ -2,13 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 )
 
-const version = "0.8.0"
+var version = "0.9.0"
 
 type Globals struct {
 	BaseURL string
@@ -30,138 +29,22 @@ func main() {
 }
 
 func run(args []string) int {
-	g, rest, err := parseGlobals(args)
+	root := newRootCmd()
+	root.SetArgs(args)
+	executed, err := root.ExecuteC()
 	if err != nil {
-		return fail(err, g.JSON, 2)
-	}
-	if len(rest) == 0 || rest[0] == "help" || rest[0] == "-h" || rest[0] == "--help" {
-		usage()
-		return 0
-	}
-	cfg, err := loadConfig()
-	if err != nil {
-		return fail(err, g.JSON, 2)
-	}
-	cmd := rest[0]
-	if cmd == "config" {
-		return runConfig(&cfg, g, rest[1:])
-	}
-	r := resolveProfile(cfg, g)
-	client := NewClient(r)
-	switch cmd {
-	case "health":
-		return cmdHealth(client, g.JSON)
-	case "capabilities":
-		return cmdCapabilities(client, g.JSON, rest[1:])
-	case "doctor":
-		return cmdDoctor(client, g.JSON)
-	case "provision":
-		return cmdProvision(client, g.JSON, rest[1:])
-	case "restart":
-		return cmdRestart(client, g.JSON, rest[1:])
-	case "wait-reconnect":
-		return cmdWaitReconnect(client, g.JSON, rest[1:])
-	case "downloads":
-		return cmdDownloads(client, g.JSON, rest[1:])
-	case "models":
-		return cmdModels(client, g.JSON, rest[1:])
-	case "deps":
-		return cmdDeps(client, g.JSON, rest[1:])
-	case "snapshot":
-		return cmdSnapshot(client, g.JSON, rest[1:])
-	case "nodes":
-		return cmdNodes(client, g.JSON, rest[1:])
-	case "pr-cache":
-		return cmdPRCache(client, g.JSON, rest[1:])
-	case "videos":
-		return cmdVideos(client, g.JSON, rest[1:], r.DefaultModel)
-	case "images":
-		return cmdImages(client, g.JSON, rest[1:], r.DefaultModel)
-	case "version", "--version":
-		if g.JSON {
-			return emitJSON(map[string]any{"version": version})
+		var exit commandExit
+		if errors.As(err, &exit) {
+			return exit.code
 		}
-		fmt.Println(version)
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
-		usage()
+		fmt.Fprintln(os.Stderr, "error:", err)
+		if executed != nil {
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprint(os.Stderr, executed.UsageString())
+		}
 		return 2
 	}
-}
-
-func parseGlobals(args []string) (Globals, []string, error) {
-	var g Globals
-	i := 0
-	for i < len(args) {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") || a == "-" {
-			break
-		}
-		next := func(name string) (string, error) {
-			if i+1 >= len(args) {
-				return "", fmt.Errorf("%s requires a value", name)
-			}
-			i++
-			return args[i], nil
-		}
-		var err error
-		switch {
-		case a == "--json":
-			g.JSON = true
-		case a == "--base-url":
-			g.BaseURL, err = next(a)
-		case strings.HasPrefix(a, "--base-url="):
-			g.BaseURL = strings.TrimPrefix(a, "--base-url=")
-		case a == "--profile":
-			g.Profile, err = next(a)
-		case strings.HasPrefix(a, "--profile="):
-			g.Profile = strings.TrimPrefix(a, "--profile=")
-		case a == "--api-key":
-			g.APIKey, err = next(a)
-		case strings.HasPrefix(a, "--api-key="):
-			g.APIKey = strings.TrimPrefix(a, "--api-key=")
-		case a == "--timeout":
-			var v string
-			v, err = next(a)
-			if err == nil {
-				g.Timeout, err = strconv.ParseFloat(v, 64)
-			}
-		case strings.HasPrefix(a, "--timeout="):
-			g.Timeout, err = strconv.ParseFloat(strings.TrimPrefix(a, "--timeout="), 64)
-		case a == "--version":
-			return g, []string{"version"}, nil
-		default:
-			return g, args[i:], nil
-		}
-		if err != nil {
-			return g, nil, err
-		}
-		i++
-	}
-	return g, args[i:], nil
-}
-
-func usage() {
-	fmt.Println(`Usage: comfy-rest-ext [--base-url URL] [--profile NAME] [--api-key KEY] [--timeout SEC] [--json] <command>
-
-Commands:
-  health
-  capabilities [--model ID] [--capability ID]
-  doctor
-  provision CAPABILITY... [--yes] [--retry-task ID]
-  restart [--yes] [--retry-task ID] [--reason TEXT]
-  wait-reconnect [--since-boot ID] [--retry-task ID]
-  downloads [list|create URL|status ID|cancel ID]
-  models [list|get ID|all|info PATH|delete PATH]
-  videos [generate PROMPT|list|status ID|wait ID|content ID|retry ID|delete ID]
-  images [generate PROMPT|edit PROMPT|list|status ID|content ID]
-  deps [check-workflow|install|status|check-node|restore]
-  snapshot [export|import|diff|list]
-  nodes [list|pack|validate|init]
-  pr-cache [list|size|delete|clear]
-  config [list|use NAME|set NAME KEY VALUE|get NAME [KEY]|path]
-  version`)
+	return 0
 }
 
 func emitJSON(v any) int {

@@ -11,6 +11,7 @@ nodes, pr-cache, health. Legacy flat commands remain as aliases.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import os
 import re
@@ -55,6 +56,10 @@ def _add_generate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--height", type=int, help="frame height (default 768)")
     parser.add_argument("--seconds", type=float, help="video length in seconds")
     parser.add_argument("--seed", type=int, help="generation seed")
+    parser.add_argument("--format", choices=["auto", "mp4", "mkv", "webm"],
+                        default="auto", help="video container (default auto)")
+    parser.add_argument("--codec", choices=["auto", "h264", "av1"],
+                        default="auto", help="video codec (default auto)")
     parser.add_argument("--speed", choices=["auto", "none", "te-speed", "sol-stack"],
                         help="acceleration mode (legacy; default auto)")
     parser.add_argument("--steps", type=int, help="sampling steps")
@@ -124,11 +129,19 @@ def _add_download_create_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--filename", help="override output filename")
 
 
+def _package_version() -> str:
+    try:
+        return importlib.metadata.version("comfy-rest-ext-cli")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=os.path.basename(sys.argv[0]) or "comfy-rest-ext",
         description="Command-line client for comfy-rest-ext.",
     )
+    parser.add_argument("--version", action="version", version=_package_version())
     parser.add_argument("--base-url", default=None,
                         help="ComfyUI base URL (overrides profile)")
     parser.add_argument("--profile", default=None,
@@ -229,7 +242,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=commands.cmd_wait)
     sp = videos_sub.add_parser("content", help="download a completed video")
     sp.add_argument("video_id")
-    sp.add_argument("--out", help="output path (default <video_id>.mp4)")
+    sp.add_argument("--out", help="output path (suffix derived from task media type by default)")
     sp.set_defaults(func=commands.cmd_video_content)
     sp = videos_sub.add_parser("delete", help="delete a video task record")
     sp.add_argument("video_id")

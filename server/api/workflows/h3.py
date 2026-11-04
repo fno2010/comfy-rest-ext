@@ -104,6 +104,8 @@ def build_h3_workflow(
     ref_image_size: str = "match",
     turbo_lora: Optional[str] = None,
     filename_prefix: str = "video/comfy-rest-ext",
+    format: str = "auto",
+    codec: str = "auto",
 ) -> Dict[str, Any]:
     """Build the API-format workflow for MiniMax-H3 T2V/I2V/R2V."""
     if accel is None:
@@ -236,8 +238,8 @@ def build_h3_workflow(
     add(str(nid), "SaveVideo", {
         "video": [create_video_id, 0],
         "filename_prefix": filename_prefix,
-        "format": "auto",
-        "codec": "auto",
+        "format": format,
+        "codec": codec,
     })
 
     return workflow
@@ -345,6 +347,12 @@ def build_h3_task(task: Any) -> BuildResult:
     )
     shift_video = turbo_params.get("shift_video", 12.0)
     shift_audio = turbo_params.get("shift_audio", 3.0)
+    video_format = str(params.get("format") or "auto")
+    if video_format not in ("auto", "mp4", "mkv", "webm"):
+        raise ValueError(f"unsupported video format: {video_format}")
+    video_codec = str(params.get("codec") or "auto")
+    if video_codec not in ("auto", "h264", "av1"):
+        raise ValueError(f"unsupported video codec: {video_codec}")
 
     workflow = build_h3_workflow(
         prompt=task.prompt,
@@ -368,6 +376,8 @@ def build_h3_task(task: Any) -> BuildResult:
         ref_image_size=ref_image_size,
         turbo_lora=turbo_lora,
         filename_prefix=prefix,
+        format=video_format,
+        codec=video_codec,
     )
 
     task.acceleration = {

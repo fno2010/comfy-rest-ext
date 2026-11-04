@@ -298,3 +298,41 @@ func sortedKeys(m map[string]Profile) []string {
 	}
 	return keys
 }
+
+func redactedConfig(cfg Config) map[string]any {
+	out := map[string]any{"default_profile": cfg.DefaultProfile, "profiles": map[string]any{}}
+	for name, p := range cfg.Profiles {
+		out["profiles"].(map[string]any)[name] = profileMap(Profile{
+			BaseURL: p.BaseURL, APIKey: redact(p.APIKey), Timeout: p.Timeout,
+			DefaultModel: p.DefaultModel,
+		})
+	}
+	return out
+}
+
+func profileMap(p Profile) map[string]any {
+	m := map[string]any{}
+	if p.APIKey != "" {
+		m["api_key"] = redact(p.APIKey)
+	}
+	if p.BaseURL != "" {
+		m["base_url"] = p.BaseURL
+	}
+	if p.DefaultModel != "" {
+		m["default_model"] = p.DefaultModel
+	}
+	if p.Timeout != 0 {
+		m["timeout"] = p.Timeout
+	}
+	return m
+}
+
+func redact(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) <= 8 {
+		return "***"
+	}
+	return s[:4] + "***" + s[len(s)-4:]
+}

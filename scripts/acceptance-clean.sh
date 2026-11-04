@@ -13,9 +13,16 @@ SKILL_SOURCE="${SKILL_SOURCE:-fno2010/comfy-rest-ext}"
 WORK="${ACCEPTANCE_WORK:-$(mktemp -d /tmp/comfy-rest-ext-accept.XXXXXX)}"
 mkdir -p "$WORK"
 
+root="$(cd "$(dirname "$0")/.." && pwd)"
 echo "workdir: $WORK"
 echo "cli:     $CLI"
-"$CLI" --version
+actual_version="$("$CLI" --version)"
+expected_version="$(tr -d '[:space:]' < "$root/VERSION")"
+echo "version: $actual_version (expected $expected_version)"
+if [ "$actual_version" != "$expected_version" ]; then
+  echo "error: CLI version does not match VERSION/skill pin" >&2
+  exit 1
+fi
 if [ "$(uname -s)" = Linux ]; then
   ldd_out="$(ldd "$CLI" 2>&1 || true)"
   if printf '%s\n' "$ldd_out" | grep -q 'not a dynamic executable'; then

@@ -2,6 +2,30 @@
 
 The CLI is a remote HTTP client. Never require the agent to run on the ComfyUI machine.
 
+## Help and defaults
+
+Run `comfy-rest-ext <command> --help` for every command and subcommand. Help renders
+each optional flag with its type, default value or `omitted:` behavior, and marks
+required flags. Prefer consulting it over inferring request defaults.
+
+## Client version
+
+The skill pins the CLI in `../cli-version`. Examples below use `comfy-rest-ext`
+for brevity; resolve the executable first and use `"$CLI"` if it differs from
+`PATH`.
+
+Resolve it with:
+
+```bash
+CLI="$(./scripts/bootstrap-cli.sh)"
+"$CLI" --version
+"$CLI" --help
+```
+
+`./scripts/bootstrap-cli.sh --check` reports the required version and the
+`COMFY_REST_EXT_CLI`, `PATH`, and cache candidates without downloading.
+`--refresh` only repairs the pinned installation.
+
 ## Profiles
 
 Config path: `${XDG_CONFIG_HOME:-$HOME/.config}/comfy-rest-ext/config.toml`.
@@ -47,10 +71,16 @@ comfy-rest-ext --json images status TASK_ID
 comfy-rest-ext --json images content TASK_ID --index 0 --out FILE
 ```
 
+`--out` names the first image. With `--n > 1`, later images are written as
+`name_2.ext`, `name_3.ext`, ...; the first keeps the exact path. Image output
+is PNG today; the `--out` extension does not transcode. There is no image
+`--format` flag.
+
 ## Videos
 
 ```bash
 comfy-rest-ext --json videos generate PROMPT --model MODEL --seconds N
+comfy-rest-ext --json videos generate PROMPT --model MODEL --seconds N --format webm
 comfy-rest-ext --json videos generate PROMPT --model MODEL --image FILE
 comfy-rest-ext --json videos generate PROMPT --model MODEL \
   --image REF1.png --image REF2.png --video MOTION.mp4
@@ -63,6 +93,13 @@ comfy-rest-ext --json videos delete TASK_ID
 
 A single image is sent as a first-frame input. Multiple images or any video
 are sent as reference inputs; discovery decides whether the model accepts them.
+
+`--format` accepts `auto` (default), `mp4`, `mkv`, or `webm`; `--codec` accepts
+`auto` (default), `h264`, or `av1`. These map to ComfyUI `SaveVideo`; WebP is
+not a supported video container. `videos generate` has no `--out` because it
+returns an async task; download with `videos content --out`. When `--out` is
+omitted, `videos content` derives `.webm`/`.mkv` from the task media type and
+otherwise uses `.mp4`.
 
 ## Provisioning
 
