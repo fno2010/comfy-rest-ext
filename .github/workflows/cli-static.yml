@@ -27,6 +27,10 @@ jobs:
         with:
           go-version-file: cli-go/go.mod
           cache: false
+      - name: Check version consistency
+        run: ./scripts/check-version.sh
+      - name: Test bootstrap contract
+        run: ./scripts/test-bootstrap-cli.sh
       - name: Test
         working-directory: cli-go
         run: go test ./...
@@ -38,10 +42,11 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
+          version="$(tr -d '[:space:]' < ../VERSION)"
           mkdir -p dist
           name="comfy-rest-ext-${GOOS}-${GOARCH}"
           [ "$GOOS" = windows ] && name="${name}.exe"
-          go build -trimpath -ldflags='-s -w' -o "dist/$name" .
+          go build -trimpath -ldflags "-s -w -X main.version=${version}" -o "dist/$name" .
           file "dist/$name" || true
       - name: Checksum
         working-directory: cli-go/dist

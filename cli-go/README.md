@@ -3,7 +3,8 @@
 HTTP-only, statically linked CLI for `comfy-rest-ext`.
 
 ```bash
-./build.sh
+./build.sh                 # injects ../VERSION into main.version
+./dist/comfy-rest-ext --version
 ./dist/comfy-rest-ext --help
 ldd ./dist/comfy-rest-ext   # "not a dynamic executable"
 ```

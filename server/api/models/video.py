@@ -118,7 +118,7 @@ async def create_video_task(request: web.Request) -> web.Response:
         seed=req.seed,
         model_id=spec.id,
         modality="video",
-        params={"duration": req.duration},
+        params={"duration": req.duration, "format": req.format, "codec": req.codec},
         first_frame=first_frame,
         ref_images=req.ref_images,
         speed=req.speed,

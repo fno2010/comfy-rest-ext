@@ -900,7 +900,9 @@ ws.addEventListener('message', (event) => {
   "height": 768,
   "duration": 5.0,
   "seed": 42,
-  "first_frame": "data:image/png;base64,..."
+  "first_frame": "data:image/png;base64,...",
+  "format": "mp4",
+  "codec": "auto"
 }
 ```
 
@@ -913,6 +915,8 @@ ws.addEventListener('message', (event) => {
 | `duration` | float | 否 | 时长秒数（默认 5.0，自动对齐 H3 17k+5 帧网格） |
 | `seed` | int | 否 | 随机种子（默认 0） |
 | `first_frame` | string | 否 | I2V 首帧：ComfyUI input 文件名或 data URL |
+| `format` | string | 否 | 容器：`auto`（默认）/`mp4`/`mkv`/`webm` |
+| `codec` | string | 否 | 编码：`auto`（默认）/`h264`/`av1` |
 
 **响应：**
 ```json
@@ -1139,9 +1143,16 @@ GET /v2/extension/acceleration/schema
   "prompt": "A red cube rolling across a white floor",
   "seconds": "4",
   "size": "1344x768",
-  "seed": 42
+  "seed": 42,
+  "format": "mp4",
+  "codec": "auto"
 }
 ```
+
+扩展输出字段：`format` 为 `auto`（默认）、`mp4`、`mkv`、`webm`；`codec` 为
+`auto`（默认）、`h264`、`av1`。它们映射到 ComfyUI `SaveVideo` 的
+`format`/`codec`。WebP 不是视频容器。`auto` + `av1` 由 `SaveVideo` 输出
+WebM，任务的 `media_type` 会报告 `video/webm`。
 
 **model 字段语义：**
 - 默认/`minimax-h3`：任务类型**从请求内容自动推断**（任意视频参考或多图→R2V、单图→I2V、无图→T2V）
@@ -1307,9 +1318,10 @@ curl -X POST http://host:8188/v1/videos \
 
 `status`: `queued` | `in_progress` | `completed` | `failed`；`progress`: 0-100
 
-### GET `/v1/videos/{video_id}/content` — 下载生成的 MP4
+### GET `/v1/videos/{video_id}/content` — 下载生成的视频
 
-返回 `video/mp4` 二进制流。
+返回对应容器的二进制流；`media_type` 按 `format`/`codec` 为 `video/mp4`、
+`video/webm` 或 `video/x-matroska`。
 
 ### GET `/v1/videos` — 列出视频任务
 

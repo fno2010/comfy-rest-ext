@@ -108,6 +108,17 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _video_media_type(task: VideoTask) -> str:
+    params = task.params or {}
+    video_format = params.get("format") or "auto"
+    if video_format == "auto" and params.get("codec") == "av1":
+        return "video/webm"
+    return {
+        "webm": "video/webm",
+        "mkv": "video/x-matroska",
+    }.get(video_format, task.output_mime or "video/mp4")
+
+
 def _video_response(task: VideoTask) -> dict:
     """OpenAI VideoResource-shaped job record."""
     status = task.status
@@ -151,7 +162,7 @@ def _video_response(task: VideoTask) -> dict:
         "seconds": str(task.length / 24),
         "created_at": int(task.created_at),
         "completed_at": int(task.completed_at) if task.completed_at else None,
-        "media_type": task.output_mime or "video/mp4",
+        "media_type": _video_media_type(task),
         "file_name": task.output_path,
         "reference_images": list(task.ref_images or []),
         "reference_videos": list(task.ref_videos or []),
@@ -297,6 +308,16 @@ async def create_video(request: web.Request) -> web.Response:
     height = _parse_int(fields.get("height"), int(spec.defaults.get("height", 768)))
     seconds = _parse_float(fields.get("seconds"), float(spec.defaults.get("seconds", 5.0)))
     seed = _parse_int(fields.get("seed"), int(spec.defaults.get("seed", 0)))
+    video_format = str(fields.get("format") or "auto").lower()
+    if video_format not in ("auto", "mp4", "mkv", "webm"):
+        return web.json_response(
+            {"error": "video format must be auto, mp4, mkv, or webm"}, status=400
+        )
+    video_codec = str(fields.get("codec") or "auto").lower()
+    if video_codec not in ("auto", "h264", "av1"):
+        return web.json_response(
+            {"error": "video codec must be auto, h264, or av1"}, status=400
+        )
 
     first_frame = None
     last_frame = None
@@ -375,7 +396,7 @@ async def create_video(request: web.Request) -> web.Response:
         seed=seed,
         model_id=spec.id,
         modality="video",
-        params={"seconds": seconds},
+        params={"seconds": seconds, "format": video_format, "codec": video_codec},
         first_frame=first_frame,
         last_frame=last_frame,
         ref_images=ref_images,
@@ -719,7 +740,7 @@ async def list_videos(request: web.Request) -> web.Response:
 
 @routes.get("/v1/videos/{video_id}/content")
 async def download_video_content(request: web.Request) -> web.Response:
-    """Download the generated MP4 for a completed job."""
+    """Download the generated video for a completed job."""
     video_id = request.match_info["video_id"]
     task = _get_task_or_restore(video_id)
     if not task or task.modality != "video":

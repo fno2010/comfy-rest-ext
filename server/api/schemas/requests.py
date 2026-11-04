@@ -3,7 +3,7 @@ Pydantic request/response schemas for REST API endpoints.
 """
 
 from pydantic import BaseModel, HttpUrl
-from typing import Optional
+from typing import Literal, Optional
 
 
 # =============================================================================
@@ -108,3 +108,5 @@ class VideoGenerateRequest(BaseModel):
     first_frame: Optional[str] = None
     ref_images: Optional[list] = None
     speed: str = "auto"
+    format: Literal["auto", "mp4", "mkv", "webm"] = "auto"
+    codec: Literal["auto", "h264", "av1"] = "auto"

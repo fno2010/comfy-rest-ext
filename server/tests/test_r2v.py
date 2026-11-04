@@ -443,3 +443,15 @@ def test_parse_content_items_empty():
     from api.openai.v1 import _parse_content_items
     assert _parse_content_items({})["prompt"] is None
     assert _parse_content_items({"input": "not-a-list"})["ref_image_urls"] == []
+
+
+def test_build_h3_workflow_video_container_format():
+    wf = build_h3_workflow(
+        prompt="p", width=512, height=512, length=39, seed=1,
+        format="webm", codec="av1",
+    )
+    save = next(
+        node for node in wf.values() if node["class_type"] == "SaveVideo"
+    )
+    assert save["inputs"]["format"] == "webm"
+    assert save["inputs"]["codec"] == "av1"

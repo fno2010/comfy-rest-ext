@@ -224,3 +224,35 @@ def test_image_float_fields_reject_nonfinite():
         _float_field({"cfg": "nan"}, "cfg", 1.0)
     with pytest.raises(BadRequest):
         _float_field({"cfg": 1e400}, "cfg", 1.0)
+
+
+@pytest.mark.asyncio
+async def test_video_format_rejects_webp():
+    import api.openai.v1 as v1
+
+    class Request:
+        headers = {}
+
+        async def json(self):
+            return {"model": "minimax-h3", "prompt": "p", "format": "webp"}
+
+    response = await v1.create_video(Request())
+    assert response.status == 400
+    assert "format" in json.loads(response.text)["error"]
+
+
+def test_video_media_type_tracks_container_and_codec():
+    from api.openai.v1 import _video_media_type
+    from api.tasks.video_task import VideoTask
+
+    def task(**params):
+        return VideoTask(
+            task_id="v", status="completed", prompt="p", task_type="t2va",
+            width=1, height=1, length=1, seed=0, modality="video",
+            params=params, output_mime="video/mp4",
+        )
+
+    assert _video_media_type(task(format="webm", codec="auto")) == "video/webm"
+    assert _video_media_type(task(format="mkv", codec="auto")) == "video/x-matroska"
+    assert _video_media_type(task(format="auto", codec="av1")) == "video/webm"
+    assert _video_media_type(task(format="mp4", codec="av1")) == "video/mp4"

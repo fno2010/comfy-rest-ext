@@ -35,13 +35,14 @@ uv tool install /path/to/comfy-rest-ext/cli
 # 或 uvx --from /path/to/comfy-rest-ext/cli comfy-rest-ext --help
 ```
 
-当前 Python 包是过渡/reference 客户端；真正的无 Python 静态单文件 CLI 由 #50 的 Go 实现提供，尚未发布。PyInstaller 不满足静态二进制验收，不纳入交付路径。
+Python 包是过渡/reference 客户端；无 Python 的静态单文件 CLI 由 `cli-go/` 提供，并作为 GitHub Release 的 `comfy-rest-ext-<os>-<arch>` 资产发布。PyInstaller 不满足静态二进制验收，不纳入交付路径。
 
-Go 静态 CLI 的迁移实现位于 `cli-go/`：
+本地构建：
 
 ```bash
 cd cli-go
 ./build.sh
+./dist/comfy-rest-ext --version
 ldd dist/comfy-rest-ext   # not a dynamic executable
 ```
 
@@ -61,7 +62,41 @@ COMFY_REST_EXT_BASE_URL=https://comfy.example \
 npx skills add fno2010/comfy-rest-ext --skill comfy-rest-ext
 ```
 
-skill 优先使用 PATH 中的 `comfy-rest-ext`；缺失时由 `skills/comfy-rest-ext/scripts/bootstrap-cli.sh` 下载 pinned 静态二进制并校验 checksum，不要求 Python/uv/pipx 或本地 ComfyUI。
+skill 不再默认信任 `PATH`。它通过 `skills/comfy-rest-ext/scripts/bootstrap-cli.sh` 读取 `cli-version`，校验 `PATH`/环境变量/缓存中的客户端版本，缺失或不匹配时下载精确版本的静态二进制并校验 checksum。不要求 Python/uv/pipx 或本地 ComfyUI。
+
+### 升级已安装的 skill 和 CLI
+
+CLI 版本由 skill 内的 `cli-version` 固定。升级 skill 后，下一次解析客户端会自动使用新 pin；正常情况下不需要手动清缓存。
+
+```bash
+# 项目内安装（在项目根目录执行）
+npx skills update comfy-rest-ext
+
+# 全局安装
+npx skills update -g comfy-rest-ext
+
+npx skills list          # 或 npx skills list -g
+```
+
+诊断当前解析结果：
+
+```bash
+# 在 skill 目录运行；只读，不下载
+./scripts/bootstrap-cli.sh --check
+
+# 强制重装当前 pin；仅用于修复损坏安装
+./scripts/bootstrap-cli.sh --refresh
+```
+
+`--check` 会同时报告 `COMFY_REST_EXT_CLI`、`PATH` 和版本化缓存中的候选版本。版本不匹配的客户端会被忽略；skill 应使用 bootstrap 返回的路径，而不是裸 `comfy-rest-ext`。
+
+如果 PATH 中是 Python CLI（`comfy-rest-ext-cli`），它没有匹配的 `--version` 时会回退到受管静态二进制；也可以显式升级：
+
+```bash
+uv tool upgrade comfy-rest-ext-cli
+# 或
+pipx upgrade comfy-rest-ext-cli
+```
 
 默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
 
@@ -238,7 +273,8 @@ comfy-rest-ext-cli videos generate "Use <Video 1> as motion reference" \
 comfy-rest-ext-cli videos status video_xxxx
 comfy-rest-ext-cli videos list
 comfy-rest-ext-cli videos wait video_xxxx --timeout 300
-comfy-rest-ext-cli videos content video_xxxx --out out.mp4
+comfy-rest-ext-cli videos generate "a paper boat in a stream" --format webm
+comfy-rest-ext-cli videos content video_xxxx --out out.webm
 comfy-rest-ext-cli videos delete video_xxxx
 comfy-rest-ext-cli videos retry video_xxxx
 
@@ -300,6 +336,8 @@ comfy-rest-ext-cli --base-url http://192.168.1.10:8188 models
 ```
 
 `videos generate --multipart` 会用 multipart 上传参考图（接线 `create_video_multipart`）；结构化 speed 会序列化为 JSON 字段，与 JSON 模式的 acceleration 语义一致。`--timeout` 放在子命令前是 HTTP 超时；`videos wait --timeout` 是等待任务完成的时间。
+
+`videos generate --format auto|mp4|mkv|webm` 选择容器，`--codec auto|h264|av1` 选择编码；映射到 ComfyUI `SaveVideo`。WebP 不是视频容器，当前不支持。`videos generate` 是异步的，所以没有 `--out`；用 `videos content --out` 下载，省略 `--out` 时按任务的 media type 选择 `.webm`/`.mkv`/`.mp4`。图片当前固定 PNG，`images generate --out` 的扩展名不会转码；`--n > 1` 时第一张写入精确路径，后续追加 `_2`、`_3`。
 
 CLI 加速输入有三类：
 

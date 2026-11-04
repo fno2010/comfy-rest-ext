@@ -5,29 +5,32 @@ description: Operate a remote ComfyUI deployment through the comfy-rest-ext CLI 
 
 # Comfy-REST-Ext
 
-Use the installed `comfy-rest-ext` client as the only transport to the server. Do not reimplement HTTP calls in ad-hoc scripts, and do not import ComfyUI or this repository's server code.
+Use the client returned by `scripts/bootstrap-cli.sh` as the only transport to the server. Do not reimplement HTTP calls in ad-hoc scripts, and do not import ComfyUI or this repository's server code.
 
 ## Resolve the client
 
-1. Prefer an executable already on `PATH`:
-   ```bash
-   command -v comfy-rest-ext
-   comfy-rest-ext --version
-   ```
-2. If it is absent, run the bundled bootstrap:
-   ```bash
-   ./scripts/bootstrap-cli.sh
-   ```
-   It downloads a pinned static binary plus checksum into the user cache. Never assume Python, uv, or pipx is installed on the agent host.
-3. If bootstrap cannot reach the release (for example, offline or blocked GitHub access), stop and give the user the exact failing command and URL. Do not silently switch to a different transport.
+Always resolve the client through the bundled bootstrap:
+
+```bash
+CLI="$(./scripts/bootstrap-cli.sh)"
+"$CLI" --version
+```
+
+- `../cli-version` is the exact CLI version this skill requires.
+- Bootstrap validates `COMFY_REST_EXT_CLI`, the `PATH` binary, and the versioned cache against that pin.
+- If no matching binary exists, it downloads the exact release asset plus checksum into the cache.
+- A PATH binary with a different version is ignored with a warning; do not silently call bare `comfy-rest-ext` when bootstrap returns a different path. Use `"$CLI"` for subsequent commands, or prepend its directory to `PATH`.
+- Never assume Python, uv, or pipx is installed on the agent host.
+
+If bootstrap cannot reach the release (for example, offline or blocked GitHub access), stop and give the user the exact failing command and URL. Do not silently switch to a different transport.
 
 Configure the server once; never hardcode localhost:
 
 ```bash
-comfy-rest-ext config set prod base_url https://comfy.example
-comfy-rest-ext config set prod api_key -   # token from stdin, not echoed
-comfy-rest-ext config use prod
-comfy-rest-ext --json doctor
+"$CLI" config set prod base_url https://comfy.example
+"$CLI" config set prod api_key -   # token from stdin, not echoed
+"$CLI" config use prod
+"$CLI" --json doctor
 ```
 
 Environment overrides remain available: `COMFY_REST_EXT_PROFILE`, `COMFY_REST_EXT_BASE_URL`, `COMFY_REST_EXT_API_KEY`, `COMFY_REST_EXT_TIMEOUT`.
@@ -37,9 +40,9 @@ Environment overrides remain available: `COMFY_REST_EXT_PROFILE`, `COMFY_REST_EX
 Always run discovery before choosing a model or acceleration method:
 
 ```bash
-comfy-rest-ext --json doctor
-comfy-rest-ext --json models
-comfy-rest-ext --json capabilities
+"$CLI" --json doctor
+"$CLI" --json models
+"$CLI" --json capabilities
 ```
 
 This inventory is the source of truth. Do not assume a model id, task type, required node, or acceleration method. Read [references/cli.md](references/cli.md) for command and exit-code details.
@@ -53,12 +56,15 @@ Use discovery to decide:
 
 ## Generate
 
+All examples use `"$CLI"` resolved above. Do not substitute a different
+`comfy-rest-ext` from `PATH`; it may be an incompatible version.
+
 ### Images
 
 ```bash
-comfy-rest-ext --json images generate "a red fox in fresh snow" \
+"$CLI" --json images generate "a red fox in fresh snow" \
   --model "$IMAGE_MODEL" --size 1024x1024 --out fox.png
-comfy-rest-ext --json images edit "replace <image1> background with snow" \
+"$CLI" --json images edit "replace <image1> background with snow" \
   --model "$IMAGE_MODEL" --image input.png --out edited.png
 ```
 
@@ -69,11 +75,11 @@ Use a model discovered from `models`, not a remembered default. For edit request
 Text-only, first-frame, and reference workflows use the same endpoint:
 
 ```bash
-comfy-rest-ext --json videos generate "a slow dolly shot through a neon alley" \
-  --model "$VIDEO_MODEL" --seconds 5
-comfy-rest-ext --json videos generate "animate this still" \
+"$CLI" --json videos generate "a slow dolly shot through a neon alley" \
+  --model "$VIDEO_MODEL" --seconds 5 --format mp4
+"$CLI" --json videos generate "animate this still" \
   --model "$VIDEO_MODEL" --image first.png --seconds 3
-comfy-rest-ext --json videos generate "use <Picture 1> as style; <Video 1> as motion" \
+"$CLI" --json videos generate "use <Picture 1> as style; <Video 1> as motion" \
   --model "$VIDEO_MODEL" --image style.png --video motion.mp4
 ```
 
@@ -84,9 +90,9 @@ Discovery tells you whether the selected model supports I2V or reference-image/r
 Generation is asynchronous for videos. Preserve the task id returned by the CLI:
 
 ```bash
-comfy-rest-ext --json videos status "$TASK_ID"
-comfy-rest-ext --json videos wait "$TASK_ID" --timeout 600
-comfy-rest-ext --json videos content "$TASK_ID" --out result.mp4
+"$CLI" --json videos status "$TASK_ID"
+"$CLI" --json videos wait "$TASK_ID" --timeout 600
+"$CLI" --json videos content "$TASK_ID" --out result.webm  # use the task's --format; omitted --out derives the suffix
 ```
 
 For a failed task, inspect `status`, `error`, and `provisioning_actions`. Do not retry blindly:
@@ -103,10 +109,10 @@ Image tasks are synchronous through `images generate`; use `images list/status/c
 `capabilities` returns `available`, `installable`, `authorization_required`, or `unsupported`. Never install silently.
 
 ```bash
-comfy-rest-ext --json provision "$CAPABILITY_ID" --retry-task "$TASK_ID"
+"$CLI" --json provision "$CAPABILITY_ID" --retry-task "$TASK_ID"
 # ask for explicit consent before adding --yes
-comfy-rest-ext --json restart --yes --retry-task "$TASK_ID"
-comfy-rest-ext --json wait-reconnect --since-boot "$OLD_BOOT_ID" --retry-task "$TASK_ID"
+"$CLI" --json restart --yes --retry-task "$TASK_ID"
+"$CLI" --json wait-reconnect --since-boot "$OLD_BOOT_ID" --retry-task "$TASK_ID"
 ```
 
 The install response may say `restart_required`. If so:
