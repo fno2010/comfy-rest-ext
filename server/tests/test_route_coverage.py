@@ -20,6 +20,7 @@ COVERED_ROUTES = {
     ("GET", "/v2/extension/image"),
     ("GET", "/v2/extension/image/{task_id}"),
     ("GET", "/v2/extension/image/{task_id}/content"),
+    ("GET", "/v2/extension/image/{task_id}/assets/{kind}/{index}"),
     ("POST", "/v2/extension/workflow/dependencies"),
     ("GET", "/v2/extension/workflow/dependencies/{task_id}"),
     ("POST", "/v2/extension/workflow/dependencies/check"),

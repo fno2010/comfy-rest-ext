@@ -102,6 +102,10 @@ def _image_task_summary(task: GenerationTask) -> dict:
             f"/v2/extension/image/{task.task_id}/content?index={index}"
             for index in range(len(task.output_paths))
         ] if task.status == "completed" else [],
+        "reference_image_urls": [
+            f"/v2/extension/image/{task.task_id}/assets/image/{index}"
+            for index in range(len(task.ref_images or []))
+        ],
         "error": (
             {"code": "generation_error", "message": task.error}
             if task.error else None
@@ -502,6 +506,34 @@ async def get_image_task(request: web.Request) -> web.Response:
     if task is None:
         return _error(404, "Task not found")
     return web.json_response(_image_task_summary(task))
+
+
+@routes.get("/v2/extension/image/{task_id}/assets/{kind}/{index}")
+async def get_image_asset(request: web.Request) -> web.Response:
+    """Serve a reference image attached to an image task."""
+    task = _get_image_task(request.match_info["task_id"])
+    if task is None:
+        return _error(404, "Task not found")
+    if request.match_info["kind"] != "image":
+        return _error(404, "Unknown asset kind")
+    try:
+        index = int(request.match_info["index"])
+    except ValueError:
+        return _error(400, "Invalid asset index")
+    names = task.ref_images or []
+    if index < 0 or index >= len(names):
+        return _error(404, "Asset not found")
+    import folder_paths
+    input_dir = os.path.realpath(folder_paths.get_input_directory())
+    path = os.path.realpath(os.path.join(input_dir, names[index]))
+    try:
+        if os.path.commonpath([input_dir, path]) != input_dir:
+            return _error(404, "Asset not found")
+    except ValueError:
+        return _error(404, "Asset not found")
+    if not os.path.isfile(path):
+        return _error(404, "Asset not found")
+    return web.FileResponse(path, headers={"Content-Disposition": "inline"})
 
 
 @routes.get("/v2/extension/image/{task_id}/content")
