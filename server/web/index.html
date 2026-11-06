@@ -805,7 +805,9 @@
       created_at: task.created_at,
       completed_at: task.completed_at,
       error: task.error,
-      refs: [],
+      refs: (task.reference_image_urls || []).map((url, index) => ({
+        kind: "image", url, label: `Image ${index + 1}`,
+      })),
       media: task.view_urls || [],
       json_url: "/v2/extension/image/" + encodeURIComponent(task.id),
     };

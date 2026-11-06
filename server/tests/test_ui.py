@@ -49,6 +49,34 @@ def test_image_summary_uses_extension_content_urls():
     assert summary["view_urls"] == [
         "/v2/extension/image/image_1/content?index=0"
     ]
+    assert summary["reference_image_urls"] == []
+
+
+def test_image_summary_exposes_reference_image_urls():
+    from api.openai.images import _image_task_summary
+    summary = _image_task_summary(_image_task(ref_images=["a.png", "b.jpg"]))
+    assert summary["reference_image_urls"] == [
+        "/v2/extension/image/image_1/assets/image/0",
+        "/v2/extension/image/image_1/assets/image/1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_image_asset_serves_reference_image(monkeypatch, tmp_path):
+    import api.openai.images as images
+    import folder_paths
+
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(b"PNG")
+    monkeypatch.setattr(images, "_get_image_task", lambda _: _image_task(ref_images=["ref.png"]))
+    monkeypatch.setattr(folder_paths, "get_input_directory", lambda: str(tmp_path), raising=False)
+
+    class Request:
+        match_info = {"task_id": "image_1", "kind": "image", "index": "0"}
+
+    response = await images.get_image_asset(Request())
+    assert response.status == 200
+    assert str(response._path) == str(ref)
 
 
 def test_video_response_uses_extension_content_url():
@@ -117,6 +145,7 @@ async def test_dashboard_exposes_reference_assets():
     html = response.text
     assert "reference_video_urls" in html
     assert "reference_image_urls" in html
+    assert "task.reference_image_urls || []" in html
     assert 'class="refs"' in html
 
 

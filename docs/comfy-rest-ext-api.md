@@ -869,6 +869,7 @@ ws.addEventListener('message', (event) => {
 | POST | `/v2/extension/image/generate` | 提交图片生成任务（异步） |
 | GET | `/v2/extension/image/{task_id}` | 查询图片生成状态 |
 | GET | `/v2/extension/image/{task_id}/content` | 读取图片输出（`?index=N`） |
+| GET | `/v2/extension/image/{task_id}/assets/image/{index}` | 读取图片参考图 |
 | GET | `/v2/extension/image` | 列出图片生成任务 |
 | GET | `/v2/extension/ui` | 任务面板（HTML） |
 | GET | `/ui` | 302 到任务面板 |
@@ -999,6 +1000,8 @@ ws.addEventListener('message', (event) => {
 | `seed` / `steps` / `cfg` / `sampler` / `scheduler` | 扩展字段 |
 | `quality` / `style` | 接受但不改变生成参数 |
 | `output_format` | 仅支持 `png`（Qwen-Image 2.1 的 alpha 通道） |
+| `ref_images` / `image` | 可选；参考图路径、data URL 或 URL，可传数组。存在参考图时自动按 edit 处理，Qwen-Image 2.1 最多 16 张 |
+| `input` / `content` | 可选；OpenAI Responses 风格的 input_image 数组，参考图同样会映射到编辑输入 |
 | `Prefer` | 请求头；`respond-async` 时立即返回 202 + 任务记录，不等待生成完成 |
 | `stream` / `partial_images` | 不支持，返回 400 |
 
@@ -1031,11 +1034,12 @@ curl -X POST http://host:8188/v1/images/edits \
 ### 异步端点
 
 - `POST /v2/extension/image/generate` — JSON 请求，立即返回 `{"id":"image_...","status":"queued"}`。
-- `GET /v2/extension/image/{task_id}` — 查询状态、进度、`view_urls`。
+- `GET /v2/extension/image/{task_id}` — 查询状态、进度、`view_urls`、`reference_image_urls`。
 - `GET /v2/extension/image/{task_id}/content?index=N` — 读取第 N 张输出图（`Content-Type: image/png`）。
+- `GET /v2/extension/image/{task_id}/assets/image/N` — 读取第 N 张参考图。
 - `GET /v2/extension/image` — 列出图片任务。
 
-`view_urls` 由扩展生成，指向 `/v2/extension/image/{id}/content?index=N`，不依赖 ComfyUI 的 `/view` 路由。视频的 `view_url` 同理指向 `/v1/videos/{id}/content`。
+`view_urls` 由扩展生成，指向 `/v2/extension/image/{id}/content?index=N`，不依赖 ComfyUI 的 `/view` 路由。`reference_image_urls` 指向 `/v2/extension/image/{id}/assets/image/N`，用于 dashboard 展示输入参考图。视频的 `view_url`/reference URL 同理使用扩展路由。
 
 同步请求超时返回 504，任务不会自动取消；可继续轮询异步端点。
 
@@ -1044,10 +1048,10 @@ curl -X POST http://host:8188/v1/images/edits \
 返回零依赖单页 HTML（`/ui` 会 302 到此地址）。页面只请求：
 
 ```text
-GET /v1/videos
+GET /v2/extension/tasks
 GET /v1/videos/{id}/content
-GET /v2/extension/image
 GET /v2/extension/image/{id}/content?index=N
+GET /v2/extension/image/{id}/assets/image/N
 GET /v2/extension/acceleration/schema
 ```
 
