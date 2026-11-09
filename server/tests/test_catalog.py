@@ -29,7 +29,9 @@ def test_image_models_are_registered():
     assert get_model("qwen-image-2.1").modality == "image"
     assert "edit" in get_model("qwen-image-2.1").tasks
     assert "edit" not in get_model("anima-base").tasks
-    assert len(list(list_models())) == 5
+    assert len(list(list_models())) == 6
+    assert get_model("see-through").modality == "layers"
+    assert get_model("see-through").tasks == ("decompose",)
 
 
 def test_unknown_model_raises_keyerror():

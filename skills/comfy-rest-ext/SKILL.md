@@ -49,10 +49,11 @@ This inventory is the source of truth. Do not assume a model id, task type, requ
 
 Use discovery to decide:
 
-- modality (`image` or `video`) and supported task;
+- modality (`image`, `video`, or `layers`) and supported task;
 - whether reference images/videos are accepted;
 - available acceleration methods and current provisioning state;
-- whether the requested capability is available, installable, or unsupported.
+- whether the requested capability is available, installable, or unsupported;
+- for a `layers` model, whether its capabilities include `exclude_tags`.
 
 ## Generate
 
@@ -69,6 +70,42 @@ All examples use `"$CLI"` resolved above. Do not substitute a different
 ```
 
 Use a model discovered from `models`, not a remembered default. For edit requests, mention `<image1>` explicitly when the model follows that convention.
+
+### Layers (See-through)
+
+When discovery reports a `layers` model, decompose one anime image and fetch the
+resulting ZIP/PSD. The command is asynchronous:
+
+```bash
+# For a wingless, tailless humanoid only; omit --exclude-tags otherwise.
+"$CLI" --json layers decompose character.png --model "$LAYERS_MODEL" \
+  --resolution 1024 --steps 20 --exclude-tags wings,tail
+"$CLI" --json layers wait "$TASK_ID" --timeout 600
+"$CLI" --json layers content "$TASK_ID" --out layers.zip
+"$CLI" --json layers psd "$TASK_ID" --out layers.psd
+```
+
+Inspect the task's `layer_count`, `preview_url`, and `archive_url`; do not assume
+the model id or parameter defaults. `content` returns RGBA PNGs plus a JSON
+manifest; `psd` is the server-side PSD export.
+
+`--exclude-tags` drops matching tags from the generated layer set/manifest/ZIP/PSD.
+It is not a model-level fix and does not reduce the fixed 13-frame diffusion cost.
+The only accepted values are `wings`, `tail`, and `objects`. Decide before submitting:
+
+| Input character | Action |
+|---|---|
+| Clearly humanoid, no wings/tail | `--exclude-tags wings,tail` |
+| Clearly has wings or tail | omit those tags from the exclusion list |
+| Props/held objects uncertain | do not exclude `objects` |
+| Cannot inspect the image / uncertain | omit `--exclude-tags` |
+
+Never exclude a part merely because a previous task produced a false positive.
+If the character has wings or a tail, excluding that tag destroys real output.
+Do not download every layer just to decide: the completed task's `/layers`
+manifest lists layer names, and `preview_url` gives a fast visual check. If the
+manifest contains an unexpected optional tag, report it and regenerate with an
+explicit exclusion only after the user confirms the part is absent.
 
 ### Videos
 
@@ -144,6 +181,7 @@ Do not hold an interactive agent session open for a long render. Return the task
 - [CLI contract](references/cli.md) — commands, profiles, exit codes, task lifecycle.
 - [Video prompt guide](references/video-prompts.md) — H3-style timeline/reference/audio prompting.
 - [Image prompt guide](references/image-prompts.md) — Qwen-Image/Anima generation and edit patterns.
+- [See-through layers](references/layers.md) — decomposition parameters and artifact contract.
 - [Planning and recovery](references/planning.md) — manifest, pause/resume, retries.
 
 Keep these references generic. Resolve models, nodes, and methods from the live server, not from this skill.

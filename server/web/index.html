@@ -115,7 +115,7 @@
   .card {
     background: var(--panel-2); border: 1px solid var(--border);
     border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
-    min-height: 170px; content-visibility: auto; contain-intrinsic-size: 260px;
+    min-height: 170px;
   }
   .card.running { border-color: #2f5f9e; }
   .card.completed { border-color: #245c35; }
@@ -127,6 +127,7 @@
   }
   .kind.video { color: var(--purple); }
   .kind.image { color: var(--accent); }
+  .kind.layers { color: #d2a8ff; }
   .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .badge {
     margin-left: auto; font-size: 11px; font-weight: 600;
@@ -142,6 +143,13 @@
     word-break: break-word; min-height: 2.9em;
   }
   .prompt.empty { color: var(--muted); font-style: italic; }
+  .prompt.expanded { display: block; -webkit-line-clamp: unset; overflow: visible; }
+  .prompt-toggle {
+    align-self: flex-start; margin-top: -4px; padding: 0; border: 0;
+    background: none; color: var(--accent); font: inherit; font-size: 11px;
+    cursor: pointer;
+  }
+  .prompt-toggle:hover { text-decoration: underline; }
   .refs { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 8px; }
   .ref-item { width: 64px; color: var(--muted); font-size: 10px; text-decoration: none; }
   .ref-item img, .ref-item video {
@@ -166,6 +174,17 @@
     color: #ffa198; background: #2d1215; border: 1px solid #5c1f24;
     border-radius: 6px; padding: 7px 8px; font-size: 12px; word-break: break-word;
   }
+  .error-details summary { cursor: pointer; font-weight: 600; }
+  .error-text {
+    margin: 7px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap;
+    word-break: break-word; font-size: 11px; line-height: 1.4; color: #ffd1cc;
+  }
+  .check-group { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+  .check-group legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
+  .check-row { display: flex; align-items: flex-start; gap: 7px; margin: 5px 0; font-size: 12px; }
+  .check-row input { margin-top: 2px; }
+  .check-row span { display: flex; flex-direction: column; gap: 1px; }
+  .check-row small { color: var(--muted); font-size: 10px; }
   .media { display: grid; gap: 6px; }
   .media img, .media video {
     width: 100%; max-height: 260px; object-fit: contain;
@@ -173,6 +192,18 @@
     display: block;
   }
   .media .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+  .media-note { color: var(--muted); font-size: 11px; line-height: 1.4; }
+  .layer-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 4px; max-height: 220px; overflow: auto; }
+  .layer-thumb {
+    display: flex; flex-direction: column; gap: 2px; min-width: 0;
+    color: var(--muted); font-size: 9px; text-decoration: none;
+  }
+  .layer-thumb img {
+    width: 100%; aspect-ratio: 1; object-fit: contain;
+    background: repeating-conic-gradient(#2a2a2a 0 25%, #1d1d1d 0 50%) 0 0 / 12px 12px;
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+  .layer-thumb span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .media .thumbs img { cursor: zoom-in; aspect-ratio: 1; object-fit: cover; }
   .media video { max-height: 300px; }
   .card-foot { margin-top: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -182,12 +213,34 @@
     cursor: pointer;
   }
   .card-foot a:hover, .card-foot button:hover { text-decoration: underline; }
-  .runtime-json {
-    margin: 0; max-width: min(760px, 86vw); max-height: 70vh; overflow: auto;
-    background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 6px; padding: 10px; font-size: 12px; line-height: 1.4;
-    white-space: pre-wrap; word-break: break-word;
+  .task-details {
+    display: grid; gap: 14px; max-width: min(820px, 88vw); max-height: 70vh;
+    overflow: auto; padding-right: 4px;
   }
+  .detail-section h3 {
+    margin: 0 0 7px; color: var(--muted); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase;
+  }
+  .detail-grid {
+    display: grid; grid-template-columns: max-content minmax(0, 1fr);
+    gap: 5px 14px; font-size: 12px;
+  }
+  .detail-grid dt { color: var(--muted); }
+  .detail-grid dd { margin: 0; word-break: break-word; }
+  .detail-prompt {
+    margin: 0; padding: 8px; white-space: pre-wrap; word-break: break-word;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 5px; font-size: 12px; line-height: 1.45;
+  }
+  .detail-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .detail-table th, .detail-table td {
+    padding: 5px 7px; border-bottom: 1px solid var(--border);
+    text-align: left; vertical-align: top; word-break: break-word;
+  }
+  .detail-table th { color: var(--muted); font-weight: 500; width: 38%; }
+  .detail-table td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .detail-table tr:last-child th, .detail-table tr:last-child td { border-bottom: 0; }
+  .task-dialog-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .empty { color: var(--muted); padding: 26px 4px; text-align: center; }
   .pager {
     display: flex; align-items: center; gap: 8px; justify-content: flex-end;
@@ -299,6 +352,7 @@
     <label class="toggle small"><input id="auto" type="checkbox" checked> auto</label>
     <button id="new-image-btn" class="primary" type="button">+ Image</button>
     <button id="new-video-btn" class="primary" type="button">+ Video</button>
+    <button id="new-layers-btn" class="primary" type="button">+ Layers</button>
     <button id="refresh" type="button"><span id="refresh-icon"></span>Refresh</button>
     <button id="models-btn" type="button">Models</button>
   </div>
@@ -312,6 +366,8 @@
     <div class="stat"><b id="stat-video-running">0</b><span>Videos active</span></div>
     <div class="stat"><b id="stat-image-total">0</b><span>Images</span></div>
     <div class="stat"><b id="stat-image-running">0</b><span>Images active</span></div>
+    <div class="stat"><b id="stat-layers-total">0</b><span>Layer tasks</span></div>
+    <div class="stat"><b id="stat-layers-running">0</b><span>Layer tasks active</span></div>
   </div>
 
   <div class="panel">
@@ -320,6 +376,7 @@
         <button data-kind="all" type="button" class="active">All</button>
         <button data-kind="video" type="button">Videos</button>
         <button data-kind="image" type="button">Images</button>
+        <button data-kind="layers" type="button">Layers</button>
       </div>
       <div class="spacer"></div>
       <label class="field">Sort
@@ -377,11 +434,12 @@
     <div id="generate-tabs" class="segmented">
       <button type="button" data-mode="image" class="active">Image</button>
       <button type="button" data-mode="video">Video</button>
+      <button type="button" data-mode="layers">Layers</button>
     </div>
     <label class="form-row">Model
       <select id="gen-model" required></select>
     </label>
-    <label class="form-row">Prompt
+    <label class="form-row" id="gen-prompt-row">Prompt
       <textarea id="gen-prompt" rows="4" required placeholder="Describe the image or video..."></textarea>
     </label>
     <label class="form-row" id="gen-negative-row">Negative prompt
@@ -422,6 +480,53 @@
       <label>Scheduler
         <input id="gen-scheduler" placeholder="simple">
       </label>
+    </div>
+    <div id="layers-fields" class="form-grid" hidden>
+      <label>Source image
+        <input id="gen-layers-image" type="file" accept="image/*">
+        <span class="hint">One anime character image; it becomes the layer source.</span>
+      </label>
+      <label>Resolution
+        <input id="gen-layers-resolution" type="number" min="512" max="2048" step="64" value="1280">
+        <span class="hint">Quality baseline: 1280 px / 30 steps; 512 px and ≤5 steps are smoke-test settings.</span>
+      </label>
+      <label>LayerDiff steps
+        <input id="gen-layers-steps" type="number" min="1" max="100" value="30">
+      </label>
+      <label>Depth resolution
+        <input id="gen-layers-depth-resolution" type="number" min="-1" max="2048" step="64" value="-1">
+      </label>
+      <label>Quantization
+        <select id="gen-layers-quant">
+          <option value="none">none</option>
+          <option value="nf4">nf4</option>
+        </select>
+      </label>
+      <label>Split left/right
+        <select id="gen-layers-tblr">
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </label>
+      <label>LaMa hair split
+        <select id="gen-layers-lama">
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </label>
+      <label>Group offload
+        <select id="gen-layers-group-offload">
+          <option value="false">false</option>
+          <option value="true">true</option>
+        </select>
+      </label>
+      <fieldset class="check-group">
+        <legend>Optional tags to omit</legend>
+        <label class="check-row"><input id="gen-layers-exclude-wings" type="checkbox" data-exclude-tag="wings"> <span><b>wings</b><small>only when the character has no wings</small></span></label>
+        <label class="check-row"><input id="gen-layers-exclude-tail" type="checkbox" data-exclude-tag="tail"> <span><b>tail</b><small>only when the character has no tail</small></span></label>
+        <label class="check-row"><input id="gen-layers-exclude-objects" type="checkbox" data-exclude-tag="objects"> <span><b>objects</b><small>props/accessories; leave off when unsure</small></span></label>
+        <span class="hint">These are the only supported exclusions. They omit the tag from the generated layer set; diffusion still runs all 13 frames.</span>
+      </fieldset>
     </div>
     <div id="video-fields" class="form-grid" hidden>
       <label>Mode
@@ -500,13 +605,17 @@
   <img id="lightbox-img" alt="">
 </dialog>
 
-<dialog id="runtime-dialog">
+<dialog id="task-dialog">
   <div class="dialog-head">
-    <h2 id="runtime-title">Runtime</h2>
+    <h2 id="task-title">Task details</h2>
     <div class="spacer"></div>
-    <button id="runtime-close" type="button">Close</button>
+    <button id="task-close" type="button">Close</button>
   </div>
-  <pre id="runtime-json" class="runtime-json"></pre>
+  <div id="task-details" class="task-details"></div>
+  <div class="dialog-actions task-dialog-foot">
+    <a id="task-json-download" class="json-download" target="_blank" rel="noreferrer">Download raw JSON</a>
+    <button id="task-dialog-close" type="button">Close</button>
+  </div>
 </dialog>
 
 <script>
@@ -620,6 +729,10 @@
     state.imageRefs = [];
     $("gen-ref-images").value = "";
     renderRefList("gen-ref-preview", [], () => {});
+  }
+
+  function clearLayersSource() {
+    $("gen-layers-image").value = "";
   }
 
   function clearVideoRefs() {
@@ -813,7 +926,39 @@
     };
   }
 
+  function normalizeLayers(task) {
+    return {
+      kind: "layers",
+      id: task.id,
+      object: task.object || "layers.decomposition",
+      model: task.model || "",
+      prompt: task.prompt || "",
+      status: task.status || "unknown",
+      progress: Number(task.progress || 0),
+      current_node: task.current_node || "",
+      node_progress: Number(task.node_progress || 0),
+      eta: null,
+      elapsed: task.elapsed,
+      size: task.params && task.params.resolution ? `${task.params.resolution}x${task.params.resolution}` : "",
+      seconds: null,
+      n: 0,
+      speed: null,
+      params: task.params || {},
+      acceleration: null,
+      created_at: task.created_at,
+      completed_at: task.completed_at,
+      error: task.error,
+      layer_count: task.layer_count || 0,
+      refs: task.input_image_url ? [{ kind: "image", url: task.input_image_url, label: "Input" }] : [],
+      media: task.preview_url ? [task.preview_url] : [],
+      archive_url: task.archive_url || "",
+      psd_url: task.psd_url || "",
+      json_url: "/v2/extension/layers/" + encodeURIComponent(task.id),
+    };
+  }
+
   function normalizeTask(task) {
+    if (task.kind === "layers") return normalizeLayers(task);
     return task.kind === "image" ? normalizeImage(task) : normalizeVideo(task);
   }
 
@@ -851,20 +996,114 @@
     return bits.join(" · ");
   }
 
-  function openRuntime(task) {
-    $("runtime-title").textContent =
-      `${task.kind === "video" ? "Video" : "Image"} ${task.id}`;
-    $("runtime-json").textContent = JSON.stringify({
-      id: task.id,
-      kind: task.kind,
-      model: task.model,
-      status: task.status,
-      speed: task.speed,
-      params: task.params,
-      acceleration: task.acceleration,
-      error: task.error,
-    }, null, 2);
-    $("runtime-dialog").showModal();
+  function detailSection(title) {
+    const section = document.createElement("section");
+    section.className = "detail-section";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    section.append(heading);
+    return section;
+  }
+
+  function detailGrid(rows) {
+    const dl = document.createElement("dl");
+    dl.className = "detail-grid";
+    for (const [label, value] of rows) {
+      if (value == null || value === "") continue;
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = String(value);
+      dl.append(dt, dd);
+    }
+    return dl;
+  }
+
+  function flattenParams(value, prefix = "", out = []) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const entries = Object.entries(value);
+      if (!entries.length) out.push([prefix || "(empty)", "{}"]);
+      for (const [key, child] of entries) {
+        flattenParams(child, prefix ? `${prefix}.${key}` : key, out);
+      }
+    } else {
+      out.push([prefix || "(root)", Array.isArray(value) ? JSON.stringify(value) : value]);
+    }
+    return out;
+  }
+
+  function detailTable(value) {
+    const table = document.createElement("table");
+    table.className = "detail-table";
+    const rows = flattenParams(value);
+    if (!rows.length) rows.push(["parameters", "—"]);
+    for (const [key, child] of rows) {
+      const tr = document.createElement("tr");
+      const th = document.createElement("th");
+      th.textContent = key;
+      const td = document.createElement("td");
+      td.textContent = child == null ? "—" : String(child);
+      tr.append(th, td);
+      table.append(tr);
+    }
+    return table;
+  }
+
+  function openTaskDetails(task) {
+    const kind = task.kind === "video" ? "Video" : task.kind === "layers" ? "Layers" : "Image";
+    $("task-title").textContent = `${kind} task · ${task.id}`;
+    const body = $("task-details");
+    body.replaceChildren();
+
+    const overview = detailSection("Overview");
+    overview.append(detailGrid([
+      ["ID", task.id],
+      ["Kind", task.kind],
+      ["Model", task.model],
+      ["Status", task.status],
+      ["Created", fmtTime(task.created_at)],
+      ["Completed", task.completed_at ? fmtTime(task.completed_at) : ""],
+      ["Elapsed", task.elapsed != null ? fmtDuration(task.elapsed) : ""],
+      ["Size", task.size],
+      ["Images", task.n],
+      ["Layers", task.layer_count],
+      ["Current node", task.current_node],
+    ]));
+    body.append(overview);
+
+    if (task.prompt) {
+      const promptSection = detailSection("Prompt");
+      const pre = document.createElement("pre");
+      pre.className = "detail-prompt";
+      pre.textContent = task.prompt;
+      promptSection.append(pre);
+      body.append(promptSection);
+    }
+
+    const paramsSection = detailSection("Submitted parameters");
+    paramsSection.append(detailTable(task.params || {}));
+    body.append(paramsSection);
+
+    const acceleration = task.acceleration || task.speed;
+    if (acceleration && (typeof acceleration !== "object" || Object.keys(acceleration).length)) {
+      const accelSection = detailSection("Acceleration / speed");
+      accelSection.append(detailTable(acceleration));
+      body.append(accelSection);
+    }
+
+    if (task.error && task.error.message) {
+      const errorSection = detailSection("Error");
+      const pre = document.createElement("pre");
+      pre.className = "detail-prompt";
+      pre.textContent = task.error.message;
+      errorSection.append(pre);
+      body.append(errorSection);
+    }
+
+    const raw = $("task-json-download");
+    raw.href = task.json_url;
+    raw.download = task.id + ".json";
+    $("task-dialog").showModal();
   }
 
   function createCard(task) {
@@ -877,45 +1116,83 @@
         <span class="badge"></span>
       </div>
       <p class="prompt"></p>
+      <button class="prompt-toggle" type="button" aria-expanded="false" hidden>Show full prompt</button>
       <div class="refs" hidden></div>
       <div class="progress"><i></i></div>
       <div class="meta"></div>
-      <div class="error" hidden></div>
+      <details class="error error-details" hidden>
+        <summary class="error-summary">Error</summary>
+        <pre class="error-text"></pre>
+      </details>
       <div class="media" hidden></div>
+      <div class="media-note" hidden></div>
+      <div class="layer-strip" hidden></div>
       <div class="card-foot">
-        <a class="json-link" target="_blank" rel="noreferrer">JSON</a>
-        <button class="detail-link" type="button">Runtime</button>
-        <a class="open-link" target="_blank" rel="noreferrer" hidden>Open output</a>
+        <button class="detail-link" type="button">Parameters</button>
+        <a class="archive-link" target="_blank" rel="noreferrer" hidden>Download ZIP</a>
+        <a class="psd-link" target="_blank" rel="noreferrer" hidden>PSD</a>
+        <a class="open-link" target="_blank" rel="noreferrer" hidden>Open preview</a>
       </div>`;
-    return {
+    const card = {
       el,
       kind: el.querySelector(".kind"),
       model: el.querySelector(".model"),
       badge: el.querySelector(".badge"),
       prompt: el.querySelector(".prompt"),
+      promptToggle: el.querySelector(".prompt-toggle"),
+      promptSig: null,
       refs: el.querySelector(".refs"),
       refsSig: null,
       progress: el.querySelector(".progress > i"),
       meta: el.querySelector(".meta"),
       error: el.querySelector(".error"),
+      errorSummary: el.querySelector(".error-summary"),
+      errorText: el.querySelector(".error-text"),
+      errorSig: null,
       media: el.querySelector(".media"),
-      json: el.querySelector(".json-link"),
+      note: el.querySelector(".media-note"),
+      layerStrip: el.querySelector(".layer-strip"),
+      details: el.querySelector(".detail-link"),
       open: el.querySelector(".open-link"),
+      archive: el.querySelector(".archive-link"),
+      psd: el.querySelector(".psd-link"),
       mediaSig: null,
+      layerSig: null,
     };
+    card.promptToggle.addEventListener("click", () => {
+      const expanded = card.prompt.classList.toggle("expanded");
+      card.promptToggle.textContent = expanded ? "Show less" : "Show full prompt";
+      card.promptToggle.setAttribute("aria-expanded", String(expanded));
+    });
+    return card;
   }
 
   function updateCard(card, task) {
     const cls = statusClass(task.status);
     card.el.className = "card " + cls;
     card.el.dataset.id = task.id;
-    card.kind.textContent = task.kind === "video" ? "VIDEO" : "IMAGE";
+    card.kind.textContent = task.kind === "video" ? "VIDEO" : task.kind === "layers" ? "LAYERS" : "IMAGE";
     card.kind.className = "kind " + task.kind;
     card.model.textContent = task.model || "unknown";
     card.badge.textContent = statusLabel(task.status);
     card.badge.className = "badge " + cls;
-    card.prompt.textContent = task.prompt || "(no prompt)";
-    card.prompt.classList.toggle("empty", !task.prompt);
+    const promptText = task.prompt
+      || (task.kind === "layers" ? "See-through layer decomposition" : "");
+    if (card.promptSig !== promptText) {
+      card.promptSig = promptText;
+      card.prompt.textContent = promptText || "(no prompt)";
+      card.prompt.classList.remove("expanded");
+      card.prompt.classList.toggle("empty", !promptText);
+      card.promptToggle.textContent = "Show full prompt";
+      card.promptToggle.setAttribute("aria-expanded", "false");
+      card.promptToggle.hidden = true;
+      requestAnimationFrame(() => {
+        if (!card.el.isConnected) return;
+        const overflow = card.prompt.scrollHeight > card.prompt.clientHeight + 1
+          || promptText.length > 180;
+        card.promptToggle.hidden = !overflow;
+      });
+    }
     const refsSig = (task.refs || []).map((ref) => ref.kind + ":" + ref.url).join("|");
     if (refsSig !== card.refsSig) {
       card.refsSig = refsSig;
@@ -949,8 +1226,9 @@
     if (task.size) meta.push(`<span>size <b>${esc(task.size)}</b></span>`);
     if (task.seconds) meta.push(`<span>seconds <b>${esc(task.seconds)}</b></span>`);
     if (task.n) meta.push(`<span>n <b>${esc(task.n)}</b></span>`);
-    const runtime = runtimeSummary(task);
-    if (runtime) meta.push(`<span class="runtime">runtime <b>${esc(runtime)}</b></span>`);
+    if (task.layer_count) meta.push(`<span>layers <b>${esc(task.layer_count)}</b></span>`);
+    const settings = runtimeSummary(task);
+    if (settings) meta.push(`<span class="settings">settings <b>${esc(settings)}</b></span>`);
     if (task.current_node && ACTIVE.has(task.status)) {
       meta.push(`<span>node <b>${esc(task.current_node)}</b> ${esc(task.node_progress)}%</span>`);
     }
@@ -964,7 +1242,11 @@
 
     const message = task.error && task.error.message ? task.error.message : "";
     card.error.hidden = !message;
-    card.error.textContent = message;
+    if (card.errorSig !== message) {
+      card.errorSig = message;
+      card.errorText.textContent = message;
+      card.error.open = false;
+    }
 
     const mediaSig = task.status + "|" + task.media.join("|");
     if (mediaSig !== card.mediaSig) {
@@ -986,7 +1268,7 @@
             const img = document.createElement("img");
             img.loading = "lazy";
             img.src = url;
-            img.alt = "output " + (index + 1);
+            img.alt = task.kind === "layers" ? "layer composite preview" : "output " + (index + 1);
             img.dataset.full = url;
             thumbs.append(img);
           });
@@ -997,7 +1279,25 @@
       }
     }
 
-    card.json.href = task.json_url;
+    if (card.note) {
+      card.note.hidden = !(task.kind === "layers" && task.status === "completed" && task.media.length);
+      card.note.textContent = card.note.hidden
+        ? ""
+        : "Preview is a flat layer composite; download the ZIP or PSD for the editable layers.";
+    }
+    if (card.archive) {
+      card.archive.textContent = task.kind === "layers" ? "Layers ZIP" : "Download ZIP";
+      card.archive.hidden = !task.archive_url;
+      if (task.archive_url) card.archive.href = task.archive_url;
+      else card.archive.removeAttribute("href");
+    }
+    if (card.psd) {
+      card.psd.hidden = !task.psd_url;
+      if (task.psd_url) card.psd.href = task.psd_url;
+      else card.psd.removeAttribute("href");
+    }
+    card.details.onclick = () => openTaskDetails(task);
+    card.open.textContent = task.kind === "layers" ? "Open preview" : "Open output";
     if (task.media.length) {
       card.open.hidden = false;
       card.open.href = task.media[0];
@@ -1005,6 +1305,61 @@
       card.open.hidden = true;
       card.open.removeAttribute("href");
     }
+    loadLayerThumbs(card, task);
+  }
+
+  function loadLayerThumbs(card, task) {
+    if (!card.layerStrip) return;
+    if (task.kind !== "layers" || task.status !== "completed") {
+      card.layerSig = null;
+      card.layerStrip.hidden = true;
+      card.layerStrip.replaceChildren();
+      return;
+    }
+    const sig = task.id + "|" + (task.layer_count || 0);
+    if (card.layerSig === sig) return;
+    card.layerSig = sig;
+    card.layerStrip.hidden = false;
+    const loading = document.createElement("span");
+    loading.className = "hint";
+    loading.textContent = "Loading layers…";
+    card.layerStrip.replaceChildren(loading);
+    fetchJson(`/v2/extension/layers/${encodeURIComponent(task.id)}/layers`)
+      .then((data) => {
+        if (card.layerSig !== sig) return;
+        const layers = data.layers || [];
+        if (!layers.length) {
+          const empty = document.createElement("span");
+          empty.className = "hint";
+          empty.textContent = "No layer manifest entries.";
+          card.layerStrip.replaceChildren(empty);
+          return;
+        }
+        const nodes = layers.map((layer) => {
+          const link = document.createElement("a");
+          link.className = "layer-thumb";
+          link.href = layer.url;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.title = `${layer.name} (${layer.right - layer.left}×${layer.bottom - layer.top})`;
+          const img = document.createElement("img");
+          img.loading = "lazy";
+          img.src = layer.url;
+          img.alt = layer.name;
+          const name = document.createElement("span");
+          name.textContent = layer.name;
+          link.append(img, name);
+          return link;
+        });
+        card.layerStrip.replaceChildren(...nodes);
+      })
+      .catch((error) => {
+        if (card.layerSig !== sig) return;
+        const failed = document.createElement("span");
+        failed.className = "hint";
+        failed.textContent = "Layer thumbnails unavailable: " + error.message;
+        card.layerStrip.replaceChildren(failed);
+      });
   }
 
   function getCard(task) {
@@ -1023,6 +1378,8 @@
     $("stat-video-running").textContent = Number(stats.video_active || 0);
     $("stat-image-total").textContent = Number(stats.image_total || 0);
     $("stat-image-running").textContent = Number(stats.image_active || 0);
+    $("stat-layers-total").textContent = Number(stats.layers_total || 0);
+    $("stat-layers-running").textContent = Number(stats.layers_active || 0);
   }
 
   function renderModelOptions() {
@@ -1436,6 +1793,19 @@
       $("gen-sampler").value = defaults.sampler || "euler";
       $("gen-scheduler").value = defaults.scheduler || "simple";
       $("gen-negative").value = defaults.negative_prompt || "";
+    } else if (state.generateMode === "layers") {
+      $("gen-layers-resolution").value = defaults.resolution || 1280;
+      $("gen-layers-steps").value = defaults.steps || 30;
+      $("gen-layers-depth-resolution").value =
+        defaults.resolution_depth != null ? defaults.resolution_depth : -1;
+      $("gen-layers-quant").value = defaults.quant_mode || "none";
+      $("gen-layers-tblr").value = defaults.tblr_split === false ? "false" : "true";
+      $("gen-layers-lama").value = defaults.use_lama === false ? "false" : "true";
+      $("gen-layers-group-offload").value =
+        defaults.group_offload ? "true" : "false";
+      document.querySelectorAll("#layers-fields input[data-exclude-tag]").forEach((input) => {
+        input.checked = false;
+      });
     } else {
       $("gen-width").value = defaults.width || 1344;
       $("gen-height").value = defaults.height || 768;
@@ -1459,12 +1829,17 @@
       clearVideoRefs();
       clearReferenceVideos();
     }
+    if (mode !== "layers") clearLayersSource();
     document.querySelectorAll("#generate-tabs button").forEach((button) => {
       button.classList.toggle("active", button.dataset.mode === mode);
     });
-    $("generate-title").textContent = mode === "image" ? "Generate image" : "Generate video";
+    $("generate-title").textContent =
+      mode === "image" ? "Generate image" : mode === "layers" ? "Decompose layers" : "Generate video";
     $("image-fields").hidden = mode !== "image";
     $("video-fields").hidden = mode !== "video";
+    $("layers-fields").hidden = mode !== "layers";
+    $("gen-prompt-row").hidden = mode === "layers";
+    $("gen-prompt").required = mode !== "layers";
     $("gen-negative-row").hidden = mode !== "image";
     $("generate-error").hidden = true;
     updateAccelVisibility();
@@ -1476,6 +1851,7 @@
     clearImageRefs();
     clearVideoRefs();
     clearReferenceVideos();
+    clearLayersSource();
     setGenerateMode(mode);
     $("generate-dialog").showModal();
     try {
@@ -1522,7 +1898,7 @@
     showGenerateError("");
     const mode = state.generateMode;
     const prompt = $("gen-prompt").value.trim();
-    if (!prompt) {
+    if (mode !== "layers" && !prompt) {
       showGenerateError("prompt is required");
       return;
     }
@@ -1540,7 +1916,30 @@
     let headers = {};
     let body;
 
-    if (mode === "image") {
+    if (mode === "layers") {
+      const file = $("gen-layers-image").files[0];
+      if (!file) {
+        showGenerateError("source image is required");
+        return;
+      }
+      const form = new FormData();
+      form.append("model", model);
+      form.append("image", file, file.name || "source.png");
+      form.append("resolution", String(numberValue("gen-layers-resolution", 1280)));
+      form.append("steps", String(numberValue("gen-layers-steps", 30)));
+      form.append("resolution_depth", String(numberValue("gen-layers-depth-resolution", -1)));
+      form.append("seed", String(numberValue("gen-seed", 0)));
+      form.append("quant_mode", $("gen-layers-quant").value);
+      form.append("tblr_split", $("gen-layers-tblr").value);
+      form.append("use_lama", $("gen-layers-lama").value);
+      form.append("group_offload", $("gen-layers-group-offload").value);
+      const excludeTags = Array.from(
+        document.querySelectorAll("#layers-fields input[data-exclude-tag]:checked")
+      ).map((input) => input.dataset.excludeTag);
+      if (excludeTags.length) form.append("exclude_tags", excludeTags.join(","));
+      url = "/v2/extension/layers/decompose";
+      body = form;
+    } else if (mode === "image") {
       if (imageRefs.length) {
         if (!modelSupportsEdit(model)) {
           showGenerateError("this model does not support reference images");
@@ -1669,6 +2068,10 @@
       $("generate-dialog").close();
       $("gen-prompt").value = "";
       $("gen-negative").value = "";
+      clearLayersSource();
+      document.querySelectorAll("#layers-fields input[data-exclude-tag]").forEach((input) => {
+        input.checked = false;
+      });
       clearImageRefs();
       clearVideoRefs();
       toast("Queued " + (id || "task"));
@@ -1684,7 +2087,7 @@
   function filterByModel(model, modality) {
     state.filters.model = model;
     $("model-filter").value = model;
-    if (modality === "video" || modality === "image") {
+    if (modality === "video" || modality === "image" || modality === "layers") {
       state.filters.kind = modality;
       document.querySelectorAll("#kind-tabs button").forEach((button) => {
         button.classList.toggle("active", button.dataset.kind === modality);
@@ -1742,6 +2145,7 @@
   $("models-btn").addEventListener("click", openModels);
   $("new-image-btn").addEventListener("click", () => openGenerate("image"));
   $("new-video-btn").addEventListener("click", () => openGenerate("video"));
+  $("new-layers-btn").addEventListener("click", () => openGenerate("layers"));
   $("generate-tabs").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-mode]");
     if (button) setGenerateMode(button.dataset.mode);
@@ -1777,7 +2181,7 @@
     if (runtimeButton) {
       const id = runtimeButton.closest(".card")?.dataset.id;
       const task = state.tasks.find((item) => item.id === id);
-      if (task) openRuntime(task);
+      if (task) openTaskDetails(task);
       return;
     }
     const img = event.target.closest("img[data-full]");
@@ -1790,9 +2194,10 @@
   $("lightbox").addEventListener("click", (event) => {
     if (event.target === $("lightbox")) $("lightbox").close();
   });
-  $("runtime-close").addEventListener("click", () => $("runtime-dialog").close());
-  $("runtime-dialog").addEventListener("click", (event) => {
-    if (event.target === $("runtime-dialog")) $("runtime-dialog").close();
+  $("task-close").addEventListener("click", () => $("task-dialog").close());
+  $("task-dialog-close").addEventListener("click", () => $("task-dialog").close());
+  $("task-dialog").addEventListener("click", (event) => {
+    if (event.target === $("task-dialog")) $("task-dialog").close();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {

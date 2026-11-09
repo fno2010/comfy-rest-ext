@@ -77,6 +77,8 @@ async def test_task_list_paginates_and_reports_totals(tasks):
         "video_active": 1,
         "image_total": 1,
         "image_active": 0,
+        "layers_total": 0,
+        "layers_active": 0,
     }
     assert body["models"] == ["m1", "m2"]
 

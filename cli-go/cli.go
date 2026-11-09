@@ -72,6 +72,7 @@ func newRootCmd() *cobra.Command {
 		a.modelsCmd(),
 		a.videosCmd(),
 		a.imagesCmd(),
+		a.layersCmd(),
 		a.depsCmd(),
 		a.snapshotCmd(),
 		a.nodesCmd(),
@@ -1940,4 +1941,309 @@ func (a *app) versionCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func (a *app) layersCmd() *cobra.Command {
+	parent := &cobra.Command{
+		Use:   "layers",
+		Short: "Decompose anime images into editable layers",
+		Long:  "See-through layer decomposition. With no subcommand, behaves like `layers list`.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.result(a.layersList())
+		},
+	}
+	parent.AddCommand(
+		a.layersDecomposeCmd(),
+		a.layersListCmd(),
+		a.layersStatusCmd(),
+		a.layersWaitCmd(),
+		a.layersContentCmd(),
+		a.layersPSDCmd(),
+		a.layersPreviewCmd(),
+	)
+	return parent
+}
+
+func (a *app) layersDecomposeCmd() *cobra.Command {
+	var model, quantMode, excludeTags string
+	var resolution, steps, depthResolution, seed int
+	var tblrSplit, useLama, groupOffload bool
+	cmd := &cobra.Command{
+		Use:   "decompose IMAGE",
+		Short: "Decompose one anime image into layers",
+		Long:  "Submit an asynchronous See-through task. Use `layers wait` and `layers content` to retrieve the layer ZIP.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			_ = writer.WriteField("model", model)
+			if resolution > 0 {
+				_ = writer.WriteField("resolution", strconv.Itoa(resolution))
+			}
+			if steps > 0 {
+				_ = writer.WriteField("steps", strconv.Itoa(steps))
+			}
+			_ = writer.WriteField("resolution_depth", strconv.Itoa(depthResolution))
+			if seed != 0 {
+				_ = writer.WriteField("seed", strconv.Itoa(seed))
+			}
+			_ = writer.WriteField("tblr_split", strconv.FormatBool(tblrSplit))
+			_ = writer.WriteField("use_lama", strconv.FormatBool(useLama))
+			_ = writer.WriteField("group_offload", strconv.FormatBool(groupOffload))
+			_ = writer.WriteField("quant_mode", quantMode)
+			if excludeTags != "" {
+				_ = writer.WriteField("exclude_tags", excludeTags)
+			}
+			file, err := os.Open(args[0])
+			if err != nil {
+				return a.result(fail(err, a.globals.JSON, 2))
+			}
+			part, err := writer.CreateFormFile("image", filepath.Base(args[0]))
+			if err != nil {
+				file.Close()
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			_, copyErr := io.Copy(part, file)
+			file.Close()
+			if copyErr != nil {
+				return a.result(fail(copyErr, a.globals.JSON, 1))
+			}
+			if err := writer.Close(); err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			data, _, err := a.client.request("POST", "/v2/extension/layers/decompose", body.Bytes(), writer.FormDataContentType(), false)
+			if err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			var out map[string]any
+			if err := json.Unmarshal(data, &out); err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if a.globals.JSON {
+				return a.result(emitJSON(out))
+			}
+			fmt.Printf("task %v queued (status: %v)\n", out["id"], out["status"])
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&model, "model", "see-through",
+		optional("layers model id", "see-through"))
+	cmd.Flags().IntVar(&resolution, "resolution", 0,
+		optional("square processing resolution", "the model default (1280)"))
+	cmd.Flags().IntVar(&steps, "steps", 0,
+		optional("LayerDiff diffusion steps", "the model default (30)"))
+	cmd.Flags().IntVar(&depthResolution, "resolution-depth", -1,
+		"depth resolution; -1 uses the layer resolution")
+	cmd.Flags().IntVar(&seed, "seed", 0,
+		optional("generation seed", "the model default (0)"))
+	cmd.Flags().BoolVar(&tblrSplit, "tblr-split", true,
+		"split symmetric parts into left/right")
+	cmd.Flags().BoolVar(&useLama, "use-lama", true,
+		"use LaMa inpainting for hair splitting")
+	cmd.Flags().BoolVar(&groupOffload, "group-offload", false,
+		optional("reduce peak memory at the cost of speed", "full model on GPU"))
+	cmd.Flags().StringVar(&quantMode, "quant-mode", "none",
+		"weight mode: none or nf4")
+	cmd.Flags().StringVar(&excludeTags, "exclude-tags", "",
+		optional("optional body tags to omit from generated layers", "keep all tags")+
+			" (allowed: wings,tail,objects)")
+	return cmd
+}
+
+func (a *app) layersListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List layer decomposition tasks",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.result(a.layersList())
+		},
+	}
+}
+
+func (a *app) layersList() int {
+	m, err := a.client.getJSON("/v2/extension/layers", nil)
+	if err != nil {
+		return fail(err, a.globals.JSON, 1)
+	}
+	if a.globals.JSON {
+		return emitJSON(m)
+	}
+	if items, ok := m["tasks"].([]any); ok {
+		for _, item := range items {
+			task, _ := item.(map[string]any)
+			fmt.Printf("%-40v %-12v layers=%v\n", task["id"], task["status"], task["layer_count"])
+		}
+	}
+	return 0
+}
+
+func (a *app) layersStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status ID",
+		Short: "Show a layer decomposition task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m, err := a.client.getJSON("/v2/extension/layers/"+url.PathEscape(args[0]), nil)
+			if err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if a.globals.JSON {
+				return a.result(emitJSON(m))
+			}
+			printStatus(m)
+			if v, ok := m["layer_count"]; ok {
+				fmt.Println("layers: ", v)
+			}
+			return nil
+		},
+	}
+}
+
+func (a *app) layersWaitCmd() *cobra.Command {
+	var timeout, interval float64
+	cmd := &cobra.Command{
+		Use:   "wait ID",
+		Short: "Wait for a layer task to finish",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			deadline := time.Time{}
+			if timeout > 0 {
+				deadline = time.Now().Add(time.Duration(timeout * float64(time.Second)))
+			}
+			for {
+				m, err := a.client.getJSON("/v2/extension/layers/"+url.PathEscape(id), nil)
+				if err != nil {
+					return a.result(fail(err, a.globals.JSON, 1))
+				}
+				status := fmt.Sprint(m["status"])
+				if !a.globals.JSON {
+					fmt.Printf("%s %v%%\n", status, m["progress"])
+				}
+				if status == "completed" {
+					if a.globals.JSON {
+						return a.result(emitJSON(m))
+					}
+					printStatus(m)
+					if v, ok := m["layer_count"]; ok {
+						fmt.Println("layers: ", v)
+					}
+					return nil
+				}
+				if status == "failed" || status == "cancelled" {
+					if a.globals.JSON {
+						return a.result(emitJSON(m))
+					}
+					printStatus(m)
+					return a.result(1)
+				}
+				if !deadline.IsZero() && time.Now().After(deadline) {
+					return a.result(fail(fmt.Errorf("timed out waiting for %s", id), a.globals.JSON, 5))
+				}
+				if interval > 0 {
+					time.Sleep(time.Duration(interval * float64(time.Second)))
+				}
+			}
+		},
+	}
+	cmd.Flags().Float64Var(&timeout, "timeout", 1800,
+		"maximum seconds to wait; 0 waits indefinitely")
+	cmd.Flags().Float64Var(&interval, "interval", 5,
+		"seconds between polls; 0 polls without sleeping")
+	return cmd
+}
+
+func (a *app) layersContentCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "content ID",
+		Short: "Download a completed layer archive",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			path := out
+			if path == "" {
+				path = id + ".zip"
+			}
+			data, err := a.client.getRaw("/v2/extension/layers/" + url.PathEscape(id) + "/content")
+			if err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if a.globals.JSON {
+				return a.result(emitJSON(map[string]any{"path": path, "bytes": len(data)}))
+			}
+			fmt.Println("saved:", filepath.Clean(path))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "",
+		optional("output ZIP path", "ID.zip"))
+	return cmd
+}
+
+func (a *app) layersPreviewCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "preview ID",
+		Short: "Download a layer preview image",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			path := out
+			if path == "" {
+				path = id + "_preview.png"
+			}
+			data, err := a.client.getRaw("/v2/extension/layers/" + url.PathEscape(id) + "/preview")
+			if err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if a.globals.JSON {
+				return a.result(emitJSON(map[string]any{"path": path, "bytes": len(data)}))
+			}
+			fmt.Println("saved:", filepath.Clean(path))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "",
+		optional("output PNG path", "ID_preview.png"))
+	return cmd
+}
+
+func (a *app) layersPSDCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "psd ID",
+		Short: "Download a server-generated PSD",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			path := out
+			if path == "" {
+				path = id + ".psd"
+			}
+			data, err := a.client.getRaw("/v2/extension/layers/" + url.PathEscape(id) + "/psd")
+			if err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				return a.result(fail(err, a.globals.JSON, 1))
+			}
+			if a.globals.JSON {
+				return a.result(emitJSON(map[string]any{"path": path, "bytes": len(data)}))
+			}
+			fmt.Println("saved:", filepath.Clean(path))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "",
+		optional("output PSD path", "ID.psd"))
+	return cmd
 }

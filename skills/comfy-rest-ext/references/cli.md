@@ -101,6 +101,24 @@ returns an async task; download with `videos content --out`. When `--out` is
 omitted, `videos content` derives `.webm`/`.mkv` from the task media type and
 otherwise uses `.mp4`.
 
+## Layers
+
+```bash
+comfy-rest-ext --json layers decompose IMAGE --model see-through --resolution 1024 --steps 20
+# optional, generation-output filter for a character with no wings/tail:
+comfy-rest-ext --json layers decompose IMAGE --model see-through --exclude-tags wings,tail
+comfy-rest-ext --json layers list
+comfy-rest-ext --json layers status TASK_ID
+comfy-rest-ext --json layers wait TASK_ID --timeout 600
+comfy-rest-ext --json layers content TASK_ID --out layers.zip
+comfy-rest-ext --json layers psd TASK_ID --out layers.psd
+comfy-rest-ext --json layers preview TASK_ID --out preview.png
+```
+
+`decompose` is asynchronous. The completed task exposes `layer_count`,
+`preview_url`, `archive_url`, and `psd_url`; ZIP contains layer PNGs plus a JSON
+manifest, and PSD is generated server-side.
+
 ## Provisioning
 
 ```bash

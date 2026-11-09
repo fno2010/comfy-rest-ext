@@ -84,6 +84,12 @@ def _summary(task: Any) -> Dict[str, Any]:
         payload = _image_task_summary(task)
         payload["kind"] = "image"
         return payload
+    if task.modality == "layers":
+        # Lazy import avoids a route-module import cycle at startup.
+        from ..layers import _summary as _layers_summary
+        payload = _layers_summary(task)
+        payload["kind"] = "layers"
+        return payload
     payload = _video_response(task)
     payload["kind"] = "video"
     return payload
@@ -102,7 +108,7 @@ async def list_tasks(request: web.Request) -> web.Response:
     limit = max(1, min(MAX_LIMIT, _parse_int(query.get("limit"), DEFAULT_LIMIT)))
     offset = max(0, _parse_int(query.get("offset"), 0))
     kind = query.get("kind", "all")
-    if kind not in ("all", "video", "image"):
+    if kind not in ("all", "video", "image", "layers"):
         kind = "all"
     status = query.get("status", "all")
     if status not in ("all", "active", "completed", "failed"):
@@ -124,6 +130,11 @@ async def list_tasks(request: web.Request) -> web.Response:
         "image_active": sum(
             1 for task in tasks
             if task.modality == "image" and task.status in ACTIVE_STATUSES
+        ),
+        "layers_total": sum(1 for task in tasks if task.modality == "layers"),
+        "layers_active": sum(
+            1 for task in tasks
+            if task.modality == "layers" and task.status in ACTIVE_STATUSES
         ),
     }
     models = sorted({

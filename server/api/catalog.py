@@ -17,11 +17,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Tuple
 
-from .workflows import anima, h3, qwen_image_21
+from .workflows import anima, h3, qwen_image_21, see_through
 
 logger = logging.getLogger("comfy-rest-ext.catalog")
 
-Modality = Literal["video", "image"]
+Modality = Literal["video", "image", "layers"]
 
 
 @dataclass(frozen=True)
@@ -422,6 +422,37 @@ QWEN_IMAGE_SPEC = register(ModelSpec(
     description="Qwen-Image 2.1 7B text-to-image and instruction editing",
 ))
 
+SEE_THROUGH_SPEC = register(ModelSpec(
+    id="see-through",
+    modality="layers",
+    family="see_through",
+    tasks=("decompose",),
+    build=see_through.build_see_through_task,
+    defaults={
+        "resolution": 1280,
+        "steps": 30,
+        "resolution_depth": -1,
+        "tblr_split": True,
+        "use_lama": True,
+        "quant_mode": "none",
+        "group_offload": False,
+    },
+    required_nodes=(
+        "SeeThrough_LoadLayerDiffModel",
+        "SeeThrough_LoadDepthModel",
+        "SeeThrough_GenerateLayers",
+        "SeeThrough_GenerateDepth",
+        "SeeThrough_PostProcess",
+        "SeeThrough_SavePSD",
+    ),
+    capabilities=frozenset({"layers", "depth", "psd", "exclude_tags"}),
+    max_n=1,
+    output_mime="application/zip",
+    timeout_s=1800,
+    description="See-through anime layer decomposition into layered PSD/PNG assets",
+))
+
+
 QWEN_IMAGE_TURBO_SPEC = register(ModelSpec(
     id="qwen-image-2.1-turbo",
     modality="image",
@@ -455,18 +486,21 @@ BUILDERS: Dict[str, Callable[[Any], Any]] = {
     "h3": h3.build_h3_task,
     "anima": anima.build_anima_task,
     "qwen_image_21": qwen_image_21.build_qwen_image_task,
+    "see_through": see_through.build_see_through_task,
 }
 
 BUILDER_MODALITY = {
     "h3": "video",
     "anima": "image",
     "qwen_image_21": "image",
+    "see_through": "layers",
 }
 
 BUILDER_TASKS = {
     "h3": frozenset({"t2va", "fl2va", "r2v"}),
     "anima": frozenset({"t2i"}),
     "qwen_image_21": frozenset({"t2i", "edit"}),
+    "see_through": frozenset({"decompose"}),
 }
 
 BUILDER_DEFAULTS_KEYS = {
@@ -482,6 +516,11 @@ BUILDER_DEFAULTS_KEYS = {
         "steps", "cfg", "sampler", "scheduler", "negative_prompt",
         "resolution", "n", "seed",
     }),
+    "see_through": frozenset({
+        "resolution", "steps", "resolution_depth", "tblr_split",
+        "use_lama", "quant_mode", "group_offload", "seed",
+        "exclude_tags",
+    }),
 }
 
 BUILDER_ASSET_KEYS = {
@@ -495,6 +534,7 @@ BUILDER_ASSET_KEYS = {
     "qwen_image_21": frozenset({
         "unet", "turbo_unet", "text_encoder", "vae",
     }),
+    "see_through": frozenset(),
 }
 
 _MODEL_KEYS = {

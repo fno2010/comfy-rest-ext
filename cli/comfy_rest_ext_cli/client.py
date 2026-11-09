@@ -192,8 +192,9 @@ class ComfyRestClient:
             "GET", f"/v2/extension/image/{urllib.parse.quote(image_id)}"
         )
 
-    def create_video_multipart(
+    def _post_multipart(
         self,
+        path: str,
         payload: Dict[str, Any],
         files: list,
     ) -> Dict[str, Any]:
@@ -224,9 +225,45 @@ class ComfyRestClient:
         body = b"".join(parts)
         return self._request(
             "POST",
-            "/v1/videos",
+            path,
             body=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+
+    def create_video_multipart(
+        self,
+        payload: Dict[str, Any],
+        files: list,
+    ) -> Dict[str, Any]:
+        return self._post_multipart("/v1/videos", payload, files)
+
+    def create_layers(
+        self, payload: Dict[str, Any], files: list,
+    ) -> Dict[str, Any]:
+        return self._post_multipart("/v2/extension/layers/decompose", payload, files)
+
+    def list_layers(self) -> list:
+        data = self._request("GET", "/v2/extension/layers")
+        return data.get("tasks", []) if isinstance(data, dict) else []
+
+    def get_layer(self, task_id: str) -> Dict[str, Any]:
+        return self._request(
+            "GET", f"/v2/extension/layers/{urllib.parse.quote(task_id)}"
+        )
+
+    def get_layer_content(self, task_id: str) -> bytes:
+        return self._request(
+            "GET", f"/v2/extension/layers/{urllib.parse.quote(task_id)}/content"
+        )
+
+    def get_layer_psd(self, task_id: str) -> bytes:
+        return self._request(
+            "GET", f"/v2/extension/layers/{urllib.parse.quote(task_id)}/psd"
+        )
+
+    def get_layer_preview(self, task_id: str) -> bytes:
+        return self._request(
+            "GET", f"/v2/extension/layers/{urllib.parse.quote(task_id)}/preview"
         )
 
     def get_video(self, video_id: str) -> Dict[str, Any]:

@@ -273,6 +273,46 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--out", help="output path (default <image_id>_<index>.png)")
     sp.set_defaults(func=commands.cmd_image_content)
 
+    # -- layers ---------------------------------------------------------
+    p = sub.add_parser("layers", help="decompose / inspect See-through layer tasks")
+    p.set_defaults(func=commands.cmd_layers)
+    layers_sub = p.add_subparsers(dest="layers_command")
+    sp = layers_sub.add_parser("decompose", help="decompose one image into layers")
+    sp.add_argument("image", help="input image")
+    sp.add_argument("--model", default="see-through", help="layers model id")
+    sp.add_argument("--resolution", type=int, help="square processing resolution")
+    sp.add_argument("--steps", type=int, help="LayerDiff steps")
+    sp.add_argument("--resolution-depth", type=int, default=-1,
+                    help="depth resolution (-1 follows the layer resolution)")
+    sp.add_argument("--seed", type=int)
+    sp.add_argument("--tblr-split", action=argparse.BooleanOptionalAction, default=True)
+    sp.add_argument("--use-lama", action=argparse.BooleanOptionalAction, default=True)
+    sp.add_argument("--group-offload", action="store_true")
+    sp.add_argument("--quant-mode", choices=["none", "nf4"], default="none")
+    sp.add_argument("--exclude-tags", default="",
+                    help="optional body tags to skip before diffusion (wings,tail,objects)")
+    sp.set_defaults(func=commands.cmd_layers_decompose)
+    sp = layers_sub.add_parser("list", help="list layer tasks")
+    sp.set_defaults(func=commands.cmd_layers)
+    sp = layers_sub.add_parser("status", help="show a layer task")
+    sp.add_argument("task_id")
+    sp.set_defaults(func=commands.cmd_layers_status)
+    sp = layers_sub.add_parser("wait", help="wait for a layer task")
+    sp.add_argument("task_id")
+    sp.add_argument("--timeout", type=float, default=1800,
+                    help="maximum seconds to wait (0 disables)")
+    sp.add_argument("--quiet", action="store_true")
+    sp.set_defaults(func=commands.cmd_layers_wait)
+    for name, func, suffix in (
+        ("content", commands.cmd_layers_content, ".zip"),
+        ("psd", commands.cmd_layers_psd, ".psd"),
+        ("preview", commands.cmd_layers_preview, "_preview.png"),
+    ):
+        sp = layers_sub.add_parser(name, help=f"download layer {name}")
+        sp.add_argument("task_id")
+        sp.add_argument("--out", help=f"output path (default TASK_ID{suffix})")
+        sp.set_defaults(func=func)
+
     # -- downloads ------------------------------------------------------
     p = sub.add_parser("downloads", help="manage model download tasks")
     downloads_sub = p.add_subparsers(dest="downloads_command", required=True)

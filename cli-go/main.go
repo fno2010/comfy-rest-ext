@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-var version = "0.9.0"
+var version = "0.10.0"
 
 type Globals struct {
 	BaseURL string

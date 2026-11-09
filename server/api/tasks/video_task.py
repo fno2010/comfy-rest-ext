@@ -289,6 +289,24 @@ def _collect_output_paths(outputs: dict) -> List[str]:
     return paths
 
 
+def _collect_layer_paths(prefix: str) -> List[str]:
+    """Collect See-through layer files written outside ComfyUI's images map.
+
+    SeeThrough_SavePSD is an output node that writes layer PNGs + a JSON
+    manifest directly to ComfyUI's output directory.  The task runner has to
+    discover them by the unique prefix emitted by the workflow builder.
+    """
+    import glob
+    import folder_paths
+
+    output_dir = folder_paths.get_output_directory()
+    paths = [
+        path for path in glob.glob(os.path.join(output_dir, prefix + "*"))
+        if os.path.isfile(path)
+    ]
+    return sorted(paths)
+
+
 # Weighted total-progress model. Only the sampler reports step-level
 # progress; conditioning/decode/save phases are modeled with fixed weights.
 DEFAULT_PHASE_WEIGHTS = {
@@ -529,6 +547,10 @@ async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
                 return task
 
             paths = _collect_output_paths(outputs)
+            if task.modality == "layers":
+                layer_paths = _collect_layer_paths(built.output_prefix)
+                if layer_paths:
+                    paths = layer_paths
             if paths:
                 task.output_paths = paths
                 task.output_path = paths[0]
@@ -539,9 +561,9 @@ async def _submit_generation_task_inner(task: GenerationTask) -> GenerationTask:
                 sync_status()
                 return task
 
-            if task.modality == "image":
+            if task.modality in ("image", "layers"):
                 task.status = "failed"
-                task.error = "generation completed without an image output"
+                task.error = "generation completed without an output artifact"
                 sync_status()
                 return task
 

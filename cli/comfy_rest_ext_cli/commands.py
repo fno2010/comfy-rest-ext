@@ -745,6 +745,125 @@ def cmd_video_delete(client: ComfyRestClient, args: Any) -> int:
     return 0
 
 
+def cmd_layers(client: ComfyRestClient, args: Any) -> int:
+    try:
+        tasks = client.list_layers()
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(tasks, True)
+    for task in tasks:
+        print(f"{task.get('id', ''):<40} {task.get('status', ''):<12} "
+              f"layers={task.get('layer_count', 0)}")
+    return 0
+
+
+def cmd_layers_decompose(client: ComfyRestClient, args: Any) -> int:
+    try:
+        with open(args.image, "rb") as f:
+            image = f.read()
+    except OSError as e:
+        return _emit_error(f"image file error: {e}")
+    payload: Dict[str, Any] = {
+        "model": args.model,
+        "resolution_depth": args.resolution_depth,
+        "tblr_split": args.tblr_split,
+        "use_lama": args.use_lama,
+        "group_offload": args.group_offload,
+        "quant_mode": args.quant_mode,
+    }
+    if args.exclude_tags.strip():
+        payload["exclude_tags"] = args.exclude_tags.strip()
+    if args.resolution is not None:
+        payload["resolution"] = args.resolution
+    if args.steps is not None:
+        payload["steps"] = args.steps
+    if args.seed is not None:
+        payload["seed"] = args.seed
+    try:
+        task = client.create_layers(payload, [("image", os.path.basename(args.image), image)])
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(task, True)
+    print(f"task {task.get('id', '')} queued (status: {task.get('status', '')})")
+    return 0
+
+
+def cmd_layers_status(client: ComfyRestClient, args: Any) -> int:
+    try:
+        task = client.get_layer(args.task_id)
+    except ApiError as e:
+        return _emit_error(str(e))
+    if args.json:
+        return _emit(task, True)
+    print(f"id:         {task.get('id', '')}")
+    print(f"status:     {task.get('status', '')}")
+    print(f"progress:   {task.get('progress', 0)}%")
+    print(f"layers:     {task.get('layer_count', 0)}")
+    if task.get("error"):
+        err = task["error"]
+        print(f"error:      {err.get('message', err)}")
+    for key in ("preview_url", "archive_url", "psd_url"):
+        if task.get(key):
+            print(f"{key}: {task[key]}")
+    return 0
+
+
+def cmd_layers_wait(client: ComfyRestClient, args: Any) -> int:
+    deadline = time.time() + args.timeout if args.timeout else None
+    while True:
+        try:
+            task = client.get_layer(args.task_id)
+        except ApiError as e:
+            return _emit_error(str(e))
+        status = task.get("status")
+        if not args.json and not args.quiet:
+            print(f"[{task.get('id', '')}] {status} {task.get('progress', 0)}%",
+                  file=sys.stderr)
+        if status in ("completed", "failed", "cancelled"):
+            if args.json:
+                _emit(task, True)
+            else:
+                cmd_layers_status(client, args)
+            return 0 if status == "completed" else 1
+        if deadline is not None and time.time() >= deadline:
+            return _emit_error("timed out waiting for layer task")
+        time.sleep(POLL_INTERVAL)
+
+
+def _layers_download(client: ComfyRestClient, args: Any, kind: str, default_suffix: str) -> int:
+    out = args.out or f"{args.task_id}{default_suffix}"
+    try:
+        if kind == "content":
+            data = client.get_layer_content(args.task_id)
+        elif kind == "psd":
+            data = client.get_layer_psd(args.task_id)
+        else:
+            data = client.get_layer_preview(args.task_id)
+        if args.json:
+            size = _save_bytes(data, out, announce=False)
+            return _emit({"path": out, "bytes": size}, True)
+        _save_bytes(data, out)
+        return 0
+    except ApiError as e:
+        return _emit_error(str(e))
+    except OSError as e:
+        return _emit_error(f"cannot write {out}: {e}")
+
+
+def cmd_layers_content(client: ComfyRestClient, args: Any) -> int:
+    return _layers_download(client, args, "content", ".zip")
+
+
+def cmd_layers_psd(client: ComfyRestClient, args: Any) -> int:
+    return _layers_download(client, args, "psd", ".psd")
+
+
+def cmd_layers_preview(client: ComfyRestClient, args: Any) -> int:
+    return _layers_download(client, args, "preview", "_preview.png")
+
+
 def cmd_image_content(client: ComfyRestClient, args: Any) -> int:
     out = args.out or f"{args.image_id}_{args.index}.png"
     try:

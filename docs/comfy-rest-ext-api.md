@@ -862,7 +862,6 @@ ws.addEventListener('message', (event) => {
 | GET | `/v2/extension/restart/capabilities` | 查看可用重启适配器与活动任务 |
 | POST | `/v2/extension/restart` | 受控重启（显式授权） |
 | POST | `/v1/videos/{video_id}/retry` | 重试 provisioning-blocked 视频任务 |
-
 | POST | `/v2/extension/video/generate` | 提交视频生成任务 |
 | GET | `/v2/extension/video/{task_id}` | 查询视频生成状态 |
 | GET | `/v2/extension/video` | 列出视频生成任务 |
@@ -871,6 +870,15 @@ ws.addEventListener('message', (event) => {
 | GET | `/v2/extension/image/{task_id}/content` | 读取图片输出（`?index=N`） |
 | GET | `/v2/extension/image/{task_id}/assets/image/{index}` | 读取图片参考图 |
 | GET | `/v2/extension/image` | 列出图片生成任务 |
+| POST | `/v2/extension/layers/decompose` | 提交 See-through 图层分解任务（multipart） |
+| GET | `/v2/extension/layers` | 列出图层分解任务 |
+| GET | `/v2/extension/layers/{task_id}` | 查询图层任务 |
+| GET | `/v2/extension/layers/{task_id}/preview` | 读取预览图 |
+| GET | `/v2/extension/layers/{task_id}/content` | 下载图层 ZIP（PNG + JSON） |
+| GET | `/v2/extension/layers/{task_id}/psd` | 服务端导出 PSD |
+| GET | `/v2/extension/layers/{task_id}/assets/image/{index}` | 读取输入图 |
+| GET | `/v2/extension/layers/{task_id}/layers` | 图层清单 + 每层缩略图 URL |
+| GET | `/v2/extension/layers/{task_id}/layer/{index}/content` | 读取单层 RGBA PNG |
 | GET | `/v2/extension/ui` | 任务面板（HTML） |
 | GET | `/ui` | 302 到任务面板 |
 | GET | `/v1/models` | 列出模型（OpenAI 兼容） |
@@ -881,8 +889,6 @@ ws.addEventListener('message', (event) => {
 | GET | `/v1/videos/{video_id}/content` | 下载视频（OpenAI 兼容） |
 | GET | `/v1/videos` | 列出视频任务（OpenAI 兼容） |
 | DELETE | `/v1/videos/{video_id}` | 删除视频任务（OpenAI 兼容） |
-
-**总计：48 个端点**
 
 ---
 
@@ -966,6 +972,7 @@ ws.addEventListener('message', (event) => {
 | `anima-turbo` | `t2i` | 1024x1024 | 8 steps / cfg 1 / euler / simple |
 | `qwen-image-2.1` | `t2i`, `edit` | 1024x1024 | 25 steps / cfg 1 / euler / simple |
 | `qwen-image-2.1-turbo` | `t2i`, `edit` | 1024x1024 | 8-step ManualSigmas |
+| `see-through` | `decompose` | 1280x1280 | See-through LayerDiff + Marigold |
 
 ### POST `/v1/images/generations` — 同步生成
 
@@ -1060,6 +1067,93 @@ GET /v2/extension/acceleration/schema
 `+ Image` / `+ Video` 弹窗可直接提交任务：图片调用 `POST /v1/images/generations` 并带 `Prefer: respond-async`；视频调用 `POST /v1/videos`。提交成功后弹窗关闭、任务进入列表，由正常轮询跟踪进度。视频表单的 Acceleration 支持 legacy preset 和 `custom…`；`custom` 会从 `/v2/extension/acceleration/schema` 动态渲染四个维度、method 与参数控件，提交为结构化 `speed` 对象。`custom` 对 T2V/I2V/R2V 都可用；multipart 会把结构化 `speed` 序列化为 JSON 字段，服务端按同一规则解析。
 
 参考图：选择 Qwen-Image 2.1 时图片表单显示参考图上传（走 `/v1/images/edits`，prompt 用 `<image1>`…）；视频表单提供 `Text only` / `First frame (I2V)` / `Reference images (R2V)`，后两者走 `/v1/videos` multipart，R2V prompt 用 `<Picture N>`。R2V 下若模型声明 `reference_video` capability，还会显示参考视频上传（最多 3 个，prompt 用 `<Video N>`）。
+
+---
+
+## 图层分解（See-through）
+
+### POST `/v2/extension/layers/decompose` — 提交图层分解任务
+
+`multipart/form-data`，输入一张 anime 角色图：
+
+```bash
+curl -X POST http://host:8188/v2/extension/layers/decompose \
+  -F model=see-through \
+  -F image=@character.png \
+  -F resolution=1280 \
+  -F steps=30 \
+  -F resolution_depth=-1 \
+  -F tblr_split=true \
+  -F use_lama=true \
+  -F exclude_tags=wings,tail
+```
+
+可选字段：`quant_mode=none|nf4`、`group_offload=true|false`、
+`layerdiff_model`、`depth_model`、`seed`、`exclude_tags`。返回 `202` 任务记录。
+
+`exclude_tags` 接受以逗号分隔的 **可选身体部件**：`wings`、`tail`、`objects`。
+v3 UNet 的 body group 固定为 13 帧，不能直接缩成 10 帧；因此这些 tag 仍会参与
+diffusion，但会在生成结果中丢弃，不进入 depth、post-process、ZIP/PSD 或 `layer_count`。
+这是输出级过滤，不是减少计算量。只应在输入角色明确没有这些部件时使用；例如确认没有
+翅膀/尾巴的角色：`exclude_tags=wings,tail`。`objects` 包含道具/配件，默认不建议排除。
+
+质量基线是 `resolution=1280`、`steps=30`（模型默认值）。`512` 分辨率加
+`1~5` steps 只适合 API/链路 smoke test，输出会明显发糊或带噪点，不应作为质量样例。
+
+### GET `/v2/extension/layers/{task_id}` — 查询任务
+
+任务完成后包含：
+
+```json
+{
+  "id": "layers_...",
+  "status": "completed",
+  "layer_count": 23,
+  "input_image_url": "/v2/extension/layers/.../assets/image/0",
+  "preview_url": "/v2/extension/layers/.../preview",
+  "archive_url": "/v2/extension/layers/.../content",
+  "psd_url": "/v2/extension/layers/.../psd"
+}
+```
+
+`preview_url` 是服务端把最终 post-process 图层按清单位置合成为白底平面预览图
+（workflow 自带的 `GenerateLayers` 预览通常黑底且早于 depth/post-process，因此不作为默认
+预览）。它不是最终可编辑资产，也不包含 PSD 图层结构。真正的输出是 `archive_url` 的 ZIP
+或 `psd_url` 的 PSD；`layer_count` 是图层数量。
+
+### GET `/v2/extension/layers/{task_id}/layers` — 图层清单
+
+返回最终图层文件清单，供 dashboard 渲染缩略图：
+
+```json
+{
+  "id": "layers_...",
+  "width": 512,
+  "height": 512,
+  "layers": [
+    {
+      "index": 0,
+      "name": "topwear",
+      "filename": "comfy-rest-ext_layers_..._topwear.png",
+      "left": 63,
+      "top": 0,
+      "right": 449,
+      "bottom": 512,
+      "depth": null,
+      "url": "/v2/extension/layers/layers_.../layer/0/content"
+    }
+  ]
+}
+```
+
+`GET .../layer/{index}/content` 直接返回该层 PNG；dashboard 用这组缩略图展示分解结果，
+而不是只展示压平合成图。
+
+### GET `/v2/extension/layers/{task_id}/content` — 下载图层资产
+
+返回 ZIP，包含每层 RGBA PNG、depth PNG 和 `*_layers.json` 图层清单。
+`GET /v2/extension/layers/{task_id}/psd` 使用服务端 `psd-tools` 从图层 PNG
+和清单生成 PSD；ZIP 仍是无需额外依赖的完整资产下载方式。
 
 ---
 

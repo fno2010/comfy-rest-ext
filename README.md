@@ -8,6 +8,7 @@ Roadmap: [ROADMAP.md](ROADMAP.md) — v0.8.0 focuses on deployment-agnostic serv
 
 - **OpenAI 兼容视频生成 API** — T2V / I2V / R2V（图像或视频参考）生成、任务持久化、历史查询（MiniMax-H3）
 - **OpenAI 兼容图片生成 API** — 同步 `/v1/images/generations`、Qwen-Image 2.1 编辑、Anima/Qwen-Image 2.1 模型目录
+- **See-through 图层分解** — 单图 → 语义图层、depth、ZIP 资产与服务端 PSD；模型节点以外部 `ComfyUI-See-through` 依赖声明
 - **任务面板** — 单页 Web UI，显示视频/图片任务列表、进度、错误和生成结果，并可直接通过 OpenAI 兼容端点提交图片/视频任务
 - **模型下载** — 从 CivitAI、HuggingFace、直链下载模型到本地
 - **模型管理** — 递归列出模型、获取元数据、删除模型
@@ -100,6 +101,21 @@ pipx upgrade comfy-rest-ext-cli
 
 默认模型由 registry 决定，可用 `COMFY_REST_DEFAULT_MODEL` 显式指定；未配置时选择首个已注册视频模型。模型 adapter 的时长/任务/workflow 契约见 [`docs/adapter-contract.md`](docs/adapter-contract.md)。
 
+### See-through 图层分解依赖
+
+`see-through` 模型只有在 ComfyUI 已加载 `ComfyUI-See-through` 自定义节点时才会出现在
+`/v1/models`。该节点是外部依赖，不随扩展安装：
+
+```bash
+ln -s /path/to/ComfyUI-See-through "$COMFYUI/custom_nodes/ComfyUI-See-through"
+# 在 ComfyUI 的 Python 环境安装节点依赖
+"$COMFYUI/venv/bin/pip" install -r /path/to/ComfyUI-See-through/requirements.txt
+```
+
+节点首次运行会把 LayerDiff/深度模型下载到 ComfyUI 的 `models/SeeThrough`（或 HuggingFace
+缓存）。服务端 PSD 导出需要 `psd-tools`，已列入 `server/pyproject.toml` 依赖；ZIP
+下载不依赖它。`exclude_tags` 需要本仓库维护的 See-through fork；旧版节点没有该输入。
+
 ## 快速验证
 
 启动 ComfyUI 后，访问健康检查端点：
@@ -119,12 +135,12 @@ http://<host>:8188/v2/extension/ui
 
 `/ui` 会 302 到同一页面。面板按需刷新（有活跃任务时 2s，否则 5s；页面隐藏时暂停），展示：
 
-- 视频任务（`GET /v1/videos`）和图片任务（`GET /v2/extension/image`）
+- 视频任务（`GET /v1/videos`）、图片任务（`GET /v2/extension/image`）和图层任务（`GET /v2/extension/layers`）
 - 状态、进度条、当前节点、ETA、耗时、错误
-- 视频播放和图片缩略图/大图预览
+- 视频播放和图片缩略图/大图预览；图层任务显示最终合成预览 + 每层缩略图，并单独提供 `Layers ZIP` / `PSD` 下载
 - 分页、每页数量、按状态/类型/模型筛选、搜索、排序
 - Models 弹窗直接读取 `/v1/models`，以卡片展示并支持一键筛选，不跳转 JSON
-- `+ Image` / `+ Video` 弹窗直接提交生成任务：图片走 `POST /v1/images/generations` + `Prefer: respond-async`，视频走 `POST /v1/videos`；提交后任务立即进入列表并可跟踪进度
+- `+ Image` / `+ Video` / `+ Layers` 弹窗直接提交生成任务：图片走 `POST /v1/images/generations` + `Prefer: respond-async`，视频走 `POST /v1/videos`，图层分解走 `POST /v2/extension/layers/decompose`；提交后任务立即进入列表并可跟踪进度
 - 参考输入：Qwen-Image 2.1 的 image edit 支持 1–16 张参考图；视频支持 `First frame (I2V)` 单图、`Reference images (R2V)` 多图，以及 H3 的参考视频（`reference_video` capability，最多 3 个，prompt 用 `<Video N>`）。
 
 面板只请求扩展自身和 OpenAI 兼容端点：
@@ -196,7 +212,7 @@ GET /v2/extension/image/{id}/content?index=N
 | 字段 | 说明 |
 |---|---|
 | `builder` | 内置：`h3` / `anima` / `qwen_image_21`；也可用 `module:function` 从配置加载新 builder（如 `my_pkg.builder:build_task`）。动态 builder 必须同时声明 `modality` 和 `tasks`；其 `defaults`/`assets` 不做内置白名单校验。models.json 是受信任的本地配置，导入模块等同于执行本地代码 |
-| `modality` | `video` 或 `image` |
+| `modality` | `video`、`image` 或 `layers` |
 | `tasks` | 如 `["t2va","fl2va","r2v"]` 或 `["t2i","edit"]` |
 | `aliases` / `alias_tasks` | 兼容别名及别名对应 task；提供 `aliases` 时会替换旧列表，未显式给出的 `alias_tasks` 会按新 aliases 过滤 |
 | `defaults` | 覆盖模型默认参数（图片：steps/cfg/sampler/scheduler/negative_prompt/n/seed/lora_strength，qwen_image_21 另支持 resolution；视频：width/height/seconds/steps/sampler/scheduler/seed/ref_image_size） |
@@ -235,6 +251,7 @@ python3 -m cli --help
 | `models` | `list` / `get` / `all` / `info` / `delete` |
 | `videos` | `generate` / `status` / `list` / `wait` / `content` / `delete` |
 | `images` | `generate` / `edit` / `list` / `status` / `content` |
+| `layers` | `decompose` / `list` / `status` / `wait` / `content` / `psd` / `preview` |
 | `downloads` | `create` / `status` / `list` / `cancel` |
 | `deps` | `install` / `status` / `check-workflow` / `check-node` / `restore` |
 | `snapshot` | `export` / `import` / `diff` / `list` |
@@ -285,6 +302,16 @@ comfy-rest-ext-cli images edit "replace <image1> background with snow" \
 comfy-rest-ext-cli images list
 comfy-rest-ext-cli images status image_xxxx
 comfy-rest-ext-cli images content image_xxxx --index 0 --out out.png
+
+# 图层分解（See-through）
+comfy-rest-ext-cli layers decompose character.png --model see-through \
+  --resolution 1024 --steps 20
+# 角色明确没有翅膀/尾巴时，生成后丢弃这些可选的 tag（固定 13 帧仍会计算）：
+comfy-rest-ext-cli layers decompose character.png --model see-through \
+  --resolution 1024 --steps 20 --exclude-tags wings,tail
+comfy-rest-ext-cli layers wait layers_xxxx --timeout 600
+comfy-rest-ext-cli layers content layers_xxxx --out layers.zip
+comfy-rest-ext-cli layers psd layers_xxxx --out layers.psd
 
 # 模型下载
 comfy-rest-ext-cli downloads create https://civitai.com/models/123
