@@ -4,6 +4,16 @@ Use this only when the live model inventory reports a `layers` model (normally
 `see-through`). The API is not OpenAI Images compatible: it consumes exactly one
 image and returns layered artifacts.
 
+Before generating, check the model dependency inventory:
+
+```bash
+comfy-rest-ext --json capabilities --model see-through
+```
+
+If `model.see-through.node_pack` is `installable`, provision that id, follow
+`restart_required`, and re-run discovery. Do not substitute a local filesystem
+path in a public workflow.
+
 ```bash
 comfy-rest-ext --json layers decompose INPUT.png \
   --model see-through --resolution 1024 --steps 20 \
