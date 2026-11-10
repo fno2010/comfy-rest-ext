@@ -12,7 +12,9 @@ canonical fallbacks.
 | `modality`, `tasks` | Capabilities exposed by `/v1/models` |
 | `build(task)` | Build a ComfyUI API-format workflow |
 | `defaults`, `assets`, `variant` | Model defaults and checkpoint/LoRA selection |
-| `required_nodes`, `required_assets` | Availability requirements used to hide unservable models |
+| `required_nodes`, `required_assets` | Fast availability checks used to hide unservable models |
+| `dependencies` | Pinned model-level dependency specs (custom nodes, packages) |
+| `capability_dependencies` | Optional capability dependency specs such as `exclude_tags` |
 | `capabilities` | Feature flags such as `reference_video` |
 | `accel_methods` | Acceleration allowlist (`"*"` or method ids) |
 | `length_for_seconds(seconds)` | Model-specific duration → frame count |
@@ -43,5 +45,10 @@ H3.
 
 Acceleration methods declare required ComfyUI nodes and Python package groups.
 The schema reports `available`, `missing_nodes`, and `missing_packages`;
-requests fail closed with a structured error. Provisioning is tracked separately
-in #49.
+requests fail closed with a structured error. Model hard dependencies and
+capability dependencies are reported by
+`GET /v2/extension/capabilities?model=<id>` using the same dependency probe.
+A dependency with a pinned install spec is `installable` and can be passed to
+`POST /v2/extension/provision`. Native custom-node installation checks out the
+declared commit and runs its requirements file; Manager specs use an exact
+registry version. Both report `requires_restart` for the caller.

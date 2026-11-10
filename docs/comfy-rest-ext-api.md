@@ -83,6 +83,39 @@ Dashboard 专用的统一任务列表，合并视频和图片任务，支持服�
 
 响应包含当前页 `data`、`total`、`has_more`、全局 `stats` 和可用 `models`；响应启用压缩。列表不返回全部历史，避免任务增长后 dashboard 超时。
 
+### Model 与 capability 的依赖声明
+
+`GET /v2/extension/capabilities?model=see-through` 同时返回两类依赖：
+
+```json
+[
+  {
+    "id": "model.see-through.node_pack",
+    "scope": "model",
+    "kind": "custom_node",
+    "status": "available",
+    "install_spec": {
+      "repo": "https://github.com/fno2010/ComfyUI-See-through.git",
+      "commit": "88163e0...",
+      "target": "ComfyUI-See-through",
+      "requirements": "requirements.txt",
+      "requires_restart": true
+    }
+  },
+  {
+    "id": "capability.see-through.exclude_tags.exclude_tags_node",
+    "scope": "capability",
+    "capability": "exclude_tags",
+    "status": "available"
+  }
+]
+```
+
+- `scope=model` 是模型硬依赖；缺失时模型不进入 `/v1/models`。
+- `scope=capability` 只影响可选能力；模型仍可服务。
+- 安装时使用 `POST /v2/extension/provision`，把上面的 `id` 放入 `capabilities`。
+- Native custom-node 安装会克隆 pinned commit，并在安装后执行 `requirements.txt`；完成后通常需要重启。
+
 ### POST `/v2/extension/provision` — 执行授权安装
 
 ```json

@@ -104,19 +104,27 @@ pipx upgrade comfy-rest-ext-cli
 ### See-through 图层分解依赖
 
 `see-through` 模型只有在 ComfyUI 已加载 `ComfyUI-See-through` 自定义节点时才会出现在
-`/v1/models`。该节点是外部依赖，不随扩展安装：
+`/v1/models`。该节点作为模型硬依赖声明在 catalog 中；扩展提供发现和 pinned 安装，但 release
+artifact 不包含节点源码。推荐通过 provisioning 流程安装：
 
 ```bash
-SEE_THROUGH_REPO=https://github.com/fno2010/ComfyUI-See-through.git
-SEE_THROUGH_COMMIT=88163e0acb07d198276d25bd65538174b3897b26
-git clone "$SEE_THROUGH_REPO" "$COMFYUI/custom_nodes/ComfyUI-See-through"
-git -C "$COMFYUI/custom_nodes/ComfyUI-See-through" checkout "$SEE_THROUGH_COMMIT"
-# 在 ComfyUI 的 Python 环境安装节点依赖
-"$COMFYUI/venv/bin/pip" install -r "$COMFYUI/custom_nodes/ComfyUI-See-through/requirements.txt"
+curl 'http://HOST:8188/v2/extension/capabilities?model=see-through'
+curl -X POST http://HOST:8188/v2/extension/provision \
+  -H 'Content-Type: application/json' \
+  -d '{"capabilities":["model.see-through.node_pack"],"authorized":true}'
+# restart_required=true 时重启 ComfyUI
 ```
 
-本地开发可以用自己的 checkout 或 symlink 替换上述 clone；公开部署示例应使用上面的
-Git URL + commit，避免依赖本机路径。
+该 install spec 固定为：
+
+```text
+repo:    https://github.com/fno2010/ComfyUI-See-through.git
+commit:  88163e0acb07d198276d25bd65538174b3897b26
+target:  ComfyUI-See-through
+requirements: requirements.txt
+```
+
+也可以手动按这个 URL + commit clone 并安装 `requirements.txt`。本地开发可以用自己的 checkout 或 symlink 替换，公开部署示例应使用上面的 Git URL + commit，避免依赖本机路径。
 
 节点首次运行会把 LayerDiff/深度模型下载到 ComfyUI 的 `models/SeeThrough`（或 HuggingFace
 缓存）。服务端 PSD 导出需要 `psd-tools`，已列入 `server/pyproject.toml` 依赖；ZIP

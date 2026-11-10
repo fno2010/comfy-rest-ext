@@ -182,12 +182,49 @@ async def _install_custom_node(spec: Dict[str, Any]) -> Dict[str, Any]:
     await proc.wait()
     if proc.returncode != 0:
         raise ProvisionError(502, f"git checkout failed for {commit}")
+    requirements = spec.get("requirements")
+    requirement_result = None
+    if requirements:
+        requirement_result = await _install_node_requirements(target, str(requirements))
     return {
         "kind": "custom_node",
         "backend": "native",
         "target": str(target),
         "commit": commit,
+        "requirements": requirement_result,
     }
+
+
+async def _install_node_requirements(target: Path, requirements: str) -> Dict[str, Any]:
+    """Install a declared node pack requirements file with the server Python."""
+    req = Path(requirements)
+    if req.is_absolute() or ".." in req.parts:
+        raise ProvisionError(400, "invalid node requirements path")
+    path = target / req
+    if not path.is_file():
+        raise ProvisionError(502, f"node requirements file not found: {path}")
+    cmd = [sys.executable, "-m", "pip", "install", "-r", str(path)]
+    logger.info("Installing node requirements: %s", path)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    output = []
+    if proc.stdout is not None:
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            output.append(line.decode("utf-8", errors="replace"))
+    await proc.wait()
+    if proc.returncode != 0:
+        raise ProvisionError(
+            502,
+            f"pip install -r failed for {path}",
+            {"requirements": str(path), "output_tail": "".join(output[-20:])},
+        )
+    return {"requirements": str(path), "returncode": proc.returncode}
 
 
 async def _install_python_package(spec: Dict[str, Any]) -> Dict[str, Any]:

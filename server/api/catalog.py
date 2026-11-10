@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Tuple
 
+from .dependencies import DependencySpec
 from .workflows import anima, h3, qwen_image_21, see_through
 
 logger = logging.getLogger("comfy-rest-ext.catalog")
@@ -130,6 +131,8 @@ class ModelSpec:
     assets: Dict[str, str] = field(default_factory=dict)
     required_nodes: Tuple[str, ...] = ()
     required_assets: Tuple[Tuple[str, str], ...] = ()
+    dependencies: Tuple[DependencySpec, ...] = ()
+    capability_dependencies: Dict[str, Tuple[DependencySpec, ...]] = field(default_factory=dict)
     aliases: Tuple[str, ...] = ()
     alias_tasks: Tuple[Tuple[str, str], ...] = ()
     capabilities: frozenset = frozenset()
@@ -422,6 +425,43 @@ QWEN_IMAGE_SPEC = register(ModelSpec(
     description="Qwen-Image 2.1 7B text-to-image and instruction editing",
 ))
 
+SEE_THROUGH_REQUIRED_NODES = (
+    "SeeThrough_LoadLayerDiffModel",
+    "SeeThrough_LoadDepthModel",
+    "SeeThrough_GenerateLayers",
+    "SeeThrough_GenerateDepth",
+    "SeeThrough_PostProcess",
+    "SeeThrough_SavePSD",
+)
+SEE_THROUGH_NODE_REPO = "https://github.com/fno2010/ComfyUI-See-through.git"
+SEE_THROUGH_NODE_COMMIT = "88163e0acb07d198276d25bd65538174b3897b26"
+SEE_THROUGH_NODE_TARGET = "ComfyUI-See-through"
+SEE_THROUGH_NODE_INSTALL = {
+    "kind": "custom_node",
+    "repo": SEE_THROUGH_NODE_REPO,
+    "commit": SEE_THROUGH_NODE_COMMIT,
+    "target": SEE_THROUGH_NODE_TARGET,
+    "requirements": "requirements.txt",
+    "requires_restart": True,
+}
+SEE_THROUGH_NODE_DEPENDENCY = DependencySpec(
+    id="node_pack",
+    kind="custom_node",
+    required_nodes=SEE_THROUGH_REQUIRED_NODES,
+    install_spec=SEE_THROUGH_NODE_INSTALL,
+    requires_restart=True,
+    description="ComfyUI-See-through custom node pack and its Python dependencies",
+)
+SEE_THROUGH_EXCLUDE_DEPENDENCY = DependencySpec(
+    id="exclude_tags_node",
+    kind="custom_node",
+    required_nodes=SEE_THROUGH_REQUIRED_NODES,
+    install_spec=SEE_THROUGH_NODE_INSTALL,
+    requires_restart=True,
+    check_commit=True,
+    description="See-through fork version that supports exclude_tags",
+)
+
 SEE_THROUGH_SPEC = register(ModelSpec(
     id="see-through",
     modality="layers",
@@ -437,14 +477,9 @@ SEE_THROUGH_SPEC = register(ModelSpec(
         "quant_mode": "none",
         "group_offload": False,
     },
-    required_nodes=(
-        "SeeThrough_LoadLayerDiffModel",
-        "SeeThrough_LoadDepthModel",
-        "SeeThrough_GenerateLayers",
-        "SeeThrough_GenerateDepth",
-        "SeeThrough_PostProcess",
-        "SeeThrough_SavePSD",
-    ),
+    required_nodes=SEE_THROUGH_REQUIRED_NODES,
+    dependencies=(SEE_THROUGH_NODE_DEPENDENCY,),
+    capability_dependencies={"exclude_tags": (SEE_THROUGH_EXCLUDE_DEPENDENCY,)},
     capabilities=frozenset({"layers", "depth", "psd", "exclude_tags"}),
     max_n=1,
     output_mime="application/zip",

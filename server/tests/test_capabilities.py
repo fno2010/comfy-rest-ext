@@ -106,6 +106,40 @@ async def test_custom_node_installer_rejects_unpinned_source(tmp_path, monkeypat
         })
 
 
+def test_model_dependency_is_reported_and_provisionable():
+    import importlib
+    dependency_module = importlib.import_module("api.dependencies")
+
+    required = {
+        "SeeThrough_LoadLayerDiffModel",
+        "SeeThrough_LoadDepthModel",
+        "SeeThrough_GenerateLayers",
+        "SeeThrough_GenerateDepth",
+        "SeeThrough_PostProcess",
+        "SeeThrough_SavePSD",
+    }
+    original = dependency_module.available_node_names
+    dependency_module.available_node_names = lambda: set(required)
+    try:
+        report = capabilities.capability_report("see-through")
+    finally:
+        dependency_module.available_node_names = original
+    model_dep = next(
+        item for item in report["capabilities"]
+        if item["id"] == "model.see-through.node_pack"
+    )
+    exclude_dep = next(
+        item for item in report["capabilities"]
+        if item["id"] == "capability.see-through.exclude_tags.exclude_tags_node"
+    )
+    assert model_dep["status"] == "available"
+    assert model_dep["kind"] == "custom_node"
+    assert model_dep["install_spec"]["requirements"] == "requirements.txt"
+    assert exclude_dep["status"] in ("available", "installable")
+    selected = provisioning._select_capabilities(["model.see-through.node_pack"])
+    assert selected and selected[0]["id"] == "model.see-through.node_pack"
+
+
 def test_unsupported_capability_has_no_silent_fallback():
     report = capabilities.capability_report(capability_ids=["step_cache.teacache"])
     item = report["capabilities"][0]

@@ -1,59 +1,55 @@
-"""
-Tests for workflow dependency functionality.
-"""
+"""Tests for the generic dependency probe."""
 
-import pytest
-from api.tasks.deps_task import (
-    detect_gpu,
-    parse_workflow_dependencies,
-    check_workflow_deps,
-)
+from __future__ import annotations
+
+from api.dependencies import DependencySpec, evaluate_dependency
 
 
-class TestDetectGpu:
-    """Tests for GPU detection."""
-
-    def test_detect_returns_string(self):
-        result = detect_gpu()
-        assert isinstance(result, str)
-        assert result in ("cuda", "rocm", "cpu")
-
-
-class TestParseWorkflowDependencies:
-    """Tests for workflow dependency parsing."""
-
-    def test_empty_workflow(self):
-        result = parse_workflow_dependencies({})
-        assert result == []
-
-    def test_none_workflow(self):
-        result = parse_workflow_dependencies(None)
-        assert result == []
-
-    def test_workflow_without_class_type(self):
-        workflow = {
-            "1": {
-                "class_type": "NonExistentNode",
-            }
-        }
-        result = parse_workflow_dependencies(workflow)
-        # Should return empty list since node doesn't exist
-        assert isinstance(result, list)
+def test_available_node_dependency():
+    dep = DependencySpec(
+        id="node_pack",
+        kind="custom_node",
+        required_nodes=("NodeA", "NodeB"),
+        install_spec={"kind": "custom_node", "repo": "https://github.com/a/b.git"},
+    )
+    report = evaluate_dependency(dep, nodes={"NodeA", "NodeB"})
+    assert report["status"] == "available"
+    assert report["missing_nodes"] == []
+    assert report["actions"] == []
 
 
-class TestCheckWorkflowDeps:
-    """Tests for workflow dependency checking."""
+def test_missing_dependency_is_installable_only_with_install_spec():
+    dep = DependencySpec(
+        id="node_pack",
+        kind="custom_node",
+        required_nodes=("NodeA",),
+        install_spec={"kind": "custom_node", "repo": "https://github.com/a/b.git"},
+    )
+    report = evaluate_dependency(dep, nodes=set())
+    assert report["status"] == "installable"
+    assert report["actions"][0]["kind"] == "custom_node"
 
-    @pytest.mark.asyncio
-    async def test_check_empty_workflow(self):
-        result = await check_workflow_deps({})
-        assert "missing" in result
-        assert "already_satisfied" in result
-        assert "can_run" in result
-        assert isinstance(result["can_run"], bool)
+    plain = DependencySpec(id="plain", kind="custom_node", required_nodes=("NodeA",))
+    report = evaluate_dependency(plain, nodes=set())
+    assert report["status"] == "unsupported"
 
-    @pytest.mark.asyncio
-    async def test_check_returns_gpu_type(self):
-        result = await check_workflow_deps({})
-        assert "gpu_type" in result
-        assert result["gpu_type"] in ("cuda", "rocm", "cpu")
+
+def test_commit_mismatch_is_installable(monkeypatch):
+    import importlib
+    dependencies = importlib.import_module("api.dependencies")
+
+    dep = DependencySpec(
+        id="exclude_tags",
+        kind="custom_node",
+        required_nodes=("NodeA",),
+        check_commit=True,
+        install_spec={
+            "kind": "custom_node",
+            "target": "ComfyUI-Test",
+            "commit": "a" * 40,
+        },
+    )
+    monkeypatch.setattr(dependencies, "_installed_commit", lambda target: "b" * 40)
+    report = evaluate_dependency(dep, nodes={"NodeA"})
+    assert report["status"] == "installable"
+    assert report["missing_version"] == {"current": "b" * 40, "expected": "a" * 40}

@@ -18,7 +18,8 @@ from .accel import (
     methods_for_dimension,
     ACCEL_DIMENSIONS,
 )
-from .catalog import available_models, get_model
+from .catalog import available_models, get_model, list_models
+from .dependencies import DependencySpec, evaluate_dependency
 from . import provisioners
 
 routes = PromptServer.instance.routes
@@ -71,6 +72,55 @@ def _method_capability(layer: str, method) -> Dict[str, Any]:
     }
 
 
+def _dependency_capability(
+    dependency: DependencySpec,
+    *,
+    scope: str,
+    owner: str,
+    capability: Optional[str] = None,
+) -> Dict[str, Any]:
+    report = evaluate_dependency(dependency)
+    suffix = f".{capability}" if capability else ""
+    cid = f"{scope}.{owner}{suffix}.{dependency.id}"
+    return {
+        "id": cid,
+        "scope": scope,
+        "owner": owner,
+        "capability": capability,
+        "kind": dependency.kind,
+        "status": report["status"],
+        "available": report["available"],
+        "required_nodes": report["required_nodes"],
+        "missing_nodes": report["missing_nodes"],
+        "required_packages": report["required_packages"],
+        "missing_packages": report["missing_packages"],
+        "missing_version": report["missing_version"],
+        "current_commit": report["current_commit"],
+        "install_spec": report["install_spec"],
+        "actions": report["actions"],
+        "requires_restart": report["requires_restart"],
+        "description": report["description"],
+    }
+
+
+def _model_dependency_items(spec) -> List[Dict[str, Any]]:
+    items = [
+        _dependency_capability(dep, scope="model", owner=spec.id)
+        for dep in spec.dependencies
+    ]
+    for capability, dependencies in (spec.capability_dependencies or {}).items():
+        items.extend(
+            _dependency_capability(
+                dep,
+                scope="capability",
+                owner=spec.id,
+                capability=capability,
+            )
+            for dep in dependencies
+        )
+    return items
+
+
 def capability_report(
     model_id: Optional[str] = None,
     capability_ids: Optional[Iterable[str]] = None,
@@ -94,6 +144,20 @@ def capability_report(
             if allowed is not None and "*" not in allowed and method.id not in allowed:
                 continue
             items.append(_method_capability(layer, method))
+
+    if model_id is not None:
+        specs = [get_model(model_id)]
+    elif wanted is not None:
+        # Provisioning selects capabilities by id; model-level dependency ids
+        # must still be discoverable without a model query parameter.
+        specs = list(list_models())
+    else:
+        specs = []
+    for spec in specs:
+        for item in _model_dependency_items(spec):
+            if wanted is not None and item["id"] not in wanted:
+                continue
+            items.append(item)
 
     counts: Dict[str, int] = {}
     for item in items:

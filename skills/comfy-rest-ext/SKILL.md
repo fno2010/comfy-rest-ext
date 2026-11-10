@@ -47,6 +47,15 @@ Always run discovery before choosing a model or acceleration method:
 
 This inventory is the source of truth. Do not assume a model id, task type, required node, or acceleration method. Read [references/cli.md](references/cli.md) for command and exit-code details.
 
+For a model-specific dependency check:
+
+```bash
+"$CLI" --json capabilities --model "$MODEL_ID"
+```
+
+`scope=model` items are hard dependencies; `scope=capability` items gate optional features.
+Provision an installable item by id, then follow its `restart_required` and re-run discovery.
+
 Use discovery to decide:
 
 - modality (`image`, `video`, or `layers`) and supported task;
@@ -144,6 +153,19 @@ Image tasks are synchronous through `images generate`; use `images list/status/c
 ## Provision missing capabilities
 
 `capabilities` returns `available`, `installable`, `authorization_required`, or `unsupported`. Never install silently.
+
+Model dependencies and optional capability dependencies share the same flow.
+Check `scope` before installing:
+
+```bash
+"$CLI" --json capabilities --model "$MODEL_ID"
+# For example, if model.see-through.node_pack is installable:
+"$CLI" --json provision model.see-through.node_pack --yes
+# follow restart_required, then rerun capabilities/model discovery
+```
+
+A `scope=model` dependency is mandatory; do not submit tasks against that model
+until it is available. A `scope=capability` dependency only gates that feature.
 
 ```bash
 "$CLI" --json provision "$CAPABILITY_ID" --retry-task "$TASK_ID"
