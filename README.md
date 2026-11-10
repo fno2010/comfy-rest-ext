@@ -107,10 +107,16 @@ pipx upgrade comfy-rest-ext-cli
 `/v1/models`。该节点是外部依赖，不随扩展安装：
 
 ```bash
-ln -s /path/to/ComfyUI-See-through "$COMFYUI/custom_nodes/ComfyUI-See-through"
+SEE_THROUGH_REPO=https://github.com/fno2010/ComfyUI-See-through.git
+SEE_THROUGH_COMMIT=88163e0acb07d198276d25bd65538174b3897b26
+git clone "$SEE_THROUGH_REPO" "$COMFYUI/custom_nodes/ComfyUI-See-through"
+git -C "$COMFYUI/custom_nodes/ComfyUI-See-through" checkout "$SEE_THROUGH_COMMIT"
 # 在 ComfyUI 的 Python 环境安装节点依赖
-"$COMFYUI/venv/bin/pip" install -r /path/to/ComfyUI-See-through/requirements.txt
+"$COMFYUI/venv/bin/pip" install -r "$COMFYUI/custom_nodes/ComfyUI-See-through/requirements.txt"
 ```
+
+本地开发可以用自己的 checkout 或 symlink 替换上述 clone；公开部署示例应使用上面的
+Git URL + commit，避免依赖本机路径。
 
 节点首次运行会把 LayerDiff/深度模型下载到 ComfyUI 的 `models/SeeThrough`（或 HuggingFace
 缓存）。服务端 PSD 导出需要 `psd-tools`，已列入 `server/pyproject.toml` 依赖；ZIP
